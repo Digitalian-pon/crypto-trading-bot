@@ -1,0 +1,149 @@
+{% extends "layout.html" %}
+
+{% block title %}Settings - GMO Coin Trading Bot{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h1><i class="fas fa-cog me-2"></i> Trading Settings</h1>
+        <p class="lead">Configure your trading bot preferences</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <a href="{{ url_for('settings.account') }}" class="btn btn-outline-primary">
+            <i class="fas fa-user-cog me-2"></i> Account Settings
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-key me-2"></i> API Credentials</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('settings.index') }}">
+                    <div class="mb-3">
+                        <label for="api_key" class="form-label">API Key</label>
+                        <input type="text" class="form-control" id="api_key" name="api_key" value="{{ current_user.api_key or '' }}" placeholder="Enter your GMO Coin API key">
+                        <div class="form-text">Your GMO Coin API key for authenticated requests</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="api_secret" class="form-label">API Secret</label>
+                        <input type="password" class="form-control" id="api_secret" name="api_secret" value="{{ current_user.api_secret or '' }}" placeholder="Enter your GMO Coin API secret">
+                        <div class="form-text">Your GMO Coin API secret for request signing</div>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i> Save API Credentials
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-robot me-2"></i> Bot Control</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Trading Bot Status</label>
+                    <div class="d-flex align-items-center">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="trading-enabled-switch" {% if settings and settings.trading_enabled %}checked{% endif %} disabled>
+                            <label class="form-check-label" for="trading-enabled-switch">
+                                {% if settings and settings.trading_enabled %}
+                                <span class="text-success">Enabled</span>
+                                {% else %}
+                                <span class="text-danger">Disabled</span>
+                                {% endif %}
+                            </label>
+                        </div>
+                        <div class="ms-auto">
+                            {% if settings and settings.trading_enabled %}
+                            <form action="{{ url_for('dashboard.stop_bot') }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-danger">
+                                    <i class="fas fa-stop-circle me-2"></i> Stop Bot
+                                </button>
+                            </form>
+                            {% else %}
+                            <form action="{{ url_for('dashboard.start_bot') }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-success">
+                                    <i class="fas fa-play-circle me-2"></i> Start Bot
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">AI Model</label>
+                    <div class="d-flex align-items-center">
+                        <div>
+                            <span class="badge bg-info">Trained Model</span>
+                        </div>
+                        <div class="ms-auto">
+                            <form action="{{ url_for('settings.train_model') }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-brain me-2"></i> Train Model
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-sliders-h me-2"></i> Trading Parameters</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('settings.index') }}">
+                    <div class="mb-3">
+                        <label for="currency_pair" class="form-label">Currency Pair</label>
+                        <select class="form-select" id="currency_pair" name="currency_pair">
+                            <option value="BTC_JPY" {% if settings and settings.currency_pair == 'BTC_JPY' %}selected{% endif %}>BTC/JPY</option>
+                            <option value="ETH_JPY" {% if settings and settings.currency_pair == 'ETH_JPY' %}selected{% endif %}>ETH/JPY</option>
+                            <option value="LTC_JPY" {% if settings and settings.currency_pair == 'LTC_JPY' %}selected{% endif %}>LTC/JPY</option>
+                            <option value="XRP_JPY" {% if settings and settings.currency_pair == 'XRP_JPY' %}selected{% endif %}>XRP/JPY</option>
+                            <option value="DOGE_JPY" {% if settings and settings.currency_pair == 'DOGE_JPY' %}selected{% endif %}>DOGE/JPY</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="investment_amount" class="form-label">Investment Amount (JPY)</label>
+                        <input type="number" class="form-control" id="investment_amount" name="investment_amount" value="{{ settings.investment_amount if settings else 0.0 }}" min="0" step="1000">
+                        <div class="form-text">Maximum amount to invest per trade in JPY</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="risk_level" class="form-label">Risk Level</label>
+                        <select class="form-select" id="risk_level" name="risk_level">
+                            <option value="low" {% if settings and settings.risk_level == 'low' %}selected{% endif %}>Low (1% per trade)</option>
+                            <option value="medium" {% if settings and settings.risk_level == 'medium' %}selected{% endif %}>Medium (2% per trade)</option>
+                            <option value="high" {% if settings and settings.risk_level == 'high' %}selected{% endif %}>High (5% per trade)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="stop_loss" class="form-label">Stop Loss (%)</label>
+                        <input type="number" class="form-control" id="stop_loss" name="stop_loss" value="{{ settings.stop_loss_percentage if settings else 3.0 }}" min="0.1" max="20" step="0.1">
+                        <div class="form-text">Percentage below entry price to set stop loss</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="take_profit" class="form-label">Take Profit (%)</label>
+                        <input type="number" class="form-control" id="take_profit" name="take_profit" value="{{ settings.take_profit_percentage if settings else 5.0 }}" min="0.1" max="50" step="0.1">
+                        <div class="form-text">Percentage above entry price to take profit</div>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i> Save Trading Parameters
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
