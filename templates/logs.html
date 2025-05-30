@@ -1,0 +1,576 @@
+{% extends "layout.html" %}
+
+{% block title %}トレードログ - GMO Coin Trading Bot{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-clipboard-list me-2"></i> トレードログ</h1>
+    <div>
+      <button type="button" class="btn btn-primary" id="refresh-logs">
+        <i class="fas fa-sync-alt me-1"></i> 最新の情報に更新
+      </button>
+    </div>
+  </div>
+  
+  <div class="alert alert-info mb-4">
+    <i class="fas fa-info-circle me-2"></i> トレード実行時の詳細なロギング情報を確認できます。システムの動作状況や取引履歴の確認にご利用ください。
+  </div>
+  
+  <div class="row">
+    <div class="col-md-4 mb-4">
+      <div class="card shadow">
+        <div class="card-header bg-primary text-white">
+          <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>統計情報</h5>
+        </div>
+        <div class="card-body" id="stats-container">
+          <div class="d-flex justify-content-center">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">読み込み中...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="col-md-8 mb-4">
+      <div class="card shadow">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>損益グラフ</h5>
+          <div>
+            <select class="form-select form-select-sm" id="period-selector">
+              <option value="7">過去7日間</option>
+              <option value="30" selected>過去30日間</option>
+              <option value="90">過去90日間</option>
+              <option value="180">過去180日間</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="profit-chart" style="height: 300px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-list-alt me-2"></i>トレードログ詳細</h5>
+          <button type="button" class="btn btn-sm btn-light" id="refresh-logs-data">
+            <i class="fas fa-sync-alt"></i> ログを更新
+          </button>
+        </div>
+        <div class="card-body">
+          <ul class="nav nav-tabs mb-3" id="logTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="trades-tab" data-bs-toggle="tab" data-bs-target="#trades" type="button" role="tab" aria-controls="trades" aria-selected="true">
+                <i class="fas fa-exchange-alt me-1"></i> 取引履歴
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="system-tab" data-bs-toggle="tab" data-bs-target="#system" type="button" role="tab" aria-controls="system" aria-selected="false">
+                <i class="fas fa-terminal me-1"></i> システムログ
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="signals-tab" data-bs-toggle="tab" data-bs-target="#signals" type="button" role="tab" aria-controls="signals" aria-selected="false">
+                <i class="fas fa-robot me-1"></i> AIシグナル
+              </button>
+            </li>
+          </ul>
+          
+          <div class="tab-content" id="logTabsContent">
+            <div class="tab-pane fade show active" id="trades" role="tabpanel" aria-labelledby="trades-tab">
+              <div class="table-responsive">
+                <table class="table table-striped table-hover" id="trades-table">
+                  <thead class="table-dark">
+                    <tr>
+                      <th>ID</th>
+                      <th>通貨ペア</th>
+                      <th>取引種類</th>
+                      <th>数量</th>
+                      <th>価格</th>
+                      <th>日時</th>
+                      <th>状態</th>
+                      <th>クローズ価格</th>
+                      <th>損益</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td colspan="9" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                          <span class="visually-hidden">読み込み中...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div class="tab-pane fade" id="system" role="tabpanel" aria-labelledby="system-tab">
+              <div class="card mb-3">
+                <div class="card-header bg-dark text-light">
+                  <i class="fas fa-terminal me-2"></i>システムログ出力
+                </div>
+                <div class="card-body p-0">
+                  <div class="logs-container bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto; font-family: 'Courier New', monospace;">
+                    <pre id="system-logs">読み込み中...</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="tab-pane fade" id="signals" role="tabpanel" aria-labelledby="signals-tab">
+              <div class="card mb-3">
+                <div class="card-header bg-dark text-light">
+                  <i class="fas fa-robot me-2"></i>AIトレーディングシグナル
+                </div>
+                <div class="card-body">
+                  <p class="text-muted mb-3">AIモデルが検出した取引シグナルと予測確率を表示します。</p>
+                  <div class="table-responsive">
+                    <table class="table table-striped table-hover" id="signals-table">
+                      <thead class="table-dark">
+                        <tr>
+                          <th>日時</th>
+                          <th>通貨ペア</th>
+                          <th>シグナル種類</th>
+                          <th>予測確率</th>
+                          <th>主要指標</th>
+                          <th>取引実行</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td colspan="6" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                              <span class="visually-hidden">読み込み中...</span>
+                            </div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    let profitChart = null;
+    
+    // 初期データ読み込み
+    loadLogData();
+    loadTradeHistory(30);
+    loadSignalData();
+    
+    // メイン更新ボタンのイベントリスナー
+    document.getElementById('refresh-logs').addEventListener('click', function() {
+      // スピナーを表示
+      const spinnerHtml = `
+        <div class="spinner-border spinner-border-sm text-light me-2" role="status">
+          <span class="visually-hidden">読み込み中...</span>
+        </div>
+        更新中...
+      `;
+      this.innerHTML = spinnerHtml;
+      this.disabled = true;
+      
+      // すべてのデータを更新
+      Promise.all([
+        fetch('/logs/api/get-logs').then(r => r.json()),
+        fetch(`/logs/api/trade-history?days=${document.getElementById('period-selector').value}`).then(r => r.json()),
+        fetch('/logs/api/signal-data').then(r => r.json())
+      ])
+      .then(([logData, historyData, signalData]) => {
+        updateTradesTable(logData.trades);
+        updateSystemLogs(logData.logs);
+        updateStatsContainer(historyData.summary);
+        updateProfitChart(historyData.daily, parseInt(document.getElementById('period-selector').value));
+        updateSignalsTable(signalData.signals);
+        
+        // ボタンを元に戻す
+        this.innerHTML = '<i class="fas fa-sync-alt me-1"></i> 最新の情報に更新';
+        this.disabled = false;
+      })
+      .catch(error => {
+        console.error('データの更新に失敗しました:', error);
+        this.innerHTML = '<i class="fas fa-sync-alt me-1"></i> 最新の情報に更新';
+        this.disabled = false;
+      });
+    });
+    
+    // テーブル内更新ボタンのイベントリスナー
+    document.getElementById('refresh-logs-data').addEventListener('click', function() {
+      loadLogData();
+    });
+    
+    // 期間セレクターのイベントリスナー
+    document.getElementById('period-selector').addEventListener('change', function() {
+      const days = parseInt(this.value);
+      loadTradeHistory(days);
+    });
+    
+    // ログデータ取得
+    function loadLogData() {
+      const tradesTable = document.querySelector('#trades-table tbody');
+      const logsContainer = document.getElementById('system-logs');
+      
+      // 読み込み中表示
+      tradesTable.innerHTML = `
+        <tr>
+          <td colspan="9" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">読み込み中...</span>
+            </div>
+          </td>
+        </tr>
+      `;
+      logsContainer.textContent = '読み込み中...';
+      
+      fetch('/logs/api/get-logs')
+        .then(response => response.json())
+        .then(data => {
+          updateTradesTable(data.trades);
+          updateSystemLogs(data.logs);
+        })
+        .catch(error => {
+          console.error('ログデータの取得に失敗しました:', error);
+          tradesTable.innerHTML = '<tr><td colspan="9" class="text-center py-4">データの読み込みに失敗しました</td></tr>';
+          logsContainer.textContent = 'ログデータの読み込みに失敗しました';
+        });
+    }
+    
+    // 取引履歴の統計情報を取得
+    function loadTradeHistory(days) {
+      fetch(`/logs/api/trade-history?days=${days}`)
+        .then(response => response.json())
+        .then(data => {
+          updateStatsContainer(data.summary);
+          updateProfitChart(data.daily, days);
+        })
+        .catch(error => {
+          console.error('取引履歴データの取得に失敗しました:', error);
+        });
+    }
+    
+    // 取引テーブルを更新
+    function updateTradesTable(trades) {
+      const tbody = document.querySelector('#trades-table tbody');
+      
+      if (trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4">取引データがありません</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = '';
+      
+      trades.forEach(trade => {
+        const tr = document.createElement('tr');
+        
+        // ステータスに基づいて行のクラスを設定
+        if (trade.status === 'closed') {
+          if (trade.profit_loss > 0) {
+            tr.classList.add('table-success');
+          } else if (trade.profit_loss < 0) {
+            tr.classList.add('table-danger');
+          }
+        }
+        
+        tr.innerHTML = `
+          <td>${trade.id}</td>
+          <td>${trade.currency_pair}</td>
+          <td>${trade.trade_type === 'buy' ? '買い' : '売り'}</td>
+          <td>${trade.amount}</td>
+          <td>${trade.price.toLocaleString()} 円</td>
+          <td>${trade.timestamp}</td>
+          <td>${getStatusBadge(trade.status)}</td>
+          <td>${trade.closing_price ? trade.closing_price.toLocaleString() + ' 円' : '-'}</td>
+          <td>${trade.profit_loss ? getProfitLossBadge(trade.profit_loss) : '-'}</td>
+        `;
+        
+        tbody.appendChild(tr);
+      });
+    }
+    
+    // システムログを更新
+    function updateSystemLogs(logs) {
+      const logsContainer = document.getElementById('system-logs');
+      
+      if (logs.length === 0) {
+        logsContainer.textContent = 'ログデータがありません';
+        return;
+      }
+      
+      logsContainer.textContent = logs.join('\n');
+    }
+    
+    // シグナルデータを取得
+    function loadSignalData() {
+      const signalsTable = document.querySelector('#signals-table tbody');
+      
+      // 読み込み中表示
+      signalsTable.innerHTML = `
+        <tr>
+          <td colspan="6" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">読み込み中...</span>
+            </div>
+          </td>
+        </tr>
+      `;
+      
+      fetch('/logs/api/signal-data')
+        .then(response => response.json())
+        .then(data => {
+          updateSignalsTable(data.signals);
+          
+          // データソースについての警告メッセージを表示（必要な場合）
+          if (data.has_dummy_data) {
+            document.querySelector('#signals .card-body p').innerHTML = 
+              '<div class="alert alert-info"><i class="fas fa-info-circle me-2"></i>シグナルのログデータが構築中です。トレーディングボットが動作するとシグナルデータが蓄積されます。</div>';
+          }
+        })
+        .catch(error => {
+          console.error('シグナルデータの取得に失敗しました:', error);
+          signalsTable.innerHTML = '<tr><td colspan="6" class="text-center py-4">シグナルデータの読み込みに失敗しました</td></tr>';
+        });
+    }
+    
+    // シグナルテーブルを更新
+    function updateSignalsTable(signals) {
+      const tbody = document.querySelector('#signals-table tbody');
+      
+      if (!signals || signals.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">シグナルデータがありません</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = '';
+      
+      signals.forEach(signal => {
+        const tr = document.createElement('tr');
+        
+        // シグナルタイプに基づいてクラスを設定
+        if (signal.signal_type === 'buy') {
+          tr.classList.add('table-success');
+        } else if (signal.signal_type === 'sell') {
+          tr.classList.add('table-danger');
+        }
+        
+        tr.innerHTML = `
+          <td>${signal.timestamp}</td>
+          <td>${signal.currency_pair}</td>
+          <td>${getSignalTypeBadge(signal.signal_type)}</td>
+          <td>${signal.probability ? (signal.probability * 100).toFixed(1) + '%' : '-'}</td>
+          <td>${getIndicatorsText(signal.indicators)}</td>
+          <td>${signal.executed ? '<span class="badge bg-success">実行済</span>' : '<span class="badge bg-secondary">見送り</span>'}</td>
+        `;
+        
+        tbody.appendChild(tr);
+      });
+    }
+    
+    // シグナルタイプのバッジを取得
+    function getSignalTypeBadge(type) {
+      let badge = '';
+      
+      switch (type) {
+        case 'buy':
+          badge = '<span class="badge bg-success">買いシグナル</span>';
+          break;
+        case 'sell':
+          badge = '<span class="badge bg-danger">売りシグナル</span>';
+          break;
+        default:
+          badge = '<span class="badge bg-secondary">不明</span>';
+      }
+      
+      return badge;
+    }
+    
+    // インジケーターテキストを取得
+    function getIndicatorsText(indicators) {
+      if (!indicators) return '-';
+      
+      // インジケーターデータから主要なものを抽出
+      const mainIndicators = [];
+      
+      if (indicators.rsi !== undefined) {
+        mainIndicators.push(`RSI: ${indicators.rsi.toFixed(1)}`);
+      }
+      
+      if (indicators.macd !== undefined) {
+        mainIndicators.push(`MACD: ${indicators.macd.toFixed(2)}`);
+      }
+      
+      if (indicators.trend_strength !== undefined) {
+        mainIndicators.push(`トレンド強度: ${indicators.trend_strength.toFixed(2)}`);
+      }
+      
+      return mainIndicators.length > 0 ? mainIndicators.join(', ') : '-';
+    }
+    
+    // 統計情報を更新
+    function updateStatsContainer(summary) {
+      const container = document.getElementById('stats-container');
+      
+      container.innerHTML = `
+        <div class="row">
+          <div class="col-6 mb-3">
+            <div class="text-muted small">期間</div>
+            <div>${summary.period}</div>
+          </div>
+          <div class="col-6 mb-3">
+            <div class="text-muted small">総取引数</div>
+            <div>${summary.total_trades}</div>
+          </div>
+          <div class="col-6 mb-3">
+            <div class="text-muted small">決済済み</div>
+            <div>${summary.closed_trades}</div>
+          </div>
+          <div class="col-6 mb-3">
+            <div class="text-muted small">勝率</div>
+            <div>${summary.win_rate}%</div>
+          </div>
+          <div class="col-12 text-center mt-2">
+            <div class="text-muted small">累積損益</div>
+            <div class="fs-4 fw-bold ${summary.total_profit >= 0 ? 'text-success' : 'text-danger'}">
+              ${summary.total_profit.toLocaleString()} 円
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    // 損益グラフを更新
+    function updateProfitChart(dailyData, days) {
+      const ctx = document.getElementById('profit-chart').getContext('2d');
+      
+      // 既存のチャートを破棄
+      if (profitChart) {
+        profitChart.destroy();
+      }
+      
+      const labels = dailyData.map(item => item.date);
+      const dailyProfits = dailyData.map(item => item.profit);
+      const cumulativeProfits = dailyData.map(item => item.cumulative);
+      
+      profitChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: '日次損益',
+              data: dailyProfits,
+              backgroundColor: dailyProfits.map(value => value >= 0 ? 'rgba(40, 167, 69, 0.7)' : 'rgba(220, 53, 69, 0.7)'),
+              borderColor: dailyProfits.map(value => value >= 0 ? 'rgb(40, 167, 69)' : 'rgb(220, 53, 69)'),
+              borderWidth: 1,
+              order: 2
+            },
+            {
+              label: '累積損益',
+              data: cumulativeProfits,
+              type: 'line',
+              borderColor: 'rgb(0, 123, 255)',
+              borderWidth: 2,
+              fill: false,
+              pointBackgroundColor: 'rgb(0, 123, 255)',
+              tension: 0.1,
+              order: 1,
+              yAxisID: 'y1'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              grid: {
+                display: false
+              }
+            },
+            y: {
+              title: {
+                display: true,
+                text: '日次損益 (円)'
+              },
+              grid: {
+                color: 'rgba(200, 200, 200, 0.2)'
+              }
+            },
+            y1: {
+              position: 'right',
+              title: {
+                display: true,
+                text: '累積損益 (円)'
+              },
+              grid: {
+                display: false
+              }
+            }
+          },
+          plugins: {
+            title: {
+              display: true,
+              text: `過去${days}日間の取引損益`,
+              font: {
+                size: 16
+              }
+            },
+            legend: {
+              display: true,
+              position: 'top'
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false
+            }
+          }
+        }
+      });
+    }
+    
+    // ステータスバッジを取得
+    function getStatusBadge(status) {
+      let badge = '';
+      
+      switch (status) {
+        case 'open':
+          badge = '<span class="badge bg-primary">オープン</span>';
+          break;
+        case 'closed':
+          badge = '<span class="badge bg-success">クローズ済</span>';
+          break;
+        case 'cancelled':
+          badge = '<span class="badge bg-warning text-dark">キャンセル</span>';
+          break;
+        default:
+          badge = '<span class="badge bg-secondary">不明</span>';
+      }
+      
+      return badge;
+    }
+    
+    // 損益バッジを取得
+    function getProfitLossBadge(value) {
+      const className = value >= 0 ? 'bg-success' : 'bg-danger';
+      return `<span class="badge ${className}">${value.toLocaleString()} 円</span>`;
+    }
+  });
+</script>
+{% endblock %}
