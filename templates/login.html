@@ -1,0 +1,51 @@
+{% extends "layout.html" %}
+
+{% block title %}Login - GMO Coin Trading Bot{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center my-5">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0"><i class="fas fa-sign-in-alt me-2"></i> GMO Coin API Login</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('auth.login') }}">
+                    <div class="mb-3">
+                        <label for="api_key" class="form-label">API Key</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-key"></i></span>
+                            <input type="text" class="form-control" id="api_key" name="api_key" required autofocus>
+                        </div>
+                        <div class="form-text">Enter your GMO Coin API Key</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="api_secret" class="form-label">API Secret</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-lock"></i></span>
+                            <input type="password" class="form-control" id="api_secret" name="api_secret" required>
+                        </div>
+                        <div class="form-text">Enter your GMO Coin API Secret</div>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                        <label class="form-check-label" for="remember">Remember credentials</label>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-sign-in-alt me-2"></i> Login
+                        </button>
+                    </div>
+                    <div class="alert alert-info mt-3">
+                        <i class="fas fa-info-circle me-2"></i> 
+                        Your API credentials will be saved in setting.ini file for future use.
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer text-center">
+                <p class="mb-0">Need GMO Coin API credentials? <a href="https://coin.z.com/jp/" target="_blank">Visit GMO Coin</a></p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
