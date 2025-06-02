@@ -1,0 +1,294 @@
+import os
+import json
+import time
+import hmac
+import hashlib
+import requests
+import logging
+import sys
+from urllib.parse import urlencode
+from datetime import datetime
+
+# ロギング設定を初期化
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
+class GMOCoinAPI:
+    """
+    Class for interacting with the GMO Coin API for cryptocurrency trading
+    """
+    
+    BASE_URL = "https://api.coin.z.com/public"
+    PRIVATE_URL = "https://api.coin.z.com/private"
+    
+    def __init__(self, api_key=None, api_secret=None):
+        """
+        Initialize with API credentials
+        
+        :param api_key: GMO Coin API key
+        :param api_secret: GMO Coin API secret
+        """
+        self.api_key = api_key or os.environ.get("GMO_API_KEY")
+        self.api_secret = api_secret or os.environ.get("GMO_API_SECRET")
+        
+        if not self.api_key or not self.api_secret:
+            logger.warning("GMO Coin API credentials not provided. Some methods will be unavailable.")
+    
+    def _generate_signature(self, timestamp, method, path, request_body=""):
+        """
+        Generate signature for private API requests
+        
+        :param timestamp: Unix timestamp in milliseconds
+        :param method: HTTP method (GET, POST, PUT, DELETE)
+        :param path: API endpoint path
+        :param request_body: Request body for POST requests (JSON string)
+        :return: Signature string
+        """
+        if not self.api_secret:
+            raise ValueError("API secret is required to generate signature")
+            
+        message = timestamp + method + path + request_body
+        signature = hmac.new(
+            bytes(str(self.api_secret), 'utf-8'),
+            bytes(message, 'utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        return signature
+    
+    def _private_request(self, method, endpoint, params=None):
+        """
+        Make an authenticated request to the private API
+        
+        :param method: HTTP method (GET, POST, PUT, DELETE)
+        :param endpoint: API endpoint path
+        :param params: Parameters to send with the request
+        :return: JSON response
+        """
+        if not self.api_key or not self.api_secret:
+            logger.error("API credentials not available for private request")
+            raise ValueError("API key and secret required for private API access")
+        
+        timestamp = str(int(time.time() * 1000))
+        url = f"{self.PRIVATE_URL}{endpoint}"
+        
+        headers = {
+            "API-KEY": self.api_key,
+            "API-TIMESTAMP": timestamp,
+            "Content-Type": "application/json"
+        }
+        
+        request_body = ""
+        if params and method in ["POST", "PUT"]:
+            request_body = json.dumps(params)
+        
+        signature = self._generate_signature(timestamp, method, endpoint, request_body)
+        headers["API-SIGN"] = signature
+        
+        try:
+            if method == "GET":
+                response = requests.get(url, headers=headers, params=params)
+            elif method == "POST":
+                response = requests.post(url, headers=headers, data=request_body)
+            elif method == "PUT":
+                response = requests.put(url, headers=headers, data=request_body)
+            elif method == "DELETE":
+                response = requests.delete(url, headers=headers, params=params)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+            
+            response.raise_for_status()
+            return response.json()
+        
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API request error: {e}")
+            return {"status": -1, "error": str(e)}
+    
+    def _public_request(self, method, endpoint, params=None):
+        """
+        Make a request to the public API
+        
+        :param method: HTTP method (GET, POST)
+        :param endpoint: API endpoint path
+        :param params: Parameters to send with the request
+        :return: JSON response or error dictionary
+        """
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        # Initialize json_response outside the try block to ensure it's always defined
+        json_response = None
+        
+        try:
+            logger.info(f"Making {method} request to {url} with params: {params}")
+            
+            if method == "GET":
+                response = requests.get(url, params=params)
+            elif method == "POST":
+                response = requests.post(url, json=params)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+            
+            # Try to parse JSON even if status code indicates error
+            try:
+                json_response = response.json()
+                logger.info(f"Response status code: {response.status_code}, content: {json_response}")
+            except ValueError:
+                logger.error(f"Failed to parse JSON response: {response.text}")
+                json_response = {"error": "Failed to parse JSON response", "text": response.text[:200]}
+            
+            # Raise for HTTP errors
+            response.raise_for_status()
+            return json_response
+            
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"API HTTP error: {e} for URL: {url} with params: {params}")
+            # Return JSON error response if available
+            if json_response:
+                logger.info(f"Error response content: {json_response}")
+                return json_response
+            return {"status": -1, "error": str(e), "status_code": e.response.status_code if hasattr(e, 'response') else None}
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API request error: {e} for URL: {url} with params: {params}")
+            return {"status": -1, "error": str(e)}
+    
+    # Public API Methods
+    
+    def get_ticker(self, symbol="BTC_JPY"):
+        """
+        Get current ticker information for a symbol
+        
+        :param symbol: Trading pair symbol (default: BTC_JPY)
+        :return: Ticker data
+        """
+        endpoint = "/v1/ticker"
+        params = {"symbol": symbol}
+        return self._public_request("GET", endpoint, params)
+    
+    def get_orderbooks(self, symbol="BTC_JPY"):
+        """
+        Get order book for a symbol
+        
+        :param symbol: Trading pair symbol (default: BTC_JPY)
+        :return: Order book data
+        """
+        endpoint = "/v1/orderbooks"
+        params = {"symbol": symbol}
+        return self._public_request("GET", endpoint, params)
+    
+    def get_klines(self, symbol="BTC_JPY", interval="1h", date=None):
+        """
+        Get candlestick/OHLCV data
+        
+        :param symbol: Trading pair symbol (default: BTC_JPY)
+        :param interval: Time interval (1min, 5min, 10min, 15min, 30min, 1h, 4h, 8h, 12h, 1d, 1w)
+        :param date: Target date (YYYYMMDD format) - required by API
+        :return: Candlestick data or error message
+        """
+        endpoint = f"/v1/klines"
+        
+        # GMO Coin APIはdateパラメータが必須
+        # 過去の日付を指定する必要があるため、現在の日付より1日前を使用
+        if not date:
+            from datetime import timedelta
+            current_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # 当日のデータより1日前のデータを使用（当日データは不完全な可能性があるため）
+            yesterday = current_date - timedelta(days=1)
+            date = yesterday.strftime('%Y%m%d')
+            logger.info(f"No date provided, using yesterday's date: {date}")
+        
+        params = {
+            "symbol": symbol,
+            "interval": interval,
+            "date": date
+        }
+            
+        logger.info(f"Getting klines with params: {params}")
+        return self._public_request("GET", endpoint, params)
+    
+    # Private API Methods
+    
+    def get_account_balance(self):
+        """
+        Get account balance information
+        
+        :return: Account balance data
+        """
+        endpoint = "/v1/account/assets"
+        return self._private_request("GET", endpoint)
+    
+    def place_order(self, symbol, side, execution_type, size, price=None, time_in_force="FAS"):
+        """
+        Place a new order
+        
+        :param symbol: Trading pair symbol (e.g., BTC_JPY)
+        :param side: Order side (BUY or SELL)
+        :param execution_type: MARKET or LIMIT
+        :param size: Order size
+        :param price: Limit price (required for LIMIT orders)
+        :param time_in_force: Time in force (FAS, FAK, FOK)
+        :return: Order placement result
+        """
+        endpoint = "/v1/order"
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "executionType": execution_type,
+            "size": str(size),
+        }
+        
+        if execution_type == "LIMIT":
+            if price is None:
+                raise ValueError("Price must be specified for LIMIT orders")
+            params["price"] = str(price)
+            params["timeInForce"] = time_in_force
+        
+        return self._private_request("POST", endpoint, params)
+    
+    def cancel_order(self, order_id):
+        """
+        Cancel an open order
+        
+        :param order_id: Order ID to cancel
+        :return: Cancellation result
+        """
+        endpoint = "/v1/cancelOrder"
+        params = {"orderId": order_id}
+        return self._private_request("POST", endpoint, params)
+    
+    def get_active_orders(self, symbol=None, page=1, count=100):
+        """
+        Get active orders
+        
+        :param symbol: Trading pair symbol (optional)
+        :param page: Page number
+        :param count: Number of orders per page
+        :return: Active orders data
+        """
+        endpoint = "/v1/activeOrders"
+        params = {"page": page, "count": count}
+        
+        if symbol:
+            params["symbol"] = symbol
+            
+        return self._private_request("GET", endpoint, params)
+    
+    def get_execution_history(self, symbol=None, page=1, count=100):
+        """
+        Get execution history
+        
+        :param symbol: Trading pair symbol (optional)
+        :param page: Page number
+        :param count: Number of executions per page
+        :return: Execution history data
+        """
+        endpoint = "/v1/executions"
+        params = {"page": page, "count": count}
+        
+        if symbol:
+            params["symbol"] = symbol
+            
+        return self._private_request("GET", endpoint, params)
