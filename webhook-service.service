@@ -1,0 +1,15 @@
+[Unit]
+Description=GitHub Webhook Server for Crypto Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/crypto-trading-bot
+Environment=PATH=/home/ubuntu/trading_env/bin
+ExecStart=/home/ubuntu/trading_env/bin/python webhook_server.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
