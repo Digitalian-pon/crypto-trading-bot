@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # CentOS Stream 9 用のトレーディングボット設定スクリプト
-# さくらのVPS (月額685円) での完全セットアップ
+# さくらのVPS 512MBプラン (月額671円) での完全セットアップ
 
 echo "=== CentOS Stream 9 暗号通貨トレーディングボット セットアップ ==="
 
@@ -32,11 +32,15 @@ GRANT ALL PRIVILEGES ON DATABASE trading_db TO trading_user;
 \q
 EOF
 
-# 5. Python仮想環境作成
+# 5. Python仮想環境作成（512MB用に軽量化）
 echo "5. Python仮想環境の作成..."
 cd /home/centos
 python3 -m venv trading_env
 source trading_env/bin/activate
+
+# メモリ使用量を抑制する設定
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONUNBUFFERED=1
 
 # 6. GitHubからプロジェクトクローン
 echo "6. プロジェクトのクローン..."
@@ -73,7 +77,7 @@ User=centos
 WorkingDirectory=/home/centos/crypto-trading-bot
 Environment=PATH=/home/centos/trading_env/bin
 EnvironmentFile=/home/centos/crypto-trading-bot/.env
-ExecStart=/home/centos/trading_env/bin/gunicorn --bind 0.0.0.0:5000 --workers 1 main:app
+ExecStart=/home/centos/trading_env/bin/gunicorn --bind 0.0.0.0:5000 --workers 1 --max-requests 1000 --timeout 120 main:app
 Restart=always
 RestartSec=10
 
