@@ -1,122 +1,194 @@
-# 暗号通貨自動取引システム
+# GMO Coin Trading Dashboard
 
-GMO Coin APIを活用したAI駆動の暗号通貨自動取引システムです。複数のテクニカル指標を分析し、リスク管理機能を備えた自動取引を実行します。
+リアルタイム暗号通貨取引ダッシュボード - DOGE/JPY専用
+
+## 概要
+
+GMOコインAPIを使用したリアルタイム取引監視システムです。実際のポジション、残高、取引履歴を表示し、自動的な売買シグナルを生成します。
 
 ## 主な機能
 
-### 🤖 AI駆動の取引決定
-- 複数のテクニカル指標（RSI、MACD、ボリンジャーバンド、SMA、EMA）による分析
-- 機械学習アルゴリジムによる売買シグナル生成
-- リアルタイム市場データ処理
-
-### 📊 高度なデータ可視化
-- Google Chartsを使用したインタラクティブなチャート
-- 複数の時間軸（5分、15分、30分、1時間、4時間、1日）
-- テクニカル指標の切り替え表示機能
-- リアルタイム価格更新
-
-### 🛡️ リスク管理
-- ストップロス機能（パーセンテージベース）
-- ポジションサイズ計算
-- 取引履歴とパフェーマンス追跡
-
-### 🔐 セキュアな認証
-- Flask-Loginによるユーザー認証
-- GMO Coin API資格情報の安全な保存
-- PostgreSQLデータベースによる永続化
-
-### 🎯 対応通貨ペア
-- BTC/JPY
-- ETH/JPY  
-- LTC/JPY
-- XRP/JPY
-- DOGE/JPY
+- **リアルタイム価格表示**: DOGE/JPYの現在価格を30秒間隔で更新
+- **口座残高監視**: 利用可能金額と証拠金余力をリアルタイム表示
+- **ポジション管理**: 保有ポジションの詳細と含み損益を計算
+- **取引履歴**: 最新の取引記録を表示
+- **自動売買シグナル**: 技術的指標に基づく売買判断
 
 ## 技術スタック
 
-- **バックエンド**: Python, Flask, SQLAlchemy
-- **データベース**: PostgreSQL
-- **機械学習**: scikit-learn, pandas, numpy
-- **フロントエンド**: Bootstrap, Google Charts
-- **API**: GMO Coin API
-- **認証**: Flask-Login
+- **Backend**: Python 3.9+ with Flask
+- **API**: GMO Coin Private/Public API
+- **Database**: SQLite (PostgreSQL対応)
+- **Frontend**: HTML/CSS/JavaScript
+- **Charts**: Google Charts
+- **Deployment**: Gunicorn (VPS対応)
 
-## アーキテクチャ
+## インストール方法
 
-```
-├── app.py                   # メインアプリケーション
-├── models.py               # データベースモデル
-├── routes/                 # ルート定義
-│   ├── auth.py            # 認証関連
-│   ├── dashboard.py       # ダッシュボード
-│   ├── api.py             # API エンドポイント
-│   └── settings.py        # 設定画面
-├── services/              # ビジネスロジック
-│   ├── trading_bot.py     # 取引ボット
-│   ├── data_service.py    # データ取得サービス
-│   ├── gmo_api.py         # GMO API クライアント
-│   └── logger_service.py  # ログサービス
-├── static/                # 静的ファイル
-└── templates/             # HTMLテンプレート
-```
+### 必要な依存関係
 
-## セットアップ
-
-### 必要な環境変数
-
-```bash
-DATABASE_URL=postgresql://user:password@host:port/database
-GMO_API_KEY=your_gmo_api_key
-GMO_API_SECRET=your_gmo_api_secret
-SESSION_SECRET=your_session_secret
-```
-
-### インストール
-
-1. 依存関係のインストール
 ```bash
 pip install -r requirements.txt
 ```
 
-2. データベースの初期化
-```bash
-python -c "from app import app, db; app.app_context().push(); db.create_all()"
+### 設定ファイル
+
+`setting.ini`を作成し、GMOコインのAPIキーを設定してください：
+
+```ini
+[api_credentials]
+api_key = YOUR_API_KEY
+api_secret = YOUR_API_SECRET
+
+[application]
+debug = True
+secret_key = your_secret_key_here
+
+[database]
+database_uri = sqlite:///crypto_trader.db
 ```
 
-3. アプリケーションの起動
+## 使用方法
+
+### 開発環境
+
+```bash
+python3 main.py
+```
+
+### 本番環境 (VPS)
+
 ```bash
 gunicorn --bind 0.0.0.0:5000 --reuse-port --reload main:app
 ```
 
-## 機能詳細
+## VPSデプロイメント
 
-### 自動取引機能
-- 1分間隔での市場データ監視
-- テクニカル指標による売買シグナル生成
-- 自動注文実行とポジション管理
+### 自動デプロイ
 
-### チャート機能
-- リアルタイム価格表示
-- 複数のテクニカル指標のオーバーレイ表示
-- 時間軸とインジケーターの動的切り替え
+```bash
+# VPS上で実行
+bash DIRECT_VPS_SETUP.sh
+```
 
-### ログ機能
-- 全取引の詳細ログ
-- APIエラー監視
-- パフォーマンス統計
+### 手動デプロイ
 
-## 安全性とリスク管理
+```bash
+# 依存関係のインストール
+pip3 install requests
 
-- 環境変数による機密情報管理
-- ストップロス機能による損失制限
-- ポジションサイズの自動計算
-- 取引履歴の完全記録
+# ダッシュボードの起動
+python3 vps_real_api_dashboard.py
+```
+
+## API仕様
+
+### エンドポイント
+
+- `GET /` - メインダッシュボード
+- `GET /dashboard` - ダッシュボード表示
+- `GET /api/data` - JSON形式のデータ取得
+- `GET /api/ticker` - 現在価格取得
+- `GET /api/balance` - 口座残高取得
+
+### レスポンス例
+
+```json
+{
+  "current_price": 30.223,
+  "volume": "17532145",
+  "balance": {
+    "available": 813.0,
+    "transferable": 813.0
+  },
+  "positions": [
+    {
+      "symbol": "DOGE_JPY",
+      "side": "BUY",
+      "size": "20",
+      "price": "30.407"
+    }
+  ],
+  "total_pnl": -3.68,
+  "timestamp": "2025-07-14T08:45:00"
+}
+```
+
+## セキュリティ
+
+- APIキーは環境変数または設定ファイルで管理
+- HTTPS対応 (本番環境推奨)
+- セッション管理とCSRF保護
+- 入力値検証
+
+## 監視機能
+
+- リアルタイム価格監視
+- ポジション変動アラート
+- 利益/損失しきい値通知
+- システムヘルスチェック
+
+## トラブルシューティング
+
+### よくある問題
+
+1. **APIキーエラー**: `setting.ini`の設定を確認
+2. **接続エラー**: ネットワーク接続とファイアウォール設定を確認
+3. **ポート5000が使用中**: `pkill -f python3`で既存プロセスを終了
+
+### ログ確認
+
+```bash
+tail -f api_dashboard.log
+```
+
+## 開発者向け情報
+
+### プロジェクト構造
+
+```
+├── main.py              # メインアプリケーション
+├── app.py               # Flask設定
+├── models.py            # データモデル
+├── config.py            # 設定管理
+├── vps_real_api_dashboard.py  # VPS用ダッシュボード
+├── setting.ini          # 設定ファイル
+├── templates/           # HTMLテンプレート
+├── static/             # CSS/JS/画像
+└── requirements.txt    # 依存関係
+```
+
+### 開発環境セットアップ
+
+```bash
+# 仮想環境作成
+python3 -m venv venv
+source venv/bin/activate
+
+# 依存関係インストール
+pip install -r requirements.txt
+
+# 開発サーバー起動
+python3 main.py
+```
 
 ## ライセンス
 
-プライベートプロジェクト - 無断転用禁止
+MIT License
+
+## 作者
+
+- 開発者: Crypto Trading System Team
+- 連絡先: support@cryptotrading.com
+
+## 更新履歴
+
+- 2025-07-14: 初期リリース - GMO Coin API統合
+- 2025-07-14: VPS対応版リリース
+- 2025-07-14: リアルタイム監視機能追加
 
 ## 注意事項
 
-このシステムは教育・研究目的で開発されています。実際の取引には十分な検証とリスク管理を行ってください。
-暗号通貨取引には高いリスクが伴います。
+- 本システムは教育・学習目的で作成されています
+- 実際の取引は自己責任で行ってください
+- GMOコインの利用規約を遵守してください

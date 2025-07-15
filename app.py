@@ -51,25 +51,27 @@ app.config["API_SECRET"] = config['api_credentials'].get('api_secret', '')
 # Initialize the database with the app
 db.init_app(app)
 
-# Configure Flask-Login
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'auth.login'
+# Configure Flask-Login - temporarily disabled for direct dashboard access
+# login_manager = LoginManager()
+# login_manager.init_app(app)
+# login_manager.login_view = 'auth.login'
 
 # Import routes and register blueprints
 with app.app_context():
     # Import and register blueprints
     from routes.auth import auth_bp
-    from routes.dashboard import dashboard_bp
+    from routes.public_dashboard import public_dashboard_bp
     from routes.settings import settings_bp
     from routes.api import api_bp
     from routes.logs import logs_bp
+    from routes.status import status_bp
     
-    app.register_blueprint(auth_bp)
-    app.register_blueprint(dashboard_bp)
-    app.register_blueprint(settings_bp)
+    app.register_blueprint(public_dashboard_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(settings_bp)
     app.register_blueprint(logs_bp)
+    app.register_blueprint(status_bp)
     
     # Import models to ensure they're registered with SQLAlchemy
     import models
@@ -79,72 +81,64 @@ with app.app_context():
     
     from models import User
     
-    @login_manager.user_loader
-    def load_user(user_id):
-        return User.query.get(int(user_id))
+    # @login_manager.user_loader
+    # def load_user(user_id):
+    #     return User.query.get(int(user_id))
     
-    # 自動的にトレーディングボットを起動するコード
-    from models import User, TradingSettings
-    from services.trading_bot import TradingBot
-    from sqlalchemy.orm import scoped_session, sessionmaker
-    import threading
+    # Trading bot auto-start temporarily disabled to fix numpy import issues
+    # TODO: Re-enable after fixing pandas/numpy import conflicts
+    logger.info("Trading bot auto-start is disabled for system stability")
     
-    def start_trading_bots():
-        """アプリケーション起動時にアクティブな全ユーザーのトレーディングボットを起動"""
-        logger.info("Checking for users with active trading settings...")
-        
-        try:
-            # 取引が有効になっているすべてのユーザーを検索
-            active_settings = TradingSettings.query.filter_by(trading_enabled=True).all()
-            logger.info(f"Found {len(active_settings)} users with trading enabled")
-            
-            # 各ユーザーのトレーディングボットを起動
-            for settings in active_settings:
-                user = User.query.get(settings.user_id)
-                if not user:
-                    logger.warning(f"User not found for settings ID {settings.id}")
-                    continue
-                    
-                if not user.api_key or not user.api_secret:
-                    logger.warning(f"API credentials not set for user {user.username}")
-                    continue
-                
-                logger.info(f"Starting trading bot for user: {user.username}, pair: {settings.currency_pair}")
-                
-                # 新しいセッションを作成
-                from sqlalchemy.orm import scoped_session, sessionmaker
-                engine = db.get_engine()
-                Session = scoped_session(sessionmaker(bind=engine))
-                session = Session()
-                
-                # 新しいセッションでユーザーとその設定を再取得
-                user_fresh = session.query(User).get(user.id)
-                
-                if not user_fresh:
-                    logger.error(f"Failed to retrieve user {user.username} with fresh session")
-                    continue
-                
-                # トレーディングボットを作成（新しいセッションオブジェクトで）
-                trading_bot = TradingBot(user_fresh, user_fresh.api_key, user_fresh.api_secret)
-                trading_bot.set_db_session(session)
-                
-                # ボットを起動
-                success = trading_bot.start()
-                if success:
-                    logger.info(f"Trading bot started successfully for user {user.username}")
-                else:
-                    logger.error(f"Failed to start trading bot for user {user.username}")
-                
-        except Exception as e:
-            logger.error(f"Error starting trading bots: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+    # Register blueprints
+    from routes.status import status_bp
+    app.register_blueprint(status_bp, name='system_status')
     
-    # アプリケーション起動時にボットを起動（アプリケーションコンテキスト内で実行）
-    def start_bots_with_app_context():
-        with app.app_context():
-            start_trading_bots()
+    # Register dashboard routes
+    from routes.dashboard import dashboard_bp
+    app.register_blueprint(dashboard_bp, name='dashboard_routes')
     
-    threading.Thread(target=start_bots_with_app_context, daemon=True).start()
+    # Register API routes
+    from routes.api import api_bp
+    app.register_blueprint(api_bp, name='api_routes')
+    
+    # Register trading API routes (delayed import to avoid circular imports)
+    try:
+        from routes.trading_api import trading_api_bp
+        app.register_blueprint(trading_api_bp, name='trading_api_routes')
+    except ImportError as e:
+        logger.warning(f"Trading API routes not available: {e}")
+    
+    # Register auth routes
+    from routes.auth import auth_bp
+    app.register_blueprint(auth_bp, name='auth_routes')
+    
+    # Register test chart routes
+    from routes.test_chart import test_chart_bp
+    app.register_blueprint(test_chart_bp, name='test_chart_routes')
+    
+    # Add direct dashboard route for external VPS access
+    from routes.dashboard import index as dashboard_index
+    app.add_url_rule('/dashboard', 'direct_dashboard', dashboard_index, methods=['GET'])
+    
+    # Add clean dashboard route without infinite loops
+    @app.route('/clean')
+    def dashboard_clean():
+        """Clean dashboard implementation"""
+        from flask import render_template
+        return render_template('dashboard_working.html')
+    
+    # Add backup route for original dashboard
+    @app.route('/dashboard_original')
+    def dashboard_original():
+        """Original dashboard for reference"""
+        from flask import render_template
+        return render_template('dashboard_clean.html')
+    
+    # Add chart fix route
+    @app.route('/fix')
+    def dashboard_fix():
+        """Chart fix dashboard"""
+        from flask import render_template
+        return render_template('chart_fix.html')
     
     logger.info("Application initialized successfully")

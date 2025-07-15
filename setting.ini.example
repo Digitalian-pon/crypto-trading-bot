@@ -1,0 +1,20 @@
+[api_credentials]
+api_key = YOUR_GMO_COIN_API_KEY_HERE
+api_secret = YOUR_GMO_COIN_API_SECRET_HERE
+
+[application]
+debug = True
+secret_key = your_secret_key_here
+
+[database]
+database_uri = sqlite:///crypto_trader.db
+
+# GMO Coin API設定例
+# 1. GMOコインにログイン
+# 2. API設定ページでAPIキーを発行
+# 3. 上記のYOUR_GMO_COIN_API_KEY_HEREとYOUR_GMO_COIN_API_SECRET_HEREを実際の値に置き換え
+# 4. このファイルをsetting.iniとして保存
+
+# セキュリティ注意:
+# - setting.ini は .gitignore に含まれているため、GitHubにアップロードされません
+# - APIキーは絶対に公開リポジトリにコミットしないでください
