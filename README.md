@@ -1,4 +1,4 @@
-# GMO Coin Trading Dashboard　（更新）
+# GMO Coin Trading Dashboard　（更新２）
 
 リアルタイム暗号通貨取引ダッシュボード - DOGE/JPY専用
 
