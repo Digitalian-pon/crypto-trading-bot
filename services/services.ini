@@ -1,0 +1,14 @@
+[Unit]
+Description=Crypto Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=centos
+WorkingDirectory=/home/centos/crypto-trading-bot
+ExecStart=/home/centos/.local/bin/gunicorn --workers 1 --timeout 60 --bind 0.0.0.0:5000 main:app
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
