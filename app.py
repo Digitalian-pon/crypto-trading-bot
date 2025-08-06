@@ -59,19 +59,19 @@ db.init_app(app)
 # Import routes and register blueprints
 with app.app_context():
     # Import and register blueprints
-    from routes.auth import auth_bp
-    from routes.public_dashboard import public_dashboard_bp
-    from routes.settings import settings_bp
-    from routes.api import api_bp
-    from routes.logs import logs_bp
-    from routes.status import status_bp
+    # from routes.auth import auth_bp
+    # from routes.public_dashboard import public_dashboard_bp
+    # from routes.settings import settings_bp
+    # from routes.api import api_bp
+    # from routes.logs import logs_bp
+    # from routes.status import status_bp
     
-    app.register_blueprint(public_dashboard_bp)
-    app.register_blueprint(api_bp)
-    app.register_blueprint(auth_bp)
-    app.register_blueprint(settings_bp)
-    app.register_blueprint(logs_bp)
-    app.register_blueprint(status_bp)
+    # app.register_blueprint(public_dashboard_bp)
+    # app.register_blueprint(api_bp)
+    # app.register_blueprint(auth_bp)
+    # app.register_blueprint(settings_bp)
+    # app.register_blueprint(logs_bp)
+    # app.register_blueprint(status_bp)
     
     # Import models to ensure they're registered with SQLAlchemy
     import models
@@ -90,35 +90,73 @@ with app.app_context():
     logger.info("Trading bot auto-start is disabled for system stability")
     
     # Register blueprints
-    from routes.status import status_bp
-    app.register_blueprint(status_bp, name='system_status')
+    # from routes.status import status_bp
+    # app.register_blueprint(status_bp, name='system_status')
     
     # Register dashboard routes
-    from routes.dashboard import dashboard_bp
-    app.register_blueprint(dashboard_bp, name='dashboard_routes')
+    # from routes.dashboard import dashboard_bp
+    # app.register_blueprint(dashboard_bp, name='dashboard_routes')
     
     # Register API routes
-    from routes.api import api_bp
-    app.register_blueprint(api_bp, name='api_routes')
+    # from routes.api import api_bp
+    # app.register_blueprint(api_bp, name='api_routes')
     
     # Register trading API routes (delayed import to avoid circular imports)
     try:
-        from routes.trading_api import trading_api_bp
-        app.register_blueprint(trading_api_bp, name='trading_api_routes')
+        # from routes.trading_api import trading_api_bp
+        # app.register_blueprint(trading_api_bp, name='trading_api_routes')
+        pass # Keep the try-except block structure
     except ImportError as e:
         logger.warning(f"Trading API routes not available: {e}")
     
     # Register auth routes
-    from routes.auth import auth_bp
-    app.register_blueprint(auth_bp, name='auth_routes')
+    # from routes.auth import auth_bp
+    # app.register_blueprint(auth_bp, name='auth_routes')
     
     # Register test chart routes
-    from routes.test_chart import test_chart_bp
-    app.register_blueprint(test_chart_bp, name='test_chart_routes')
+    # from routes.test_chart import test_chart_bp
+    # app.register_blueprint(test_chart_bp, name='test_chart_routes')
     
     # Add direct dashboard route for external VPS access
-    from routes.dashboard import index as dashboard_index
-    app.add_url_rule('/dashboard', 'direct_dashboard', dashboard_index, methods=['GET'])
+    # from routes.dashboard import index as dashboard_index
+    # app.add_url_rule('/dashboard', 'direct_dashboard', dashboard_index, methods=['GET'])
+    
+    # Add main dashboard route
+    @app.route('/')
+    @app.route('/dashboard')
+    def dashboard():
+        """Main dashboard"""
+        from flask import render_template, jsonify
+        from services.gmo_api import GMOCoinAPI
+        from services.data_service import DataService
+        
+        try:
+            # Initialize API with config credentials
+            api_key = config['api_credentials'].get('api_key', '')
+            api_secret = config['api_credentials'].get('api_secret', '')
+            
+            if not api_key or not api_secret:
+                return render_template('login.html', error="API認証情報が設定されていません")
+            
+            # Get basic market data
+            api = GMOCoinAPI(api_key, api_secret)
+            data_service = DataService(api_key, api_secret)
+            
+            # Get ticker data
+            ticker_data = api.get_ticker("DOGE_JPY")
+            balance_data = api.get_account_balance() if api_key and api_secret else None
+            
+            dashboard_data = {
+                'ticker': ticker_data,
+                'balance': balance_data,
+                'status': 'running' if api_key and api_secret else 'not_configured'
+            }
+            
+            return render_template('dashboard_new.html', data=dashboard_data)
+            
+        except Exception as e:
+            logger.error(f"Dashboard error: {e}")
+            return render_template('dashboard_new.html', data={'error': str(e)})
     
     # Add clean dashboard route without infinite loops
     @app.route('/clean')
@@ -140,5 +178,49 @@ with app.app_context():
         """Chart fix dashboard"""
         from flask import render_template
         return render_template('chart_fix.html')
+    
+    # Add API route for ticker data
+    @app.route('/api/ticker/<symbol>')
+    def api_ticker(symbol):
+        """API endpoint for ticker data"""
+        from flask import jsonify
+        from services.gmo_api import GMOCoinAPI
+        
+        try:
+            api_key = config['api_credentials'].get('api_key', '')
+            api_secret = config['api_credentials'].get('api_secret', '')
+            
+            if not api_key or not api_secret:
+                return jsonify({'error': 'API credentials not configured'})
+            
+            api = GMOCoinAPI(api_key, api_secret)
+            ticker_data = api.get_ticker(symbol)
+            
+            return jsonify(ticker_data)
+            
+        except Exception as e:
+            return jsonify({'error': str(e)})
+    
+    # Add settings route
+    @app.route('/settings', methods=['GET', 'POST'])
+    def settings():
+        """Settings page"""
+        from flask import render_template, request, flash, redirect, url_for
+        from config import save_api_credentials
+        
+        if request.method == 'POST':
+            api_key = request.form.get('api_key', '').strip()
+            api_secret = request.form.get('api_secret', '').strip()
+            
+            if api_key and api_secret:
+                if save_api_credentials(api_key, api_secret):
+                    flash('API認証情報を保存しました', 'success')
+                    return redirect(url_for('dashboard'))
+                else:
+                    flash('API認証情報の保存に失敗しました', 'error')
+            else:
+                flash('API KeyとAPI Secretを入力してください', 'error')
+        
+        return render_template('settings.html')
     
     logger.info("Application initialized successfully")
