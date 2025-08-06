@@ -135,21 +135,32 @@ with app.app_context():
             api_key = config['api_credentials'].get('api_key', '')
             api_secret = config['api_credentials'].get('api_secret', '')
             
+            logger.info(f"Dashboard access - API key available: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
+            
             if not api_key or not api_secret:
+                logger.warning("API credentials not found in configuration")
                 return render_template('simple_dashboard.html', data={'status': 'not_configured'})
             
             # Get basic market data
             api = GMOCoinAPI(api_key, api_secret)
             data_service = DataService(api_key, api_secret)
             
-            # Get ticker data
+            # Get ticker data (public API)
+            logger.info("Fetching ticker data...")
             ticker_data = api.get_ticker("DOGE_JPY")
+            logger.info(f"Ticker data result: {ticker_data}")
+            
+            # Get balance data (private API)
+            logger.info("Fetching balance data...")
             balance_data = api.get_account_balance() if api_key and api_secret else None
+            logger.info(f"Balance data success: {bool(balance_data and balance_data.get('data'))}")
             
             dashboard_data = {
                 'ticker': ticker_data,
                 'balance': balance_data,
-                'status': 'running' if api_key and api_secret else 'not_configured'
+                'status': 'running' if api_key and api_secret else 'not_configured',
+                'api_key_length': len(api_key),
+                'api_secret_length': len(api_secret)
             }
             
             return render_template('simple_dashboard.html', data=dashboard_data)
