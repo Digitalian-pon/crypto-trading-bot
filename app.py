@@ -136,7 +136,7 @@ with app.app_context():
             api_secret = config['api_credentials'].get('api_secret', '')
             
             if not api_key or not api_secret:
-                return render_template('login.html', error="API認証情報が設定されていません")
+                return render_template('simple_dashboard.html', data={'status': 'not_configured'})
             
             # Get basic market data
             api = GMOCoinAPI(api_key, api_secret)
@@ -152,11 +152,11 @@ with app.app_context():
                 'status': 'running' if api_key and api_secret else 'not_configured'
             }
             
-            return render_template('dashboard_new.html', data=dashboard_data)
+            return render_template('simple_dashboard.html', data=dashboard_data)
             
         except Exception as e:
             logger.error(f"Dashboard error: {e}")
-            return render_template('dashboard_new.html', data={'error': str(e)})
+            return render_template('simple_dashboard.html', data={'error': str(e)})
     
     # Add clean dashboard route without infinite loops
     @app.route('/clean')
@@ -221,6 +221,6 @@ with app.app_context():
             else:
                 flash('API KeyとAPI Secretを入力してください', 'error')
         
-        return render_template('settings.html')
+        return render_template('simple_settings.html')
     
     logger.info("Application initialized successfully")

@@ -20,7 +20,7 @@
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
-            <a class="navbar-brand" href="{{ url_for('dashboard.index') }}">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
                 <i class="fas fa-robot me-2"></i>
                 GMO Coin Trader
             </a>
@@ -29,49 +29,16 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    {% if current_user.is_authenticated %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard.index') }}">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
                             <i class="fas fa-chart-line me-1"></i> ダッシュボード
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard.trades') }}">
-                            <i class="fas fa-exchange-alt me-1"></i> 取引履歴
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('settings.index') }}">
+                        <a class="nav-link" href="{{ url_for('settings') }}">
                             <i class="fas fa-cog me-1"></i> 設定
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard.database_check') }}">
-                            <i class="fas fa-database me-1"></i> データベース
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('logs.index') }}">
-                            <i class="fas fa-clipboard-list me-1"></i> トレードログ
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('auth.logout') }}">
-                            <i class="fas fa-sign-out-alt me-1"></i> ログアウト
-                        </a>
-                    </li>
-                    {% else %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('auth.login') }}">
-                            <i class="fas fa-sign-in-alt me-1"></i> ログイン
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('auth.register') }}">
-                            <i class="fas fa-user-plus me-1"></i> 新規登録
-                        </a>
-                    </li>
-                    {% endif %}
                 </ul>
             </div>
         </div>
@@ -106,10 +73,8 @@
                 <div class="col-md-3">
                     <h5>クイックリンク</h5>
                     <ul class="list-unstyled">
-                        <li><a href="{{ url_for('dashboard.index') }}" class="text-light"><i class="fas fa-chart-line me-1"></i> ダッシュボード</a></li>
-                        <li><a href="{{ url_for('dashboard.trades') }}" class="text-light"><i class="fas fa-exchange-alt me-1"></i> 取引履歴</a></li>
-                        <li><a href="{{ url_for('logs.index') }}" class="text-light"><i class="fas fa-clipboard-list me-1"></i> トレードログ</a></li>
-                        <li><a href="{{ url_for('settings.index') }}" class="text-light"><i class="fas fa-cog me-1"></i> 設定</a></li>
+                        <li><a href="{{ url_for('dashboard') }}" class="text-light"><i class="fas fa-chart-line me-1"></i> ダッシュボード</a></li>
+                        <li><a href="{{ url_for('settings') }}" class="text-light"><i class="fas fa-cog me-1"></i> 設定</a></li>
                     </ul>
                 </div>
                 <div class="col-md-3">

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GMO Coin Trading Bot - Settings</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-dark text-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-robot me-2"></i>
+                GMO Coin Trader
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/">ダッシュボード</a>
+                <a class="nav-link" href="/settings">設定</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <h1><i class="fas fa-cog me-2"></i>設定</h1>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card bg-secondary">
+                    <div class="card-header">
+                        <h5><i class="fas fa-key me-2"></i>API認証情報</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <div class="mb-3">
+                                <label for="api_key" class="form-label">API Key</label>
+                                <input type="text" class="form-control" id="api_key" name="api_key" required>
+                                <div class="form-text">GMO CoinのAPI Keyを入力してください</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="api_secret" class="form-label">API Secret</label>
+                                <input type="password" class="form-control" id="api_secret" name="api_secret" required>
+                                <div class="form-text">GMO CoinのAPI Secretを入力してください</div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i>保存
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card bg-info">
+                    <div class="card-header">
+                        <h5><i class="fas fa-info-circle me-2"></i>設定方法</h5>
+                    </div>
+                    <div class="card-body">
+                        <ol class="small">
+                            <li><a href="https://coin.z.com/jp/" target="_blank" class="text-white">GMO Coin</a>にログイン</li>
+                            <li>「API」→「APIキー管理」へ</li>
+                            <li>新しいAPIキーを作成</li>
+                            <li>「取引」権限を有効化</li>
+                            <li>API KeyとSecretをコピー</li>
+                            <li>左のフォームに入力して保存</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
