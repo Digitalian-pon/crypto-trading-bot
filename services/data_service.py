@@ -3,10 +3,8 @@ import logging
 import sys
 import random
 from datetime import datetime, timedelta
-from sqlalchemy import desc
 from services.gmo_api import GMOCoinAPI
 from services.technical_indicators import TechnicalIndicators
-from models import MarketData
 
 # ロギング設定
 logging.basicConfig(
@@ -76,6 +74,8 @@ class DataService:
         # 強制更新が指定されていない場合のみデータベースを確認
         if not force_refresh and hasattr(self, 'db_session') and self.db_session:
             try:
+                from models import MarketData
+                from sqlalchemy import desc
                 logger.info(f"Attempting to get {limit} records for {symbol} from database first")
                 
                 # データベースからデータを取得
@@ -189,6 +189,8 @@ class DataService:
         if len(all_klines) < limit and hasattr(self, 'db_session') and self.db_session:
             logger.info(f"Retrieved only {len(all_klines)} candles from API, trying database again")
             try:
+                from models import MarketData
+                from sqlalchemy import desc
                 market_data = self.db_session.query(MarketData).filter_by(
                     currency_pair=symbol
                 ).order_by(
@@ -219,6 +221,7 @@ class DataService:
             if hasattr(self, 'db_session') and self.db_session:
                 logger.info("Trying to get data from database")
                 try:
+                    from models import MarketData
                     # データベースからデータを取得
                     market_data = self.db_session.query(MarketData).filter_by(
                         currency_pair=symbol
@@ -475,6 +478,8 @@ class DataService:
                 record_limit = 500  # リサンプリングのため多めにデータを取得
                 
                 # データベースから十分なデータを取得
+                from models import MarketData
+                from sqlalchemy import desc
                 market_data = self.db_session.query(MarketData).filter_by(
                     currency_pair=symbol
                 ).order_by(
@@ -578,6 +583,7 @@ class DataService:
         try:
             for _, row in df.iterrows():
                 # 既存のデータをチェック
+                from models import MarketData
                 existing = db_session.query(MarketData).filter_by(
                     currency_pair=symbol,
                     timestamp=row['timestamp']
