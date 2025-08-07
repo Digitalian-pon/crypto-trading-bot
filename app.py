@@ -212,6 +212,56 @@ with app.app_context():
         except Exception as e:
             return jsonify({'error': str(e)})
     
+    # Add API route for trading analysis
+    @app.route('/api/trading-analysis/<symbol>')
+    def api_trading_analysis(symbol):
+        """API endpoint for real-time trading analysis"""
+        from flask import jsonify
+        from services.gmo_api import GMOCoinAPI
+        from services.data_service import DataService
+        from services.simple_trading_logic import SimpleTradingLogic
+        
+        try:
+            api_key = config['api_credentials'].get('api_key', '')
+            api_secret = config['api_credentials'].get('api_secret', '')
+            
+            if not api_key or not api_secret:
+                return jsonify({'error': 'API credentials not configured'})
+            
+            # Get market data with indicators
+            data_service = DataService(api_key, api_secret)
+            df = data_service.get_data_with_indicators(symbol, interval="1h", limit=50)
+            
+            if df is None or df.empty:
+                return jsonify({'error': 'Could not get market data'})
+            
+            # Get latest data point
+            latest = df.iloc[-1].to_dict()
+            
+            # Analyze trading signals
+            trading_logic = SimpleTradingLogic()
+            should_trade, trade_type, reason, confidence = trading_logic.should_trade(latest)
+            market_summary = trading_logic.get_market_summary(latest)
+            
+            return jsonify({
+                'should_trade': should_trade,
+                'trade_type': trade_type,
+                'reason': reason,
+                'confidence': round(confidence, 2),
+                'market_summary': market_summary,
+                'indicators': {
+                    'rsi': round(latest.get('rsi_14', 0), 2),
+                    'macd_line': round(latest.get('macd_line', 0), 4),
+                    'macd_signal': round(latest.get('macd_signal', 0), 4),
+                    'price': round(latest.get('close', 0), 3)
+                },
+                'timestamp': datetime.now().isoformat()
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in trading analysis: {e}")
+            return jsonify({'error': str(e)})
+    
     # Add settings route
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
