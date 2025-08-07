@@ -53,6 +53,38 @@
                                 <input type="password" class="form-control" id="api_secret" name="api_secret" required>
                                 <div class="form-text">GMO CoinのAPI Secretを入力してください</div>
                             </div>
+                            
+                            <hr class="my-4">
+                            <h6><i class="fas fa-shield-alt me-2"></i>リスク管理設定</h6>
+                            
+                            <div class="mb-3">
+                                <label for="max_position_size" class="form-label">最大投資額 (%)</label>
+                                <input type="number" class="form-control" id="max_position_size" name="max_position_size" value="5" min="1" max="20">
+                                <div class="form-text">残高の何%まで1回の取引に使用するか (推奨: 5%)</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="stop_loss" class="form-label">損切りライン (%)</label>
+                                <input type="number" class="form-control" id="stop_loss" name="stop_loss" value="2" min="1" max="10" step="0.1">
+                                <div class="form-text">何%下落したら損切りするか (推奨: 2%)</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="take_profit" class="form-label">利確ライン (%)</label>
+                                <input type="number" class="form-control" id="take_profit" name="take_profit" value="4" min="1" max="20" step="0.1">
+                                <div class="form-text">何%上昇したら利確するか (推奨: 4%)</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="auto_trading" name="auto_trading">
+                                    <label class="form-check-label" for="auto_trading">
+                                        自動取引を有効にする
+                                    </label>
+                                    <div class="form-text">チェックすると実際の売買を開始します（十分注意してください）</div>
+                                </div>
+                            </div>
+                            
                             <button type="submit" class="btn btn-primary">
                                 <i class="fas fa-save me-1"></i>保存
                             </button>
