@@ -151,10 +151,16 @@
         // Real-time trading analysis updates
         function updateTradingAnalysis() {
             fetch('/api/trading-analysis/DOGE_JPY')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (data.error) {
-                        console.error('Error:', data.error);
+                        console.error('API Error:', data.error);
+                        showError(data.error);
                         return;
                     }
                     
@@ -181,17 +187,17 @@
                             <td><small>${now}</small></td>
                             <td>DOGE/JPY</td>
                             <td>${signalBadge}</td>
-                            <td>¥${data.indicators.price}</td>
+                            <td>¥${data.indicators ? data.indicators.price : 'N/A'}</td>
                             <td>${statusBadge}</td>
                         </tr>
                         <tr class="table-active">
                             <td colspan="5">
                                 <small>
-                                    <strong>判断理由:</strong> ${data.reason}<br>
-                                    <strong>信頼度:</strong> ${data.confidence}/2.0<br>
-                                    <strong>RSI:</strong> ${data.indicators.rsi} | 
-                                    <strong>市場状況:</strong> ${data.market_summary.condition} |
-                                    <strong>ボラティリティ:</strong> ${data.market_summary.volatility}
+                                    <strong>判断理由:</strong> ${data.reason || 'データ取得中'}<br>
+                                    <strong>信頼度:</strong> ${data.confidence || 0}/2.0<br>
+                                    <strong>RSI:</strong> ${data.indicators ? data.indicators.rsi : 'N/A'} | 
+                                    <strong>市場状況:</strong> ${data.market_summary ? data.market_summary.condition : 'N/A'} |
+                                    <strong>ボラティリティ:</strong> ${data.market_summary ? data.market_summary.volatility : 'N/A'}
                                 </small>
                             </td>
                         </tr>
@@ -199,7 +205,29 @@
                 })
                 .catch(error => {
                     console.error('Error fetching trading analysis:', error);
+                    showError('取引分析データの取得に失敗しました');
                 });
+        }
+
+        function showError(message) {
+            const tbody = document.getElementById('trading-signals');
+            const now = new Date().toLocaleTimeString('ja-JP');
+            tbody.innerHTML = `
+                <tr>
+                    <td><small>${now}</small></td>
+                    <td>DOGE/JPY</td>
+                    <td><span class="badge bg-warning">エラー</span></td>
+                    <td>-</td>
+                    <td><span class="badge bg-warning">取得中</span></td>
+                </tr>
+                <tr class="table-active">
+                    <td colspan="5">
+                        <small class="text-warning">
+                            <strong>エラー:</strong> ${message}
+                        </small>
+                    </td>
+                </tr>
+            `;
         }
         
         // Update every 30 seconds
