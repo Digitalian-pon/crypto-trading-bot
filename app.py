@@ -85,9 +85,30 @@ with app.app_context():
     # def load_user(user_id):
     #     return User.query.get(int(user_id))
     
-    # Trading bot auto-start temporarily disabled to fix numpy import issues
-    # TODO: Re-enable after fixing pandas/numpy import conflicts
-    logger.info("Trading bot auto-start is disabled for system stability")
+    # Trading bot auto-start enabled for real trading
+    logger.info("Trading bot auto-start enabled")
+    
+    # Start trading bot for the first user with trading enabled
+    try:
+        from services.trading_bot import TradingBot
+        user = User.query.filter_by(username='trading_user').first()
+        
+        if user and user.settings and user.settings.trading_enabled:
+            logger.info(f"Starting trading bot for user: {user.username}")
+            trading_bot = TradingBot(user=user, api_key=user.api_key, api_secret=user.api_secret)
+            trading_bot.set_db_session(db.session)
+            
+            # Start the bot with 60 second intervals
+            if trading_bot.start(interval=60):
+                logger.info("Trading bot started successfully")
+            else:
+                logger.error("Failed to start trading bot")
+        else:
+            logger.warning("No user found with trading enabled")
+    except Exception as e:
+        logger.error(f"Error starting trading bot: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
     
     # Register blueprints
     # from routes.status import status_bp
