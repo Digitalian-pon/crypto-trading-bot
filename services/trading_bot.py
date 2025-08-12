@@ -27,13 +27,14 @@ class TradingBot:
     Automated cryptocurrency trading bot
     """
     
-    def __init__(self, user=None, api_key=None, api_secret=None):
+    def __init__(self, user=None, api_key=None, api_secret=None, app=None):
         """
         Initialize the trading bot
         
         :param user: User object with trading settings
         :param api_key: GMO Coin API key
         :param api_secret: GMO Coin API secret
+        :param app: Flask app instance for context
         """
         self.user = user
         self.api = GMOCoinAPI(api_key, api_secret)
@@ -44,6 +45,7 @@ class TradingBot:
         self.thread = None
         self.interval = 60  # Default check interval in seconds
         self.db_session = None
+        self.app = app
     
     def set_db_session(self, session):
         """
@@ -156,23 +158,32 @@ class TradingBot:
         optimization_interval = 24 * 60 * 60  # 24時間（秒単位）
         
         while self.running:
-            try:
-                # Check if user or settings are available
-                if not self.user:
-                    logger.error("User is not available, stopping bot")
-                    self.running = False
-                    break
-                    
-                if not hasattr(self.user, 'settings') or not self.user.settings:
-                    logger.error("User settings are not available, stopping bot")
-                    self.running = False
-                    break
+            # Ensure we're operating within Flask app context
+            if self.app:
+                with self.app.app_context():
+                    self._execute_trading_cycle()
+            else:
+                self._execute_trading_cycle()
+    
+    def _execute_trading_cycle(self):
+        """Execute one trading cycle"""
+        try:
+            # Check if user or settings are available
+            if not self.user:
+                logger.error("User is not available, stopping bot")
+                self.running = False
+                return
                 
-                # Check if trading is still enabled
-                if not self.user.settings.trading_enabled:
-                    logger.info("Trading has been disabled in settings, stopping bot")
-                    self.running = False
-                    break
+            if not hasattr(self.user, 'settings') or not self.user.settings:
+                logger.error("User settings are not available, stopping bot")
+                self.running = False
+                return
+            
+            # Check if trading is still enabled
+            if not self.user.settings.trading_enabled:
+                logger.info("Trading has been disabled in settings, stopping bot")
+                self.running = False
+                return
                 
                 # Get the trading pair from settings
                 symbol = self.user.settings.currency_pair
