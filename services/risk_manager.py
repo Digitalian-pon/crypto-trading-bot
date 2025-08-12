@@ -50,8 +50,8 @@ class RiskManager:
             logger.error(f"Error calculating position size: {e}")
             return 0.0001
     
-    def should_close_trade(self, trade, current_price):
-        """Check if a trade should be closed based on risk rules"""
+    def should_close_trade(self, trade, current_price, market_indicators=None):
+        """Check if a trade should be closed based on risk rules and trend reversal"""
         try:
             entry_price = float(trade.price)
             
@@ -66,6 +66,12 @@ class RiskManager:
                 # Check take profit
                 if profit_loss_ratio >= self.take_profit_ratio:
                     return True, f"Take profit triggered: {profit_loss_ratio:.4f}"
+                
+                # Check trend reversal for buy positions
+                if market_indicators:
+                    trend_reversal = self._check_trend_reversal_for_buy(market_indicators)
+                    if trend_reversal:
+                        return True, f"Trend reversal detected for BUY position: {trend_reversal}"
                     
             else:  # sell trades
                 # For sell trades
@@ -78,6 +84,12 @@ class RiskManager:
                 # Check take profit
                 if profit_loss_ratio >= self.take_profit_ratio:
                     return True, f"Take profit triggered: {profit_loss_ratio:.4f}"
+                
+                # Check trend reversal for sell positions
+                if market_indicators:
+                    trend_reversal = self._check_trend_reversal_for_sell(market_indicators)
+                    if trend_reversal:
+                        return True, f"Trend reversal detected for SELL position: {trend_reversal}"
             
             return False, "No exit condition met"
             
@@ -187,3 +199,115 @@ class RiskManager:
                 'risk_score': 5,
                 'volatility': 1
             }
+    
+    def _check_trend_reversal_for_buy(self, indicators):
+        """Check if trend is reversing against BUY position (turning bearish)"""
+        try:
+            # RSI overbought condition (strong reversal signal)
+            rsi = indicators.get('rsi_14', 50)
+            if rsi > 75:  # Strong overbought
+                return "RSI extremely overbought (>75)"
+            
+            # MACD bearish crossover
+            macd_line = indicators.get('macd_line', 0)
+            macd_signal = indicators.get('macd_signal', 0)
+            macd_histogram = indicators.get('macd_histogram', 0)
+            
+            # Strong bearish MACD signal
+            if macd_line < macd_signal and macd_histogram < -0.5:
+                return "Strong MACD bearish crossover"
+            
+            # Price breaking below key moving averages
+            close = indicators.get('close', 0)
+            ema_12 = indicators.get('ema_12', close)
+            ema_26 = indicators.get('ema_26', close)
+            sma_20 = indicators.get('sma_20', close)
+            
+            # Death cross pattern (fast MA below slow MA) + price below both
+            if ema_12 < ema_26 and close < sma_20 and close < ema_12:
+                return "Death cross pattern with price breakdown"
+            
+            # Bollinger Band squeeze with downward breakout
+            bb_upper = indicators.get('bb_upper', close * 1.02)
+            bb_lower = indicators.get('bb_lower', close * 0.98)
+            bb_middle = indicators.get('bb_middle', close)
+            
+            # Price falling below middle band with momentum
+            if close < bb_middle * 0.995 and macd_line < macd_signal:
+                return "Bollinger Band middle break with bearish momentum"
+            
+            # Multiple weak signals combined
+            weak_signals = 0
+            if rsi > 65:  # Moderately overbought
+                weak_signals += 1
+            if macd_line < macd_signal:  # MACD bearish
+                weak_signals += 1
+            if close < ema_12:  # Price below fast MA
+                weak_signals += 1
+            if close < sma_20:  # Price below SMA
+                weak_signals += 1
+            
+            if weak_signals >= 3:
+                return f"Multiple bearish signals ({weak_signals}/4)"
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error checking trend reversal for buy: {e}")
+            return None
+    
+    def _check_trend_reversal_for_sell(self, indicators):
+        """Check if trend is reversing against SELL position (turning bullish)"""
+        try:
+            # RSI oversold condition (strong reversal signal)
+            rsi = indicators.get('rsi_14', 50)
+            if rsi < 25:  # Strong oversold
+                return "RSI extremely oversold (<25)"
+            
+            # MACD bullish crossover
+            macd_line = indicators.get('macd_line', 0)
+            macd_signal = indicators.get('macd_signal', 0)
+            macd_histogram = indicators.get('macd_histogram', 0)
+            
+            # Strong bullish MACD signal
+            if macd_line > macd_signal and macd_histogram > 0.5:
+                return "Strong MACD bullish crossover"
+            
+            # Price breaking above key moving averages
+            close = indicators.get('close', 0)
+            ema_12 = indicators.get('ema_12', close)
+            ema_26 = indicators.get('ema_26', close)
+            sma_20 = indicators.get('sma_20', close)
+            
+            # Golden cross pattern (fast MA above slow MA) + price above both
+            if ema_12 > ema_26 and close > sma_20 and close > ema_12:
+                return "Golden cross pattern with price breakout"
+            
+            # Bollinger Band squeeze with upward breakout
+            bb_upper = indicators.get('bb_upper', close * 1.02)
+            bb_lower = indicators.get('bb_lower', close * 0.98)
+            bb_middle = indicators.get('bb_middle', close)
+            
+            # Price rising above middle band with momentum
+            if close > bb_middle * 1.005 and macd_line > macd_signal:
+                return "Bollinger Band middle break with bullish momentum"
+            
+            # Multiple weak signals combined
+            weak_signals = 0
+            if rsi < 35:  # Moderately oversold
+                weak_signals += 1
+            if macd_line > macd_signal:  # MACD bullish
+                weak_signals += 1
+            if close > ema_12:  # Price above fast MA
+                weak_signals += 1
+            if close > sma_20:  # Price above SMA
+                weak_signals += 1
+            
+            if weak_signals >= 3:
+                return f"Multiple bullish signals ({weak_signals}/4)"
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error checking trend reversal for sell: {e}")
+            return None

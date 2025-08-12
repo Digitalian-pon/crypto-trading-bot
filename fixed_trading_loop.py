@@ -177,24 +177,49 @@ class FixedTradingBot:
         current_price = df['close'].iloc[-1]
         logger.info(f"Current {symbol} price: {current_price}")
         
+        # Get current market indicators for trend reversal check
+        latest_indicators = df.iloc[-1].to_dict()
+        
         # Check if any active trades need to be closed
-        self._check_active_trades(active_trades, current_price)
+        self._check_active_trades(active_trades, current_price, latest_indicators)
         
         # If no active trades, check for new trade opportunities
         if len(active_trades) == 0:
             logger.info("No active trades found, checking for new trade opportunities")
             self._check_for_new_trade(df, symbol, current_price)
     
-    def _check_active_trades(self, active_trades, current_price):
+    def _check_active_trades(self, active_trades, current_price, market_indicators=None):
         """Check if any active trades need to be closed"""
         if not active_trades:
             return
         
+        logger.info(f"Checking {len(active_trades)} active trades for exit conditions")
+        
+        # Check for major trend reversal that requires closing all positions
+        major_reversal = self._check_major_trend_reversal(active_trades, market_indicators)
+        if major_reversal:
+            logger.warning(f"Major trend reversal detected: {major_reversal}")
+            logger.warning("Initiating emergency close of all positions!")
+            for trade in active_trades:
+                self._close_trade(trade, current_price, f"Emergency close: {major_reversal}")
+            return
+        
+        # Check individual trades
         for trade in active_trades:
-            should_close, reason = self.risk_manager.should_close_trade(trade, current_price)
+            should_close, reason = self.risk_manager.should_close_trade(trade, current_price, market_indicators)
             
             if should_close:
+                logger.info(f"Closing trade {trade.id} due to: {reason}")
                 self._close_trade(trade, current_price, reason)
+            else:
+                # Log current trade status
+                entry_price = float(trade.price)
+                if trade.trade_type.lower() == 'buy':
+                    pl_ratio = (current_price - entry_price) / entry_price * 100
+                else:
+                    pl_ratio = (entry_price - current_price) / entry_price * 100
+                
+                logger.info(f"Trade {trade.id} ({trade.trade_type.upper()}) still open: Entry={entry_price}, Current={current_price}, P/L={pl_ratio:.2f}%")
     
     def _close_trade(self, trade, current_price, reason):
         """Close a trade and record the result"""
@@ -406,3 +431,63 @@ class FixedTradingBot:
                     self.db_session.rollback()
                 except:
                     pass
+    
+    def _check_major_trend_reversal(self, active_trades, market_indicators):
+        """Check for major trend reversal that requires closing all positions"""
+        if not market_indicators or not active_trades:
+            return None
+            
+        try:
+            # Analyze the majority position direction
+            buy_trades = sum(1 for trade in active_trades if trade.trade_type.lower() == 'buy')
+            sell_trades = len(active_trades) - buy_trades
+            
+            # If we have mostly BUY positions
+            if buy_trades > sell_trades:
+                # Check for strong bearish reversal signals
+                rsi = market_indicators.get('rsi_14', 50)
+                macd_line = market_indicators.get('macd_line', 0)
+                macd_signal = market_indicators.get('macd_signal', 0)
+                close = market_indicators.get('close', 0)
+                ema_12 = market_indicators.get('ema_12', close)
+                ema_26 = market_indicators.get('ema_26', close)
+                
+                # Extremely strong bearish signals for emergency close
+                if rsi > 80:  # Extreme overbought
+                    return "Extreme RSI overbought (>80) - emergency close all BUY positions"
+                
+                # Death cross with strong momentum
+                if ema_12 < ema_26 and (ema_26 - ema_12) / ema_26 > 0.02:  # 2% gap
+                    return "Strong death cross pattern - emergency close all BUY positions"
+                
+                # MACD with very strong bearish momentum
+                if macd_line < macd_signal and (macd_signal - macd_line) > 1.0:
+                    return "Extreme MACD bearish divergence - emergency close all BUY positions"
+            
+            # If we have mostly SELL positions
+            elif sell_trades > buy_trades:
+                # Check for strong bullish reversal signals
+                rsi = market_indicators.get('rsi_14', 50)
+                macd_line = market_indicators.get('macd_line', 0)
+                macd_signal = market_indicators.get('macd_signal', 0)
+                close = market_indicators.get('close', 0)
+                ema_12 = market_indicators.get('ema_12', close)
+                ema_26 = market_indicators.get('ema_26', close)
+                
+                # Extremely strong bullish signals for emergency close
+                if rsi < 20:  # Extreme oversold
+                    return "Extreme RSI oversold (<20) - emergency close all SELL positions"
+                
+                # Golden cross with strong momentum
+                if ema_12 > ema_26 and (ema_12 - ema_26) / ema_26 > 0.02:  # 2% gap
+                    return "Strong golden cross pattern - emergency close all SELL positions"
+                
+                # MACD with very strong bullish momentum
+                if macd_line > macd_signal and (macd_line - macd_signal) > 1.0:
+                    return "Extreme MACD bullish divergence - emergency close all SELL positions"
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error checking major trend reversal: {e}")
+            return None
