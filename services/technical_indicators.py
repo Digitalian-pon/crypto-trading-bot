@@ -41,13 +41,23 @@ class TechnicalIndicators:
     
     @staticmethod
     def calculate_bollinger_bands(data, window=20, std=2):
-        """Bollinger Bands"""
+        """Bollinger Bands with SMA (legacy)"""
         sma = TechnicalIndicators.calculate_sma(data, window)
         rolling_std = data.rolling(window=window).std()
         upper_band = sma + (rolling_std * std)
         lower_band = sma - (rolling_std * std)
         
         return upper_band, lower_band, sma
+    
+    @staticmethod
+    def calculate_bollinger_bands_ema(data, window=20, std=2):
+        """Bollinger Bands with EMA for more responsive middle band"""
+        ema = TechnicalIndicators.calculate_ema(data, window)
+        rolling_std = data.rolling(window=window).std()
+        upper_band = ema + (rolling_std * std)
+        lower_band = ema - (rolling_std * std)
+        
+        return upper_band, lower_band, ema
     
     @staticmethod
     def calculate_stochastic(high, low, close, k_window=14, d_window=3):
@@ -63,8 +73,8 @@ class TechnicalIndicators:
     def add_all_indicators(df):
         """Add all technical indicators to DataFrame"""
         try:
-            # Basic moving averages
-            df['sma_20'] = TechnicalIndicators.calculate_sma(df['close'], 20)
+            # Basic moving averages - Changed SMA to EMA for better responsiveness
+            df['ema_20'] = TechnicalIndicators.calculate_ema(df['close'], 20)
             df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], 12)
             df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], 26)
             
@@ -77,8 +87,8 @@ class TechnicalIndicators:
             df['macd_signal'] = signal_line
             df['macd_histogram'] = histogram
             
-            # Bollinger Bands
-            bb_upper, bb_lower, bb_middle = TechnicalIndicators.calculate_bollinger_bands(df['close'])
+            # Bollinger Bands - Updated to use EMA instead of SMA for middle band
+            bb_upper, bb_lower, bb_middle = TechnicalIndicators.calculate_bollinger_bands_ema(df['close'])
             df['bb_upper'] = bb_upper
             df['bb_lower'] = bb_lower
             df['bb_middle'] = bb_middle

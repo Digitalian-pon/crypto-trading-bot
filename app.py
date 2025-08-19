@@ -185,7 +185,15 @@ with app.app_context():
             api_key = config['api_credentials'].get('api_key', '')
             api_secret = config['api_credentials'].get('api_secret', '')
             
+            # Get current trading symbol and timeframe from config
+            from config import get_default_symbol, get_default_timeframe, get_available_symbols, get_available_timeframes
+            current_symbol = get_default_symbol()
+            current_timeframe = get_default_timeframe()
+            available_symbols = get_available_symbols()
+            available_timeframes = get_available_timeframes()
+            
             logger.info(f"Dashboard access - API key available: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
+            logger.info(f"Current trading settings - Symbol: {current_symbol}, Timeframe: {current_timeframe}")
             
             if not api_key or not api_secret:
                 logger.warning("API credentials not found in configuration")
@@ -195,9 +203,9 @@ with app.app_context():
             api = GMOCoinAPI(api_key, api_secret)
             data_service = DataService(api_key, api_secret)
             
-            # Get ticker data (public API)
-            logger.info("Fetching ticker data...")
-            ticker_data = api.get_ticker("DOGE_JPY")
+            # Get ticker data (public API) using dynamic symbol
+            logger.info(f"Fetching ticker data for {current_symbol}...")
+            ticker_data = api.get_ticker(current_symbol)
             logger.info(f"Ticker data result: {ticker_data}")
             
             # Get balance data (private API)
@@ -210,7 +218,11 @@ with app.app_context():
                 'balance': balance_data,
                 'status': 'running' if api_key and api_secret else 'not_configured',
                 'api_key_length': len(api_key),
-                'api_secret_length': len(api_secret)
+                'api_secret_length': len(api_secret),
+                'current_symbol': current_symbol,
+                'current_timeframe': current_timeframe,
+                'available_symbols': available_symbols,
+                'available_timeframes': available_timeframes
             }
             
             return render_template('simple_dashboard.html', data=dashboard_data)
@@ -279,9 +291,11 @@ with app.app_context():
             if not api_key or not api_secret:
                 return jsonify({'error': 'API credentials not configured'})
             
-            # Get market data with indicators
+            # Get market data with indicators using dynamic timeframe
+            from config import get_default_timeframe
+            current_timeframe = get_default_timeframe()
             data_service = DataService(api_key, api_secret)
-            df = data_service.get_data_with_indicators(symbol, interval="1h", limit=50)
+            df = data_service.get_data_with_indicators(symbol, interval=current_timeframe, limit=50)
             
             if df is None or df.empty:
                 # Fallback: Use current ticker data
@@ -337,21 +351,41 @@ with app.app_context():
     def settings():
         """Settings page"""
         from flask import render_template, request, flash, redirect, url_for
-        from config import save_api_credentials
+        from config import save_api_credentials, save_trading_settings, get_available_symbols, get_available_timeframes, get_default_symbol, get_default_timeframe
         
         if request.method == 'POST':
             api_key = request.form.get('api_key', '').strip()
             api_secret = request.form.get('api_secret', '').strip()
+            symbol = request.form.get('symbol', '').strip()
+            timeframe = request.form.get('timeframe', '').strip()
             
+            # Save API credentials if provided
             if api_key and api_secret:
                 if save_api_credentials(api_key, api_secret):
                     flash('API認証情報を保存しました', 'success')
-                    return redirect(url_for('dashboard'))
                 else:
                     flash('API認証情報の保存に失敗しました', 'error')
+            
+            # Save trading settings if provided
+            if symbol and timeframe:
+                if save_trading_settings(symbol, timeframe):
+                    flash(f'取引設定を保存しました: {symbol}, {timeframe}', 'success')
+                else:
+                    flash('取引設定の保存に失敗しました', 'error')
+            
+            if (api_key and api_secret) or (symbol and timeframe):
+                return redirect(url_for('dashboard'))
             else:
-                flash('API KeyとAPI Secretを入力してください', 'error')
+                flash('設定項目を入力してください', 'error')
         
-        return render_template('simple_settings.html')
+        # Get current settings for display
+        settings_data = {
+            'available_symbols': get_available_symbols(),
+            'available_timeframes': get_available_timeframes(),
+            'current_symbol': get_default_symbol(),
+            'current_timeframe': get_default_timeframe()
+        }
+        
+        return render_template('simple_settings.html', settings=settings_data)
     
     logger.info("Application initialized successfully")

@@ -1,18 +1,34 @@
-# GMO Coin Trading Dashboard　（更新２）
+# GMO Coin Advanced Trading Bot　（更新３）
 
-リアルタイム暗号通貨取引ダッシュボード - DOGE/JPY専用
+高度な機械学習暗号通貨自動取引システム - 複数通貨ペア・時間足対応
 
 ## 概要
 
-GMOコインAPIを使用したリアルタイム取引監視システムです。実際のポジション、残高、取引履歴を表示し、自動的な売買シグナルを生成します。
+GMOコインAPIを使用した高度な機械学習取引システムです。複数通貨ペア・時間足に対応し、EMAベースのテクニカル分析とRandom Forest機械学習モデルを組み合わせた自動取引を実現します。
+
+## 🚀 最新アップデート (更新３)
+
+### 🔧 技術的改善
+- **SMA → EMA変更**: より敏感で応答性の高い指数移動平均に変更
+- **動的通貨ペア選択**: BTC/ETH/XRP/DOGE_JPYから選択可能
+- **時間足設定**: 1m/5m/15m/30m/1h/4h/1dから選択可能
+- **設定画面**: Web UIから通貨ペアと時間足を動的変更
+
+### 📊 アルゴリズム詳細
+
+#### **多層意思決定システム**
+1. **機械学習予測**: Random Forest分類器による価格方向予測
+2. **テクニカル分析**: EMAベース重み付きシグナル統合
+3. **リスク管理**: 厳格な損切り・利確・ポジション管理
 
 ## 主な機能
 
-- **リアルタイム価格表示**: DOGE/JPYの現在価格を30秒間隔で更新
-- **口座残高監視**: 利用可能金額と証拠金余力をリアルタイム表示
-- **ポジション管理**: 保有ポジションの詳細と含み損益を計算
-- **取引履歴**: 最新の取引記録を表示
-- **自動売買シグナル**: 技術的指標に基づく売買判断
+- **🔄 動的通貨ペア**: BTC_JPY, ETH_JPY, XRP_JPY, DOGE_JPY対応
+- **⏰ 複数時間足**: 1分足〜日足まで選択可能
+- **🤖 機械学習**: Random Forestによる価格予測
+- **📈 EMAベース分析**: 高応答性の指数移動平均
+- **🛡️ リスク管理**: 2%損切り・4%利確の自動執行
+- **📱 リアルタイム監視**: 30秒間隔の価格・シグナル更新
 
 ## 技術スタック
 
@@ -46,6 +62,12 @@ secret_key = your_secret_key_here
 
 [database]
 database_uri = sqlite:///crypto_trader.db
+
+[trading]
+default_symbol = DOGE_JPY
+default_timeframe = 1h
+available_symbols = BTC_JPY,ETH_JPY,XRP_JPY,DOGE_JPY
+available_timeframes = 1m,5m,15m,30m,1h,4h,1d
 ```
 
 ## 使用方法
@@ -85,10 +107,11 @@ python3 vps_real_api_dashboard.py
 
 ### エンドポイント
 
-- `GET /` - メインダッシュボード
+- `GET /` - メインダッシュボード（動的通貨ペア対応）
 - `GET /dashboard` - ダッシュボード表示
-- `GET /api/data` - JSON形式のデータ取得
-- `GET /api/ticker` - 現在価格取得
+- `GET /settings` - 通貨ペア・時間足設定画面
+- `GET /api/ticker/<symbol>` - 指定通貨の現在価格取得
+- `GET /api/trading-analysis/<symbol>` - リアルタイム取引分析
 - `GET /api/balance` - 口座残高取得
 
 ### レスポンス例
@@ -128,19 +151,110 @@ python3 vps_real_api_dashboard.py
 - 利益/損失しきい値通知
 - システムヘルスチェック
 
+## 24時間稼働監視
+
+### ボット監視・確認方法
+
+#### 基本的な状態確認
+```bash
+# 現在の状態を確認
+python monitor_bot.py status
+
+# 継続監視（5分間隔）
+python monitor_bot.py monitor
+
+# カスタム間隔で監視（秒単位）
+python monitor_bot.py monitor 300
+```
+
+#### 稼働状況チェック項目
+- ✅ **Webダッシュボード**: https://web-production-1f4ce.up.railway.app
+- ✅ **API応答**: `/api/ticker/DOGE_JPY` エンドポイント
+- ✅ **取引ログ**: `logs/trading_bot.log` の最新エントリ
+- ✅ **プロセス確認**: Pythonプロセスの実行状態
+
+### ボット再起動方法
+
+#### 手動再起動
+```bash
+# 完全再起動（推奨）
+python restart_bot.py restart
+
+# 停止のみ
+python restart_bot.py stop
+
+# 開始のみ
+python restart_bot.py start
+
+# プロセス状態確認
+python restart_bot.py status
+
+# 強制終了
+python restart_bot.py kill
+```
+
+#### Railway環境での対処法
+1. **Railway Dashboard**でアプリケーションを確認
+2. **Deploy**タブで最新のデプロイ状況を確認
+3. 問題がある場合は**Redeploy**を実行
+
+### 異常検出時の対応手順
+
+#### 1. 状態確認
+```bash
+python monitor_bot.py status
+```
+
+#### 2. ログ確認
+```bash
+# 取引ログ確認
+tail -f logs/trading_bot.log
+
+# エラーログ確認
+tail -f monitor.log
+```
+
+#### 3. 再起動実行
+```bash
+# 自動再起動
+python restart_bot.py restart
+```
+
+#### 4. Railway環境でのトラブル
+- Railway Dashboard: https://railway.app/dashboard
+- プロジェクト: web-production-1f4ce
+- 手動Redeploy実行
+
 ## トラブルシューティング
 
-### よくある問題
+### よくある問題と解決法
 
-1. **APIキーエラー**: `setting.ini`の設定を確認
-2. **接続エラー**: ネットワーク接続とファイアウォール設定を確認
-3. **ポート5000が使用中**: `pkill -f python3`で既存プロセスを終了
+1. **APIキーエラー**
+   - `setting.ini`の設定を確認
+   - Railway環境変数の確認（`GMO_API_KEY`, `GMO_API_SECRET`）
 
-### ログ確認
+2. **接続エラー**
+   - ネットワーク接続とファイアウォール設定を確認
+   - GMO Coin APIのサービス状況を確認
 
-```bash
-tail -f api_dashboard.log
-```
+3. **ボットが停止している**
+   - `python restart_bot.py restart`で再起動
+   - `python monitor_bot.py status`で状態確認
+
+4. **取引が実行されない**
+   - 残高不足の確認
+   - 取引条件（RSI、MACDなど）の確認
+   - `logs/trading_bot.log`でエラー内容を確認
+
+5. **Railway環境でのトラブル**
+   - Build失敗: 依存関係を確認
+   - メモリ不足: プランのアップグレードを検討
+   - 接続タイムアウト: サーバー負荷を確認
+
+### ログファイル一覧
+- `logs/trading_bot.log` - メイン取引ログ
+- `monitor.log` - 監視ログ
+- `restart.log` - 再起動ログ
 
 ## 開発者向け情報
 
@@ -172,6 +286,49 @@ pip install -r requirements.txt
 python3 main.py
 ```
 
+## 🧠 アルゴリズム詳細説明
+
+### **EMAベースの技術分析システム**
+
+#### **1. 指数移動平均 (EMA) 指標**
+- **EMA 20**: メイントレンド判定 (SMAより応答性向上)
+- **EMA 12/26**: MACD計算用高速/低速ライン
+- **ボリンジャーバンド**: EMA20ベースでより敏感な反応
+
+#### **2. 売買シグナル条件（改良版）**
+
+**🟢 買いシグナル（重み付き判定）:**
+- RSI < 35 (売られ過ぎ) - 重み: 0.8
+- MACD線 > シグナル線 かつ MACD線 > 0 - 重み: 0.6
+- 価格 < 下部BBバンド × 1.005 - 重み: 0.7
+- 価格 > EMA20 × 1.01 - 重み: 0.5
+
+**🔴 売りシグナル（重み付き判定）:**
+- RSI > 65 (買われ過ぎ) - 重み: 0.8
+- MACD線 < シグナル線 かつ MACD線 < 0 - 重み: 0.6
+- 価格 > 上部BBバンド × 0.995 - 重み: 0.7
+- 価格 < EMA20 × 0.99 - 重み: 0.5
+
+**実行条件**: 合計重み ≥ 0.8
+
+#### **3. Random Forest機械学習統合**
+- **予測対象**: 次期価格の上昇/下降方向
+- **特徴量**: 全テクニカル指標値
+- **閾値**: 55%以上の確率でシグナル採用
+- **最適化**: グリッドサーチによる日次ハイパーパラメータ調整
+
+#### **4. 動的設定システム**
+- **通貨ペア**: Web UI内で瞬時切り替え
+- **時間足**: 1分〜日足まで設定変更
+- **設定保存**: `setting.ini`に永続保存
+
+### **リスク管理（強化版）**
+- **ポジションサイズ**: 残高の5%まで
+- **損切り**: 2%下落で即座実行
+- **利確**: 4%上昇で自動決済
+- **最大損失**: 日次10%制限
+- **緊急決済**: RSI極値(20未満/80超)で全ポジション決済
+
 ## ライセンス
 
 MIT License
@@ -186,6 +343,11 @@ MIT License
 - 2025-07-14: 初期リリース - GMO Coin API統合
 - 2025-07-14: VPS対応版リリース
 - 2025-07-14: リアルタイム監視機能追加
+- **2025-08-19: 更新３ - EMA移行・動的設定対応**
+  - SMA → EMA変更で応答性向上
+  - 動的通貨ペア選択機能追加
+  - 時間足設定機能追加
+  - Web UI設定画面実装
 
 ## 注意事項
 

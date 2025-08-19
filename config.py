@@ -29,6 +29,12 @@ def load_config():
         config['database'] = {
             'database_uri': 'sqlite:///instance/crypto_trader.db'
         }
+        config['trading'] = {
+            'default_symbol': 'DOGE_JPY',
+            'default_timeframe': '1h',
+            'available_symbols': 'BTC_JPY,ETH_JPY,XRP_JPY,DOGE_JPY',
+            'available_timeframes': '1m,5m,15m,30m,1h,4h,1d'
+        }
         
         # Save default config
         with open('setting.ini', 'w') as configfile:
@@ -62,3 +68,58 @@ def save_api_credentials(api_key, api_secret):
     
     logger.info("API credentials saved to setting.ini")
     return True
+
+def save_trading_settings(symbol, timeframe):
+    """
+    Save trading settings to setting.ini
+    """
+    config = configparser.ConfigParser()
+    
+    # Load existing config if available
+    if os.path.exists('setting.ini'):
+        config.read('setting.ini')
+    
+    # Make sure the section exists
+    if 'trading' not in config:
+        config['trading'] = {}
+    
+    # Update trading settings
+    config['trading']['default_symbol'] = symbol
+    config['trading']['default_timeframe'] = timeframe
+    
+    # Save the config
+    with open('setting.ini', 'w') as configfile:
+        config.write(configfile)
+    
+    logger.info(f"Trading settings saved: {symbol}, {timeframe}")
+    return True
+
+def get_available_symbols():
+    """
+    Get list of available trading symbols
+    """
+    config = load_config()
+    symbols_str = config['trading'].get('available_symbols', 'DOGE_JPY')
+    return symbols_str.split(',')
+
+def get_available_timeframes():
+    """
+    Get list of available timeframes
+    """
+    config = load_config()
+    timeframes_str = config['trading'].get('available_timeframes', '1h')
+    return timeframes_str.split(',')
+
+def get_default_symbol():
+    """
+    Get default trading symbol
+    """
+    config = load_config()
+    return config['trading'].get('default_symbol', 'DOGE_JPY')
+
+def get_default_timeframe():
+    """
+    Get default timeframe
+    """
+    config = load_config()
+    return config['trading'].get('default_timeframe', '1h')

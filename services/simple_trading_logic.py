@@ -57,12 +57,12 @@ class SimpleTradingLogic:
                 signals.append(('SELL', 'BB Reversal', 0.7))
                 logger.info(f"BB Sell Signal: Price {current_price} near upper band {bb_upper}")
             
-            # 4. Moving Average Signal
-            sma_20 = market_data.get('sma_20', current_price)
-            if current_price > sma_20 * 1.01:
-                signals.append(('BUY', 'Above SMA', 0.5))
-            elif current_price < sma_20 * 0.99:
-                signals.append(('SELL', 'Below SMA', 0.5))
+            # 4. Moving Average Signal - Changed to EMA for better responsiveness
+            ema_20 = market_data.get('ema_20', current_price)
+            if current_price > ema_20 * 1.01:
+                signals.append(('BUY', 'Above EMA', 0.5))
+            elif current_price < ema_20 * 0.99:
+                signals.append(('SELL', 'Below EMA', 0.5))
             
             # Evaluate signals
             buy_signals = [s for s in signals if s[0] == 'BUY']
