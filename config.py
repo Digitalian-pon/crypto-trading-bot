@@ -98,28 +98,56 @@ def get_available_symbols():
     """
     Get list of available trading symbols
     """
-    config = load_config()
-    symbols_str = config['trading'].get('available_symbols', 'DOGE_JPY')
-    return symbols_str.split(',')
+    try:
+        config = load_config()
+        if 'trading' in config:
+            symbols_str = config['trading'].get('available_symbols', 'DOGE_JPY')
+        else:
+            symbols_str = 'DOGE_JPY'
+        return symbols_str.split(',')
+    except Exception as e:
+        logger.warning(f"Error getting available symbols: {e}")
+        return ['DOGE_JPY']
 
 def get_available_timeframes():
     """
     Get list of available timeframes
     """
-    config = load_config()
-    timeframes_str = config['trading'].get('available_timeframes', '1h')
-    return timeframes_str.split(',')
+    try:
+        config = load_config()
+        if 'trading' in config:
+            timeframes_str = config['trading'].get('available_timeframes', '1h')
+        else:
+            timeframes_str = '1h'
+        return timeframes_str.split(',')
+    except Exception as e:
+        logger.warning(f"Error getting available timeframes: {e}")
+        return ['1h']
 
 def get_default_symbol():
     """
     Get default trading symbol
     """
-    config = load_config()
-    return config['trading'].get('default_symbol', 'DOGE_JPY')
+    try:
+        config = load_config()
+        if 'trading' in config:
+            return config['trading'].get('default_symbol', 'DOGE_JPY')
+        else:
+            return 'DOGE_JPY'
+    except Exception as e:
+        logger.warning(f"Error getting default symbol: {e}")
+        return 'DOGE_JPY'
 
 def get_default_timeframe():
     """
     Get default timeframe
     """
-    config = load_config()
-    return config['trading'].get('default_timeframe', '1h')
+    try:
+        config = load_config()
+        if 'trading' in config:
+            return config['trading'].get('default_timeframe', '1h')
+        else:
+            return '1h'
+    except Exception as e:
+        logger.warning(f"Error getting default timeframe: {e}")
+        return '1h'
