@@ -154,8 +154,8 @@ class TradingBot:
         logger.info("Trading loop started")
         
         # 最適化スケジュール設定（1日1回）
-        last_optimization_time = None
-        optimization_interval = 24 * 60 * 60  # 24時間（秒単位）
+        self.last_optimization_time = None
+        self.optimization_interval = 24 * 60 * 60  # 24時間（秒単位）
         
         while self.running:
             # Ensure we're operating within Flask app context
@@ -184,77 +184,77 @@ class TradingBot:
                 logger.info("Trading has been disabled in settings, stopping bot")
                 self.running = False
                 return
-                
-                # Get the trading pair from settings
-                symbol = self.user.settings.currency_pair
-                logger.info(f"Processing currency pair: {symbol}")
-                
-                # Get market data with indicators
-                logger.info(f"Fetching market data with indicators for {symbol}...")
-                df = self.data_service.get_data_with_indicators(symbol, interval="1h", limit=100)
-                
-                if df is None or df.empty:
-                    logger.error("Failed to get market data, skipping this iteration")
-                    time.sleep(self.interval)
-                    continue
-                
-                logger.info(f"Successfully retrieved {len(df)} market data points")
-                
-                # 定期的なモデル最適化処理
-                now = time.time()
-                if last_optimization_time is None or (now - last_optimization_time) >= optimization_interval:
-                    logger.info("Scheduled model parameter optimization...")
-                    optimized_params = self.model.optimize_parameters(df)
-                    if optimized_params:
-                        logger.info(f"Model parameters optimized successfully: {optimized_params['model_params']}")
-                        logger.info(f"Top features: {optimized_params['top_features']}")
-                        # 最適化時刻を更新
-                        last_optimization_time = now
-                    else:
-                        logger.warning("Model parameter optimization failed or was skipped")
-                
-                # Get the current active trades for this user and symbol
-                active_trades = None
-                if self.db_session:
-                    try:
-                        # セッションの状態をリフレッシュし、新しいクエリを準備
-                        self.db_session.commit()  # 以前のトランザクションがあれば完了させる
-                        
-                        user_id = self.user.id
-                        active_trades = self.db_session.query(Trade).filter_by(
-                            user_id=user_id,
-                            currency_pair=symbol,
-                            status='open'
-                        ).all()
-                        
-                        logger.info(f"Found {len(active_trades) if active_trades else 0} active trades")
-                    except Exception as db_e:
-                        logger.error(f"Database error while querying active trades: {db_e}")
-                        # セッションがエラー状態になっている可能性があるのでロールバック
-                        self.db_session.rollback()
+            
+            # Get the trading pair from settings
+            symbol = self.user.settings.currency_pair
+            logger.info(f"Processing currency pair: {symbol}")
+            
+            # Get market data with indicators
+            logger.info(f"Fetching market data with indicators for {symbol}...")
+            df = self.data_service.get_data_with_indicators(symbol, interval="1h", limit=100)
+            
+            if df is None or df.empty:
+                logger.error("Failed to get market data, skipping this iteration")
+                time.sleep(self.interval)
+                return
+            
+            logger.info(f"Successfully retrieved {len(df)} market data points")
+            
+            # 定期的なモデル最適化処理
+            now = time.time()
+            if self.last_optimization_time is None or (now - self.last_optimization_time) >= self.optimization_interval:
+                logger.info("Scheduled model parameter optimization...")
+                optimized_params = self.model.optimize_parameters(df)
+                if optimized_params:
+                    logger.info(f"Model parameters optimized successfully: {optimized_params['model_params']}")
+                    logger.info(f"Top features: {optimized_params['top_features']}")
+                    # 最適化時刻を更新
+                    self.last_optimization_time = now
                 else:
-                    logger.error("Database session is not available")
-                
-                # Check if we have any active trades that need to be closed
-                current_price = df['close'].iloc[-1]
-                logger.info(f"Current {symbol} price: {current_price}")
-                self._check_active_trades(active_trades, current_price)
-                
-                # If there are no active trades, check if we should open a new one
-                if not active_trades or len(active_trades) == 0:
-                    logger.info("No active trades found, checking for new trade opportunities")
-                    self._check_for_new_trade(df, symbol, current_price)
-                
-                # Sleep until next check
-                logger.info(f"Sleeping for {self.interval} seconds until next check")
-                time.sleep(self.interval)
-                
-            except Exception as e:
-                import traceback
-                logger.error(f"Error in trading loop: {e}")
-                logger.error(f"Error traceback: {traceback.format_exc()}")
-                logger.info(f"Will retry after {self.interval} seconds")
-                time.sleep(self.interval)
+                    logger.warning("Model parameter optimization failed or was skipped")
+            
+            # Get the current active trades for this user and symbol
+            active_trades = None
+            if self.db_session:
+                try:
+                    # セッションの状態をリフレッシュし、新しいクエリを準備
+                    self.db_session.commit()  # 以前のトランザクションがあれば完了させる
+                    
+                    user_id = self.user.id
+                    active_trades = self.db_session.query(Trade).filter_by(
+                        user_id=user_id,
+                        currency_pair=symbol,
+                        status='open'
+                    ).all()
+                    
+                    logger.info(f"Found {len(active_trades) if active_trades else 0} active trades")
+                except Exception as db_e:
+                    logger.error(f"Database error while querying active trades: {db_e}")
+                    # セッションがエラー状態になっている可能性があるのでロールバック
+                    self.db_session.rollback()
+            else:
+                logger.error("Database session is not available")
+            
+            # Check if we have any active trades that need to be closed
+            current_price = df['close'].iloc[-1]
+            logger.info(f"Current {symbol} price: {current_price}")
+            self._check_active_trades(active_trades, current_price)
+            
+            # If there are no active trades, check if we should open a new one
+            if not active_trades or len(active_trades) == 0:
+                logger.info("No active trades found, checking for new trade opportunities")
+                self._check_for_new_trade(df, symbol, current_price)
+            
+            # Sleep until next check
+            logger.info(f"Sleeping for {self.interval} seconds until next check")
+            time.sleep(self.interval)
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"Error in trading loop: {e}")
+            logger.error(f"Error traceback: {traceback.format_exc()}")
+            logger.info(f"Will retry after {self.interval} seconds")
+            time.sleep(self.interval)
     
     def _check_active_trades(self, active_trades, current_price):
         """
@@ -424,6 +424,7 @@ class TradingBot:
         trade_type = None
         trade_reason = ""
         
+        # IMPORTANT: Only allow BUY trades since we only have JPY balance
         # トレード条件を大幅に緩和（確率閾値を0.55に下げる）
         if prediction['prediction'] == 1 and prediction['probability'] > 0.55:
             # Model predicts price will go up
@@ -435,34 +436,33 @@ class TradingBot:
             else:
                 logger.info(f"Not trading despite bullish signal because: market_trend={market_eval['market_trend']}, trend_strength={market_eval['trend_strength']:.2f}")
         elif prediction['prediction'] == 0 and prediction['probability'] > 0.55:
-            # Model predicts price will go down
-            logger.info("Model indicates BEARISH signal")
-            if market_eval['market_trend'] != 'bullish' or market_eval['trend_strength'] < 0.7:
-                should_trade = True
-                trade_type = 'sell'
-                trade_reason = f"Bearish signal with {prediction['probability']:.2f} probability, market trend: {market_eval['market_trend']}"
-            else:
-                logger.info(f"Not trading despite bearish signal because: market_trend={market_eval['market_trend']}, trend_strength={market_eval['trend_strength']:.2f}")
+            # Model predicts price will go down - but we can only buy with JPY balance
+            logger.info("Model indicates BEARISH signal - but skipping SELL trade (no crypto balance)")
+            # Don't execute sell trades when we only have JPY balance
+            should_trade = False
+            trade_reason = f"Bearish signal detected but no crypto to sell"
         else:
             # 予測が明確でない場合、テクニカル指標のみに基づいて判断（条件緩和）
             if market_eval['trend_strength'] > 0.6:  # 閾値を0.7→0.6に緩和
-                should_trade = True
-                # 市場トレンドに従ってトレードタイプを決定
+                # Only allow BUY trades
                 if market_eval['market_trend'] == 'bullish':
+                    should_trade = True
                     trade_type = 'buy'
                     trade_reason = f"Strong bullish trend detected. Strength: {market_eval['trend_strength']:.2f}"
                 elif market_eval['market_trend'] == 'bearish':
-                    trade_type = 'sell'
-                    trade_reason = f"Strong bearish trend detected. Strength: {market_eval['trend_strength']:.2f}"
-            # トレンドが中程度の場合でもトレードを実行
+                    # Skip sell trades
+                    logger.info(f"Bearish trend detected but skipping SELL trade (no crypto balance)")
+                    should_trade = False
+            # トレンドが中程度の場合でもBUYトレードのみ実行
             elif market_eval['trend_strength'] > 0.4 and market_eval['risk_score'] < 7:
-                should_trade = True
                 if market_eval['market_trend'] == 'bullish':
+                    should_trade = True
                     trade_type = 'buy'
                     trade_reason = f"Moderate bullish trend with low risk. Strength: {market_eval['trend_strength']:.2f}"
                 elif market_eval['market_trend'] == 'bearish':
-                    trade_type = 'sell'
-                    trade_reason = f"Moderate bearish trend with low risk. Strength: {market_eval['trend_strength']:.2f}"
+                    # Skip sell trades
+                    logger.info(f"Bearish trend with low risk but skipping SELL trade (no crypto balance)")
+                    should_trade = False
                 
             logger.info(f"ML signal analysis: Prediction: {prediction['prediction']}, probability: {prediction['probability']:.2f}, trend_strength: {market_eval['trend_strength']:.2f}")
         

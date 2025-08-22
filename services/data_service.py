@@ -467,8 +467,31 @@ class DataService:
         """
         logger.info(f"Getting data with indicators for {symbol}, interval={interval}, force_refresh={force_refresh}")
         
+        # First try to get current price from ticker API
+        current_ticker = self.get_ticker(symbol)
+        current_price = None
+        if current_ticker and isinstance(current_ticker, list) and len(current_ticker) > 0:
+            try:
+                current_price = float(current_ticker[0]['last'])
+                logger.info(f"Current price from ticker: {current_price}")
+            except (KeyError, ValueError, IndexError) as e:
+                logger.warning(f"Could not get current price from ticker: {e}")
+        
         # API経由で取得を試みる
         df = self.get_klines(symbol, interval, limit, force_refresh=force_refresh)
+        
+        # If we got historical data and current price, update the last row with current price
+        if df is not None and not df.empty and current_price is not None:
+            logger.info("Updating last candle with current price")
+            # Update the last row's close price to current price
+            df.iloc[-1, df.columns.get_loc('close')] = current_price
+            # Also update high and low if current price exceeds them
+            last_high = df.iloc[-1]['high']
+            last_low = df.iloc[-1]['low']
+            if current_price > last_high:
+                df.iloc[-1, df.columns.get_loc('high')] = current_price
+            if current_price < last_low:
+                df.iloc[-1, df.columns.get_loc('low')] = current_price
         
         # APIから取得できない場合は、データベースからデータを取得してリサンプリング
         if (df is None or df.empty) and hasattr(self, 'db_session') and self.db_session:
