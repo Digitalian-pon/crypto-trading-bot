@@ -46,6 +46,8 @@ class TradingBot:
         self.interval = 60  # Default check interval in seconds
         self.db_session = None
         self.app = app
+        self.last_trend = None  # Track trend changes for reversal detection
+        self.trend_change_threshold = 0.7  # Threshold for strong trend change
     
     def set_db_session(self, session):
         """
@@ -227,7 +229,23 @@ class TradingBot:
                         status='open'
                     ).all()
                     
-                    logger.info(f"Found {len(active_trades) if active_trades else 0} active trades")
+                    logger.info(f"Found {len(active_trades) if active_trades else 0} active trades in database")
+                    
+                    # Also check for actual positions on the exchange that might not be in our database
+                    exchange_positions = self._get_exchange_positions(symbol)
+                    if exchange_positions and len(exchange_positions) > 0:
+                        logger.info(f"Found {len(exchange_positions)} positions on exchange")
+                        # Sync exchange positions with database if needed
+                        self._sync_exchange_positions(exchange_positions, symbol, active_trades)
+                        
+                        # Refresh active trades after sync
+                        active_trades = self.db_session.query(Trade).filter_by(
+                            user_id=user_id,
+                            currency_pair=symbol,
+                            status='open'
+                        ).all()
+                        logger.info(f"After sync: {len(active_trades) if active_trades else 0} active trades")
+                    
                 except Exception as db_e:
                     logger.error(f"Database error while querying active trades: {db_e}")
                     # セッションがエラー状態になっている可能性があるのでロールバック
@@ -238,7 +256,19 @@ class TradingBot:
             # Check if we have any active trades that need to be closed
             current_price = df['close'].iloc[-1]
             logger.info(f"Current {symbol} price: {current_price}")
-            self._check_active_trades(active_trades, current_price)
+            
+            # Get market evaluation for trend detection
+            last_row = df.iloc[-1].to_dict()
+            market_eval = self.risk_manager.evaluate_market_conditions(last_row)
+            current_trend = market_eval['market_trend']
+            trend_strength = market_eval['trend_strength']
+            
+            # Check for trend reversal and close opposing positions
+            trend_reversal_detected = self._check_trend_reversal(current_trend, trend_strength, active_trades, current_price, symbol)
+            
+            # Check active trades for normal stop-loss/take-profit
+            if not trend_reversal_detected:
+                self._check_active_trades(active_trades, current_price)
             
             # If there are no active trades, check if we should open a new one
             if not active_trades or len(active_trades) == 0:
@@ -255,6 +285,175 @@ class TradingBot:
             logger.error(f"Error traceback: {traceback.format_exc()}")
             logger.info(f"Will retry after {self.interval} seconds")
             time.sleep(self.interval)
+    
+    def _check_trend_reversal(self, current_trend, trend_strength, active_trades, current_price, symbol):
+        """
+        Check for trend reversal and close opposing positions if detected
+        
+        :param current_trend: Current market trend (bullish/bearish/neutral)
+        :param trend_strength: Strength of the trend (0-1)
+        :param active_trades: List of active trades
+        :param current_price: Current price
+        :param symbol: Trading symbol
+        :return: True if trend reversal was detected and positions were closed
+        """
+        if not active_trades or len(active_trades) == 0:
+            # Update last trend for next comparison
+            self.last_trend = current_trend
+            return False
+        
+        # Check for strong trend reversal
+        reversal_detected = False
+        
+        if self.last_trend and trend_strength >= self.trend_change_threshold:
+            # Strong bullish trend detected while having sell positions
+            if current_trend == 'bullish' and self.last_trend != 'bullish':
+                sell_trades = [t for t in active_trades if t.trade_type.lower() == 'sell']
+                if sell_trades:
+                    logger.warning(f"TREND REVERSAL DETECTED: {self.last_trend} -> {current_trend} (strength: {trend_strength:.2f})")
+                    logger.info(f"Closing {len(sell_trades)} SELL positions due to bullish reversal")
+                    self._close_all_positions_by_type(sell_trades, current_price, f"Bullish trend reversal (strength: {trend_strength:.2f})")
+                    reversal_detected = True
+                    
+                    # Execute immediate BUY trade after closing sell positions
+                    self._execute_reversal_trade(symbol, 'buy', current_price, f"Bullish reversal trade after closing sells")
+            
+            # Strong bearish trend detected while having buy positions  
+            elif current_trend == 'bearish' and self.last_trend != 'bearish':
+                buy_trades = [t for t in active_trades if t.trade_type.lower() == 'buy']
+                if buy_trades:
+                    logger.warning(f"TREND REVERSAL DETECTED: {self.last_trend} -> {current_trend} (strength: {trend_strength:.2f})")
+                    logger.info(f"Closing {len(buy_trades)} BUY positions due to bearish reversal")
+                    self._close_all_positions_by_type(buy_trades, current_price, f"Bearish trend reversal (strength: {trend_strength:.2f})")
+                    reversal_detected = True
+                    
+                    # Execute immediate SELL trade after closing buy positions
+                    self._execute_reversal_trade(symbol, 'sell', current_price, f"Bearish reversal trade after closing buys")
+        
+        # Update last trend
+        self.last_trend = current_trend
+        return reversal_detected
+    
+    def _close_all_positions_by_type(self, trades_to_close, current_price, reason):
+        """
+        Close all positions of a specific type (buy or sell)
+        
+        :param trades_to_close: List of trades to close
+        :param current_price: Current market price
+        :param reason: Reason for closing
+        """
+        for trade in trades_to_close:
+            try:
+                self._close_trade(trade, current_price, reason)
+                logger.info(f"Closed trade {trade.id} ({trade.trade_type}) due to trend reversal")
+            except Exception as e:
+                logger.error(f"Error closing trade {trade.id}: {e}")
+    
+    def _execute_reversal_trade(self, symbol, trade_type, current_price, reason):
+        """
+        Execute a new trade in the opposite direction after trend reversal
+        
+        :param symbol: Trading symbol
+        :param trade_type: Type of trade (buy/sell)
+        :param current_price: Current price
+        :param reason: Reason for the trade
+        """
+        try:
+            # Only execute buy trades if we have JPY balance, skip sell trades for now
+            if trade_type.lower() == 'sell':
+                logger.info("Skipping SELL reversal trade (no crypto balance for selling)")
+                return
+                
+            logger.info(f"Executing reversal {trade_type.upper()} trade: {reason}")
+            
+            # Get current market indicators for the reversal trade
+            df = self.data_service.get_data_with_indicators(symbol, interval="1h", limit=50)
+            if df is not None and not df.empty:
+                last_row = df.iloc[-1].to_dict()
+                self._execute_trade(symbol, trade_type, current_price, last_row)
+            else:
+                logger.warning("Could not get market data for reversal trade")
+                
+        except Exception as e:
+            logger.error(f"Error executing reversal trade: {e}")
+    
+    def _get_exchange_positions(self, symbol):
+        """
+        Get current positions from the exchange
+        
+        :param symbol: Trading symbol
+        :return: List of positions
+        """
+        try:
+            # Get account balance to check for positions
+            balance_response = self.api.get_account_balance()
+            
+            if 'data' in balance_response:
+                positions = []
+                crypto_symbol = symbol.split('_')[0]  # Get crypto part (e.g., DOGE from DOGE_JPY)
+                
+                for asset in balance_response['data']:
+                    if asset['symbol'] == crypto_symbol and float(asset['available']) > 0:
+                        # We have this crypto, which means we have a buy position
+                        positions.append({
+                            'symbol': symbol,
+                            'type': 'buy',
+                            'amount': float(asset['available']),
+                            'side': 'long'
+                        })
+                        logger.info(f"Found {crypto_symbol} position: {asset['available']} units")
+                
+                return positions
+            else:
+                logger.warning(f"Could not get account balance: {balance_response}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error getting exchange positions: {e}")
+            return []
+    
+    def _sync_exchange_positions(self, exchange_positions, symbol, db_trades):
+        """
+        Sync exchange positions with database trades
+        
+        :param exchange_positions: List of positions from exchange
+        :param symbol: Trading symbol
+        :param db_trades: Current database trades
+        """
+        try:
+            # Create database records for exchange positions not in database
+            for position in exchange_positions:
+                # Check if this position exists in database
+                existing_trade = None
+                for trade in db_trades:
+                    if (trade.currency_pair == symbol and 
+                        trade.trade_type.lower() == position['type'] and
+                        trade.status == 'open'):
+                        existing_trade = trade
+                        break
+                
+                if not existing_trade:
+                    logger.info(f"Creating database record for exchange position: {position['type']} {position['amount']} {symbol}")
+                    
+                    # Create new trade record
+                    new_trade = Trade()
+                    new_trade.user_id = self.user.id
+                    new_trade.currency_pair = symbol
+                    new_trade.trade_type = position['type']
+                    new_trade.amount = position['amount']
+                    new_trade.price = 0  # We don't know the original price
+                    new_trade.status = 'open'
+                    new_trade.created_at = datetime.utcnow()
+                    
+                    self.db_session.add(new_trade)
+                    self.db_session.commit()
+                    
+                    logger.info(f"Synced exchange position to database: Trade ID {new_trade.id}")
+                    
+        except Exception as e:
+            logger.error(f"Error syncing exchange positions: {e}")
+            if self.db_session:
+                self.db_session.rollback()
     
     def _check_active_trades(self, active_trades, current_price):
         """
