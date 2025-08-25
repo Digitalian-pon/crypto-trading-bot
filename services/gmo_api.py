@@ -292,3 +292,128 @@ class GMOCoinAPI:
             params["symbol"] = symbol
             
         return self._private_request("GET", endpoint, params)
+    
+    # Leverage Trading Methods
+    
+    def get_margin_account(self):
+        """
+        Get margin account information including open positions
+        
+        :return: Margin account data with positions
+        """
+        endpoint = "/v1/account/margin"
+        return self._private_request("GET", endpoint)
+    
+    def get_positions(self, symbol=None, page=1, count=100):
+        """
+        Get detailed open positions (建玉一覧を取得)
+        
+        :param symbol: Trading pair symbol (e.g., 'DOGE_JPY')
+        :param page: Page number (default: 1)
+        :param count: Number of positions per page (default: 100)
+        :return: Open positions data
+        """
+        endpoint = "/v1/openPositions"
+        params = {"page": page, "count": count}
+        
+        if symbol:
+            params["symbol"] = symbol
+            
+        return self._private_request("GET", endpoint, params)
+    
+    def close_position(self, symbol, side, execution_type="MARKET", position_id=None, size=None, price=None):
+        """
+        Close a leverage position (決済注文)
+        
+        :param symbol: Trading pair symbol (e.g., 'DOGE_JPY')
+        :param side: Order side ('BUY' or 'SELL')
+        :param execution_type: Order type ('MARKET', 'LIMIT', 'STOP')
+        :param position_id: Position ID to close (required if size specified)
+        :param size: Size to close (required if position_id specified)
+        :param price: Price for LIMIT/STOP orders
+        :return: Close order result
+        """
+        endpoint = "/v1/closeOrder"
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "executionType": execution_type
+        }
+        
+        if execution_type in ["LIMIT", "STOP"] and price:
+            params["price"] = str(price)
+            
+        if position_id and size:
+            params["settlePosition"] = [{
+                "positionId": position_id,
+                "size": str(size)
+            }]
+        
+        return self._private_request("POST", endpoint, params)
+    
+    def close_bulk_position(self, symbol, side, execution_type="MARKET", size=None, price=None):
+        """
+        Close multiple positions at once (一括決済注文)
+        
+        :param symbol: Trading pair symbol (e.g., 'DOGE_JPY')
+        :param side: Position side to close ('BUY' or 'SELL')
+        :param execution_type: Order type ('MARKET', 'LIMIT', 'STOP')
+        :param size: Total size to close (required)
+        :param price: Price for LIMIT/STOP orders
+        :return: Bulk close result
+        """
+        endpoint = "/v1/closeBulkOrder"
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "executionType": execution_type
+        }
+        
+        if size:
+            # For DOGE and other whole number instruments, ensure integer size
+            if symbol and 'DOGE' in symbol:
+                params["size"] = str(int(float(size)))
+            else:
+                params["size"] = str(size)
+            
+        if execution_type in ["LIMIT", "STOP"] and price:
+            params["price"] = str(price)
+        
+        return self._private_request("POST", endpoint, params)
+    
+    def close_all_positions_by_symbol(self, symbol, side=None):
+        """
+        Convenience method to close all positions for a symbol using bulk close
+        
+        :param symbol: Trading pair symbol (e.g., 'DOGE_JPY')
+        :param side: Position side to close ('BUY' or 'SELL')
+        :return: Bulk close result
+        """
+        # First get current positions to calculate total size
+        positions_response = self.get_positions(symbol=symbol)
+        
+        if positions_response.get('status') != 0:
+            return {'error': f'Failed to get positions: {positions_response}'}
+        
+        if not positions_response.get('data') or not positions_response['data'].get('list'):
+            return {'message': 'No positions found'}
+        
+        positions = positions_response['data']['list']
+        total_size = 0
+        
+        # Calculate total size for the specified side
+        for position in positions:
+            if position.get('symbol') == symbol:
+                if side is None or position.get('side') == side:
+                    total_size += float(position.get('size', 0))
+        
+        if total_size == 0:
+            return {'message': f'No {side or "any"} positions found for {symbol}'}
+        
+        # Use bulk close to close all positions at once
+        return self.close_bulk_position(
+            symbol=symbol,
+            side=side,
+            execution_type="MARKET",
+            size=str(total_size)
+        )
