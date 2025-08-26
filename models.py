@@ -1,7 +1,15 @@
 import datetime
-from app import db
 from flask_login import UserMixin
+from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+
+# DBインスタンスを直接インポートせず、後で設定
+db = None
+
+def init_db(database):
+    """Initialize database instance"""
+    global db
+    db = database
 
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)

@@ -326,28 +326,29 @@ class FixedTradingBot:
         trade_type = None
         trade_reason = ""
         
-        # Lower probability threshold to 0.55 for more trading opportunities
-        if prediction['prediction'] == 1 and prediction['probability'] > 0.55:
-            # Model predicts price will go up
+        # JPY残高のみの場合、BUY取引のみ実行可能
+        # Lower probability threshold to 0.45 for more trading opportunities
+        if prediction['prediction'] == 1 and prediction['probability'] > 0.45:
+            # Model predicts price will go up - BUY signal
             if market_eval['market_trend'] != 'bearish' or market_eval['trend_strength'] < 0.7:
                 should_trade = True
                 trade_type = 'buy'
-                trade_reason = f"Bullish signal with {prediction['probability']:.2f} probability"
-        elif prediction['prediction'] == 0 and prediction['probability'] > 0.55:
-            # Model predicts price will go down
-            if market_eval['market_trend'] != 'bullish' or market_eval['trend_strength'] < 0.7:
-                should_trade = True
-                trade_type = 'sell'
-                trade_reason = f"Bearish signal with {prediction['probability']:.2f} probability"
-        elif market_eval['trend_strength'] > 0.6:
+                trade_reason = f"Bullish signal with {prediction['probability']:.2f} probability - Buying DOGE with JPY"
+        elif prediction['prediction'] == 0 and prediction['probability'] > 0.45:
+            # Model predicts price will go down - 通常ならSELLだが、JPY残高のためスキップ
+            logger.info(f"Bearish signal detected ({prediction['probability']:.2f} probability) but only JPY available - cannot SELL")
+            should_trade = False
+            trade_reason = "Bearish signal but insufficient DOGE holdings for SELL"
+        elif market_eval['trend_strength'] > 0.5:  # 閾値を下げて取引機会を増加
             # Strong trend without clear ML signal
-            should_trade = True
             if market_eval['market_trend'] == 'bullish':
+                should_trade = True
                 trade_type = 'buy'
-                trade_reason = f"Strong bullish trend. Strength: {market_eval['trend_strength']:.2f}"
+                trade_reason = f"Strong bullish trend detected. Strength: {market_eval['trend_strength']:.2f} - Buying DOGE"
             elif market_eval['market_trend'] == 'bearish':
-                trade_type = 'sell'
-                trade_reason = f"Strong bearish trend. Strength: {market_eval['trend_strength']:.2f}"
+                logger.info(f"Bearish trend detected (strength: {market_eval['trend_strength']:.2f}) but only JPY available - skipping SELL")
+                should_trade = False
+                trade_reason = "Bearish trend but insufficient DOGE holdings"
         
         if should_trade and trade_type:
             logger.info(f"Decision to trade: {trade_type} because {trade_reason}")
@@ -376,8 +377,9 @@ class FixedTradingBot:
                 logger.error("No available balance for trading")
                 return
             
-            # Calculate position size
-            position_size = self.risk_manager.calculate_position_size(available_balance, current_price)
+            # Calculate position size (BUY注文用)
+            position_size = self.risk_manager.calculate_position_size(available_balance, current_price, symbol)
+            logger.info(f"Calculated position size for {symbol}: {position_size}")
             
             # Format size according to currency pair requirements
             if 'DOGE_' in symbol:

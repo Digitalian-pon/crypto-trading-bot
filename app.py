@@ -73,8 +73,9 @@ with app.app_context():
     # app.register_blueprint(logs_bp)
     # app.register_blueprint(status_bp)
     
-    # Import models to ensure they're registered with SQLAlchemy
+    # Import models and initialize database
     import models
+    models.init_db(db)  # models.pyにDBインスタンスを渡す
     
     # Create all database tables
     db.create_all()
@@ -358,11 +359,29 @@ with app.app_context():
             api_secret = request.form.get('api_secret', '').strip()
             symbol = request.form.get('symbol', '').strip()
             timeframe = request.form.get('timeframe', '').strip()
+            auto_trading = request.form.get('auto_trading') == 'on'  # チェックボックスの値を取得
+            
+            success_count = 0
             
             # Save API credentials if provided
             if api_key and api_secret:
                 if save_api_credentials(api_key, api_secret):
                     flash('API認証情報を保存しました', 'success')
+                    success_count += 1
+                    
+                    # Update or create user with API credentials
+                    try:
+                        user = User.query.filter_by(username='trading_user').first()
+                        if not user:
+                            user = User(username='trading_user')
+                            db.session.add(user)
+                        
+                        user.api_key = api_key
+                        user.api_secret = api_secret
+                        db.session.commit()
+                        logger.info("Updated user API credentials in database")
+                    except Exception as e:
+                        logger.error(f"Failed to update user API credentials: {e}")
                 else:
                     flash('API認証情報の保存に失敗しました', 'error')
             
@@ -370,10 +389,39 @@ with app.app_context():
             if symbol and timeframe:
                 if save_trading_settings(symbol, timeframe):
                     flash(f'取引設定を保存しました: {symbol}, {timeframe}', 'success')
+                    success_count += 1
                 else:
                     flash('取引設定の保存に失敗しました', 'error')
             
-            if (api_key and api_secret) or (symbol and timeframe):
+            # Handle auto trading setting - 最重要！
+            try:
+                user = User.query.filter_by(username='trading_user').first()
+                if user:
+                    if not user.settings:
+                        from models import TradingSettings
+                        user.settings = TradingSettings(
+                            user_id=user.id,
+                            currency_pair=symbol or 'DOGE_JPY',
+                            trading_enabled=auto_trading
+                        )
+                        db.session.add(user.settings)
+                    else:
+                        user.settings.trading_enabled = auto_trading
+                        if symbol:
+                            user.settings.currency_pair = symbol
+                    
+                    db.session.commit()
+                    status_msg = "有効" if auto_trading else "無効"
+                    flash(f'自動取引を{status_msg}にしました', 'success')
+                    success_count += 1
+                    logger.info(f"Auto trading set to: {auto_trading}")
+                else:
+                    flash('ユーザーが見つかりません。先にAPI認証情報を設定してください', 'error')
+            except Exception as e:
+                logger.error(f"Failed to update auto trading setting: {e}")
+                flash('自動取引設定の保存に失敗しました', 'error')
+            
+            if success_count > 0:
                 return redirect(url_for('dashboard'))
             else:
                 flash('設定項目を入力してください', 'error')

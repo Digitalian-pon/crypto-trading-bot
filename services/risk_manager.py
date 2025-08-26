@@ -33,10 +33,10 @@ class RiskManager:
         except Exception as e:
             logger.error(f"Error updating risk settings: {e}")
     
-    def calculate_position_size(self, available_balance, current_price):
+    def calculate_position_size(self, available_balance, current_price, symbol='DOGE_JPY'):
         """Calculate position size based on available balance and risk rules"""
         try:
-            # Calculate maximum position value (JPY)
+            # Calculate maximum position value (JPY) - 残高の5%を使用
             max_position_value = available_balance * self.max_position_size_ratio
             
             # Calculate position size in crypto units
@@ -44,11 +44,24 @@ class RiskManager:
             
             logger.info(f"Position size calculation: balance={available_balance}, max_value={max_position_value}, size={position_size}")
             
-            return max(position_size, 0.0001)  # Ensure minimum position size
+            # DOGE取引の場合は最小10単位に調整
+            if 'DOGE_' in symbol:
+                position_size = max(int(position_size), 10)  # DOGE最小10単位
+                logger.info(f"DOGE position adjusted to: {position_size} units")
+            elif 'XRP_' in symbol:
+                position_size = max(int(position_size), 10)  # XRP最小10単位
+            elif 'BTC_' in symbol:
+                position_size = max(position_size, 0.0001)  # BTC最小0.0001
+            elif 'ETH_' in symbol:
+                position_size = max(position_size, 0.001)   # ETH最小0.001
+            else:
+                position_size = max(position_size, 1)       # その他最小1単位
+            
+            return position_size
             
         except Exception as e:
             logger.error(f"Error calculating position size: {e}")
-            return 0.0001
+            return 10 if 'DOGE_' in symbol else 0.0001
     
     def should_close_trade(self, trade, current_price, market_indicators=None):
         """Check if a trade should be closed based on risk rules and trend reversal"""

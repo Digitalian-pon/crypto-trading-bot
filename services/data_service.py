@@ -216,7 +216,9 @@ class DataService:
                 logger.error(f"Error retrieving additional data from database: {e}")
         
         if not all_klines:
-            logger.error(f"Failed to get klines data from API")
+            logger.warning(f"No historical data retrieved from API for {symbol}")
+            # 現在価格データが取得できればフォールバック処理を実行
+            logger.info("Attempting fallback to ticker-based data generation")
             # データベースからデータを試す
             if hasattr(self, 'db_session') and self.db_session:
                 logger.info("Trying to get data from database")
