@@ -80,6 +80,7 @@ with app.app_context():
     # Create all database tables
     db.create_all()
     
+    # Import model classes after initialization
     from models import User
     
     # @login_manager.user_loader
