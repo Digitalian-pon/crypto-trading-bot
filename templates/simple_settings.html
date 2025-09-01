@@ -55,6 +55,36 @@
                             </div>
                             
                             <hr class="my-4">
+                            <h6><i class="fas fa-chart-bar me-2"></i>取引設定</h6>
+                            
+                            <div class="mb-3">
+                                <label for="currency_pair" class="form-label">通貨ペア</label>
+                                <select class="form-select" id="currency_pair" name="currency_pair" required>
+                                    <option value="DOGE_JPY">DOGE/JPY</option>
+                                    <option value="BTC_JPY">BTC/JPY</option>
+                                    <option value="ETH_JPY">ETH/JPY</option>
+                                    <option value="XRP_JPY">XRP/JPY</option>
+                                    <option value="LTC_JPY">LTC/JPY</option>
+                                    <option value="BCH_JPY">BCH/JPY</option>
+                                </select>
+                                <div class="form-text">取引する通貨ペアを選択してください</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="timeframe" class="form-label">時間足</label>
+                                <select class="form-select" id="timeframe" name="timeframe" required>
+                                    <option value="1m">1分足</option>
+                                    <option value="5m" selected>5分足</option>
+                                    <option value="15m">15分足</option>
+                                    <option value="30m">30分足</option>
+                                    <option value="1h">1時間足</option>
+                                    <option value="4h">4時間足</option>
+                                    <option value="1d">日足</option>
+                                </select>
+                                <div class="form-text">分析に使用する時間足を選択してください</div>
+                            </div>
+                            
+                            <hr class="my-4">
                             <h6><i class="fas fa-shield-alt me-2"></i>リスク管理設定</h6>
                             
                             <div class="mb-3">

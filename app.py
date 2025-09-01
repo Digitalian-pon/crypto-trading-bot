@@ -358,9 +358,12 @@ with app.app_context():
         if request.method == 'POST':
             api_key = request.form.get('api_key', '').strip()
             api_secret = request.form.get('api_secret', '').strip()
-            symbol = request.form.get('symbol', '').strip()
+            currency_pair = request.form.get('currency_pair', '').strip()
             timeframe = request.form.get('timeframe', '').strip()
-            auto_trading = request.form.get('auto_trading') == 'on'  # チェックボックスの値を取得
+            max_position_size = request.form.get('max_position_size', 5)
+            stop_loss = request.form.get('stop_loss', 2)
+            take_profit = request.form.get('take_profit', 4)
+            auto_trading = request.form.get('auto_trading') == 'on'
             
             success_count = 0
             
@@ -387,9 +390,9 @@ with app.app_context():
                     flash('API認証情報の保存に失敗しました', 'error')
             
             # Save trading settings if provided
-            if symbol and timeframe:
-                if save_trading_settings(symbol, timeframe):
-                    flash(f'取引設定を保存しました: {symbol}, {timeframe}', 'success')
+            if currency_pair and timeframe:
+                if save_trading_settings(currency_pair, timeframe):
+                    flash(f'取引設定を保存しました: {currency_pair}, {timeframe}', 'success')
                     success_count += 1
                 else:
                     flash('取引設定の保存に失敗しました', 'error')
@@ -402,14 +405,21 @@ with app.app_context():
                         from models import TradingSettings
                         user.settings = TradingSettings(
                             user_id=user.id,
-                            currency_pair=symbol or 'DOGE_JPY',
-                            trading_enabled=auto_trading
+                            currency_pair=currency_pair or 'DOGE_JPY',
+                            timeframe=timeframe or '5m',
+                            trading_enabled=auto_trading,
+                            stop_loss_percentage=float(stop_loss),
+                            take_profit_percentage=float(take_profit)
                         )
                         db.session.add(user.settings)
                     else:
                         user.settings.trading_enabled = auto_trading
-                        if symbol:
-                            user.settings.currency_pair = symbol
+                        if currency_pair:
+                            user.settings.currency_pair = currency_pair
+                        if timeframe:
+                            user.settings.timeframe = timeframe
+                        user.settings.stop_loss_percentage = float(stop_loss)
+                        user.settings.take_profit_percentage = float(take_profit)
                     
                     db.session.commit()
                     status_msg = "有効" if auto_trading else "無効"

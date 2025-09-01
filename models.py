@@ -44,6 +44,7 @@ def create_models():
         id = db.Column(db.Integer, primary_key=True)
         user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
         currency_pair = db.Column(db.String(20), default='DOGE_JPY')
+        timeframe = db.Column(db.String(10), default='5m')  # 1m, 5m, 15m, 30m, 1h, 4h, 1d
         trading_enabled = db.Column(db.Boolean, default=False)
         investment_amount = db.Column(db.Float, default=0.0)
         risk_level = db.Column(db.String(20), default='medium')  # low, medium, high

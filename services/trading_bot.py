@@ -49,6 +49,24 @@ class TradingBot:
         self.last_trend = None  # Track trend changes for reversal detection
         self.trend_change_threshold = 0.7  # Threshold for strong trend change
     
+    def _get_limit_for_timeframe(self, timeframe):
+        """
+        Get appropriate data limit based on timeframe to cover ~24 hours
+        
+        :param timeframe: Timeframe string (1m, 5m, 15m, 30m, 1h, 4h, 1d)
+        :return: Number of candles to fetch
+        """
+        timeframe_limits = {
+            '1m': 1440,   # 24 hours * 60 minutes
+            '5m': 288,    # 24 hours * 12 (5-min intervals)
+            '15m': 96,    # 24 hours * 4 (15-min intervals)
+            '30m': 48,    # 24 hours * 2 (30-min intervals)
+            '1h': 24,     # 24 hours
+            '4h': 6,      # 24 hours / 4
+            '1d': 30      # 30 days for daily data
+        }
+        return timeframe_limits.get(timeframe, 288)  # Default to 5m settings
+    
     def set_db_session(self, session):
         """
         Set the database session
@@ -193,7 +211,11 @@ class TradingBot:
             
             # Get market data with indicators
             logger.info(f"Fetching market data with indicators for {symbol}...")
-            df = self.data_service.get_data_with_indicators(symbol, interval="1h", limit=100)
+            # Get timeframe from user settings
+            timeframe = self.user.settings.timeframe if self.user.settings.timeframe else "5m"
+            # Calculate appropriate limit based on timeframe
+            limit = self._get_limit_for_timeframe(timeframe)
+            df = self.data_service.get_data_with_indicators(symbol, interval=timeframe, limit=limit)
             
             if df is None or df.empty:
                 logger.error("Failed to get market data, skipping this iteration")
@@ -367,7 +389,11 @@ class TradingBot:
             logger.info(f"Executing reversal {trade_type.upper()} trade: {reason}")
             
             # Get current market indicators for the reversal trade
-            df = self.data_service.get_data_with_indicators(symbol, interval="1h", limit=50)
+            # Get timeframe from user settings
+            timeframe = self.user.settings.timeframe if self.user.settings.timeframe else "5m"
+            # Calculate appropriate limit for reversal trade (half of main limit)
+            limit = self._get_limit_for_timeframe(timeframe) // 2
+            df = self.data_service.get_data_with_indicators(symbol, interval=timeframe, limit=limit)
             if df is not None and not df.empty:
                 last_row = df.iloc[-1].to_dict()
                 self._execute_trade(symbol, trade_type, current_price, last_row)
