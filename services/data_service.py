@@ -32,6 +32,27 @@ class DataService:
         self.cache = {}
         self.cache_timeout = 60  # Cache timeout in seconds
     
+    def _convert_interval_for_api(self, interval):
+        """
+        UI設定の時間足をGMO Coin API形式に変換
+        
+        :param interval: UI設定の間隔 (5m, 1h, etc.)
+        :return: GMO API用の間隔 (5min, 1h, etc.)
+        """
+        conversion_map = {
+            '1m': '1min',
+            '5m': '5min',
+            '15m': '15min',
+            '30m': '30min',
+            '1h': '1h',
+            '4h': '4h',
+            '1d': '1d'
+        }
+        
+        converted = conversion_map.get(interval, interval)
+        logger.info(f"Converting interval: {interval} -> {converted}")
+        return converted
+    
     def get_ticker(self, symbol="DOGE_JPY"):
         """
         Get current ticker information
@@ -69,7 +90,9 @@ class DataService:
         :param force_refresh: 強制的にAPIから新しいデータを取得する
         :return: DataFrame with OHLCV data
         """
-        logger.info(f"Fetching klines data for {symbol}, interval: {interval}, force_refresh: {force_refresh}")
+        # UI設定の時間足をGMO API形式に変換
+        api_interval = self._convert_interval_for_api(interval)
+        logger.info(f"Fetching klines data for {symbol}, interval: {interval} (API: {api_interval}), force_refresh: {force_refresh}")
         
         # 強制更新が指定されていない場合のみデータベースを確認
         if not force_refresh and hasattr(self, 'db_session') and self.db_session:
@@ -100,14 +123,12 @@ class DataService:
                             float(point.volume)
                         ])
                     
-                    # データフレームに変換
-                    df = self._process_klines_data(data_points, limit)
-                    
-                    # キャッシュに保存
-                    cache_key = f"klines_{symbol}_{interval}_{limit}"
-                    self.cache[cache_key] = (datetime.now(), df)
-                    
-                    return df
+                    # 逆順にして時系列を正しく並べる
+                    data_points.reverse()
+                    df = self._convert_klines_to_dataframe(data_points)
+                    if df is not None and not df.empty:
+                        logger.info(f"Successfully loaded {len(df)} data points from database")
+                        return df
             except Exception as db_e:
                 logger.error(f"Error retrieving data from database: {db_e}")
                 # データベース取得に失敗した場合はAPIでフォールバック
@@ -123,7 +144,7 @@ class DataService:
         # APIからデータを取得
         all_klines = []
         
-        logger.info(f"Fetching klines data from API for {symbol}, interval: {interval}")
+        logger.info(f"Fetching klines data from API for {symbol}, interval: {api_interval}")
         
         # GMO Coin APIは過去の日付パラメータが必須
         logger.info(f"Attempting to get historical data with date parameter")
@@ -137,506 +158,212 @@ class DataService:
         
         # 現在から過去に向かって日付を遡る
         for days_ago in range(1, max_days_to_try + 1):
-            try:
-                target_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y%m%d')
-                logger.info(f"Trying to fetch data for date: {target_date}")
-                
-                response = self.api.get_klines(symbol=symbol, interval=interval, date=target_date)
-                
-                # 有効なデータが取得できたか確認
-                if isinstance(response, dict) and 'data' in response:
-                    data = response['data']
-                    
-                    # 少なくともmin_required_datapoints分のデータがあれば成功とみなす
-                    if isinstance(data, dict) and 'candlesticks' in data:
-                        for candle_type in data['candlesticks']:
-                            if candle_type['type'] == interval and len(candle_type['ohlcv']) >= min_required_datapoints:
-                                success = True
-                                logger.info(f"Successfully retrieved sufficient data from date {target_date}")
-                                break
-                    elif isinstance(data, list) and len(data) >= min_required_datapoints:
-                        success = True
-                        logger.info(f"Successfully retrieved {len(data)} data points from date {target_date}")
-                    
-                    # 成功したらループを抜ける
-                    if success:
-                        break
-            except Exception as e:
-                logger.error(f"Error fetching data for date {target_date}: {e}")
-                # エラーが発生しても継続して次の日付を試す
-                continue
-        
-        if isinstance(response, dict) and 'data' in response and isinstance(response['data'], list) and len(response['data']) > 0:
-            logger.info(f"Successfully retrieved {len(response['data'])} candles")
+            target_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y%m%d')
+            logger.info(f"Trying to fetch data for date: {target_date}")
             
-            # レスポンスデータをパース
-            try:
-                for candle in response['data']:
-                    if all(key in candle for key in ['openTime', 'open', 'high', 'low', 'close', 'volume']):
-                        kline_data = [
-                            int(candle['openTime']),  # Unix timestamp in milliseconds
-                            float(candle['open']),
-                            float(candle['high']), 
-                            float(candle['low']),
-                            float(candle['close']),
-                            float(candle['volume'])
-                        ]
-                        all_klines.append(kline_data)
-            except Exception as e:
-                logger.error(f"Error processing candle data: {e}")
-        
-        # まだ十分なデータがない場合、データベースからの取得を再試行
-        if len(all_klines) < limit and hasattr(self, 'db_session') and self.db_session:
-            logger.info(f"Retrieved only {len(all_klines)} candles from API, trying database again")
-            try:
-                from models import MarketData
-                from sqlalchemy import desc
-                market_data = self.db_session.query(MarketData).filter_by(
-                    currency_pair=symbol
-                ).order_by(
-                    desc(MarketData.timestamp)
-                ).limit(limit - len(all_klines)).all()
+            response = self.api.get_klines(symbol=symbol, interval=api_interval, date=target_date)
+            
+            if isinstance(response, dict) and 'data' in response and response['data']:
+                logger.info(f"Successfully fetched {len(response['data'])} data points for date {target_date}")
+                all_klines.extend(response['data'])
+                success = True
                 
-                if market_data:
-                    logger.info(f"Retrieved additional {len(market_data)} records from database")
-                    
-                    for point in market_data:
-                        data_point = [
-                            int(point.timestamp.timestamp() * 1000),  # Unix timestamp in ms
-                            float(point.open_price),
-                            float(point.high_price),
-                            float(point.low_price),
-                            float(point.close_price),
-                            float(point.volume)
-                        ]
-                        # 重複を防ぐために、すでに存在するタイムスタンプをチェック
-                        if not any(existing[0] == data_point[0] for existing in all_klines):
-                            all_klines.append(data_point)
-            except Exception as e:
-                logger.error(f"Error retrieving additional data from database: {e}")
+                # 十分なデータが集まったかチェック
+                if len(all_klines) >= min_required_datapoints:
+                    break
+            else:
+                logger.warning(f"No data for date {target_date}: {response}")
         
-        if not all_klines:
-            logger.warning(f"No historical data retrieved from API for {symbol}")
-            # 現在価格データが取得できればフォールバック処理を実行
-            logger.info("Attempting fallback to ticker-based data generation")
-            # データベースからデータを試す
+        if not success or not all_klines:
+            logger.warning("Failed to get sufficient klines data from API")
+            # フォールバックデータ生成を試行
+            logger.info("Primary data source failed, trying enhanced fallback")
+            df = self._create_enhanced_fallback_data(symbol, interval, limit)
+            if df is not None:
+                return df
+            
+            logger.info(f"Enhanced fallback failed, trying database with resampling to {interval}")
+            # データベースから異なる間隔のデータを取得してリサンプリングを試行
             if hasattr(self, 'db_session') and self.db_session:
-                logger.info("Trying to get data from database")
                 try:
                     from models import MarketData
-                    # データベースからデータを取得
+                    from sqlalchemy import desc
+                    
+                    # より多くのデータを取得（最大500件）
                     market_data = self.db_session.query(MarketData).filter_by(
                         currency_pair=symbol
-                    ).order_by(MarketData.timestamp.desc()).limit(limit).all()
+                    ).order_by(
+                        desc(MarketData.timestamp)
+                    ).limit(500).all()
                     
-                    if market_data and len(market_data) > 0:
-                        logger.info(f"Retrieved {len(market_data)} records from database")
-                        # DataFrame形式に変換
-                        db_data = []
-                        for record in market_data:
-                            db_data.append({
-                                'timestamp': record.timestamp,
-                                'open': record.open_price,
-                                'high': record.high_price,
-                                'low': record.low_price,
-                                'close': record.close_price,
-                                'volume': record.volume
-                            })
-                        df = pd.DataFrame(db_data)
-                        df = df.sort_values('timestamp').reset_index(drop=True)
+                    if market_data and len(market_data) > 10:
+                        logger.info(f"Found {len(market_data)} historical records, attempting to create dataset")
                         
-                        # キャッシュに保存
-                        self.cache[cache_key] = (datetime.now(), df)
-                        return df
-                except Exception as e:
-                    logger.error(f"Error retrieving data from database: {e}")
+                        # データポイントをリストに変換
+                        data_points = []
+                        for point in market_data:
+                            data_points.append([
+                                int(point.timestamp.timestamp() * 1000),
+                                float(point.open_price),
+                                float(point.high_price),
+                                float(point.low_price),
+                                float(point.close_price),
+                                float(point.volume)
+                            ])
+                        
+                        # 逆順にして時系列を正しく並べる
+                        data_points.reverse()
+                        df = self._convert_klines_to_dataframe(data_points)
+                        
+                        if df is not None and not df.empty:
+                            logger.info(f"Successfully created {len(df)} data points from database")
+                            return df
+                except Exception as db_e:
+                    logger.error(f"Error with database fallback: {db_e}")
             
-            # どのようなデータソースからもデータを取得できなかった場合、
-            # リアルタイムのTickerデータからOHLCVデータを構築
-            logger.info("Building OHLCV data from current ticker")
-            
-            # 現在のティッカー情報を取得
-            ticker_data = self.get_ticker(symbol)
-            if ticker_data and isinstance(ticker_data, list) and len(ticker_data) > 0:
-                try:
-                    # 現在の価格を取得
-                    current_price = float(ticker_data[0]['last'])
-                    now = datetime.now()
-                    
-                    # 高値と安値の範囲を設定（実際のボラティリティを模倣）
-                    high_range = float(ticker_data[0]['high']) if 'high' in ticker_data[0] else current_price * 1.02
-                    low_range = float(ticker_data[0]['low']) if 'low' in ticker_data[0] else current_price * 0.98
-                    
-                    # ヒストリカルなOHLCVデータポイントを作成
-                    df_data = []
-                    base_price = current_price
-                    
-                    # 現在から過去へさかのぼってデータポイントを作成
-                    for i in range(limit):
-                        # 間隔に基づいて時間を設定
-                        if interval == '1min':
-                            timestamp = now - timedelta(minutes=(limit - i - 1))
-                        elif interval == '5min':
-                            timestamp = now - timedelta(minutes=5 * (limit - i - 1))
-                        elif interval == '15min':
-                            timestamp = now - timedelta(minutes=15 * (limit - i - 1))
-                        elif interval == '1h':
-                            timestamp = now - timedelta(hours=(limit - i - 1))
-                        elif interval == '4h':
-                            timestamp = now - timedelta(hours=4 * (limit - i - 1))
-                        else:  # 1d
-                            timestamp = now - timedelta(days=(limit - i - 1))
-                        
-                        # 実際のデータの傾向を模倣
-                        # 短期的に不規則だが、基本的に現在の価格に収束する
-                        price_change = random.uniform(-0.01, 0.01) * (1 - i/limit)
-                        
-                        # 現在の価格に近づくように調整
-                        target_factor = i / limit  # 0から1の値（0=過去、1=現在）
-                        adjusted_price = base_price * (1 - target_factor) + current_price * target_factor
-                        
-                        # OHLCデータポイントを計算
-                        open_price = adjusted_price * (1 + price_change * 0.5)
-                        close_price = adjusted_price * (1 + price_change)
-                        high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.005))
-                        low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.005))
-                        
-                        # 最後のポイントは現在の価格に合わせる
-                        if i == limit - 1:
-                            close_price = current_price
-                            high_price = max(high_range, close_price)
-                            low_price = min(low_range, close_price)
-                        
-                        # ボリューム（出来高）
-                        volume = float(ticker_data[0]['volume']) / limit if 'volume' in ticker_data[0] else random.uniform(1000, 10000)
-                        
-                        # 次の価格計算のための基準
-                        base_price = close_price
-                        
-                        df_data.append({
-                            'timestamp': timestamp,
-                            'open': open_price,
-                            'high': high_price,
-                            'low': low_price,
-                            'close': close_price,
-                            'volume': volume
-                        })
-                    
-                    # DataFrameに変換
-                    df = pd.DataFrame(df_data)
-                    
-                    # キャッシュに保存
-                    self.cache[cache_key] = (datetime.now(), df)
-                    
-                    # 生成したデータをデータベースに保存（将来の参照用）
-                    if hasattr(self, 'db_session') and self.db_session:
-                        self.save_market_data_to_db(df, symbol, self.db_session)
-                    
-                    return df
-                    
-                except Exception as e:
-                    logger.error(f"Error building data from ticker: {e}")
-            
-            # すべての方法が失敗した場合
-            logger.error("No data available from any source")
+            logger.error("All data sources failed")
             return None
-            
-            # 実際の本番環境ではこの行が実行されます
-            # logger.error("No data available from API or database")
-            # return None
+        
+        # データを制限
+        if len(all_klines) > limit:
+            all_klines = all_klines[-limit:]
+        
+        logger.info(f"Processing {len(all_klines)} klines data points")
         
         # Convert to DataFrame
-        # Use a dict to create DataFrame to avoid column type issues
-        df_data = []
-        for kline in all_klines:
-            if len(kline) >= 6:  # Make sure we have all required fields
-                df_data.append({
-                    'timestamp': kline[0],
-                    'open': kline[1],
-                    'high': kline[2],
-                    'low': kline[3],
-                    'close': kline[4],
-                    'volume': kline[5]
-                })
+        df = self._convert_klines_to_dataframe(all_klines)
         
-        df = pd.DataFrame(df_data)
-        
-        # Convert timestamp to numeric first to avoid deprecation warning
-        df['timestamp'] = pd.to_numeric(df['timestamp'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        
-        # Convert string values to float
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
-        
-        # Sort by timestamp and limit to requested number of candles
-        df = df.sort_values('timestamp').tail(limit).reset_index(drop=True)
-        
-        # Cache the result
-        self.cache[cache_key] = (datetime.now(), df)
-        
-        return df
-    
-    def resample_ohlcv_data(self, df, interval):
-        """
-        データフレームを指定された時間間隔にリサンプリングする
-        
-        :param df: リサンプリングするデータフレーム（timestampカラムを含む）
-        :param interval: 目標の時間間隔 (5min, 15min, 30min, 1h, 4h, 1d)
-        :return: リサンプリングされたデータフレーム
-        """
-        if df is None or df.empty:
-            logger.warning("リサンプリング対象のデータフレームが空です")
+        if df is not None:
+            # Cache the result
+            self.cache[cache_key] = (datetime.now(), df)
             return df
+        else:
+            logger.error("Failed to convert klines data to DataFrame")
+            return None
+    
+    def _convert_klines_to_dataframe(self, klines_data):
+        """
+        Convert klines data to DataFrame
         
-        # データの範囲を記録
-        start_date = df['timestamp'].min()
-        end_date = df['timestamp'].max()
-        logger.info(f"リサンプリング元データ範囲: {start_date} から {end_date} まで、{len(df)}件")
-        
-        # リサンプリング前にNaNや重複データをチェック・クリーニング
-        df = df.dropna(subset=['timestamp', 'open', 'high', 'low', 'close'])
-        df = df.drop_duplicates(subset=['timestamp'])
-        
-        # リサンプリング前に一時的なインデックスを設定
-        df_copy = df.copy()
-        df_copy.set_index('timestamp', inplace=True)
-        
-        # 間隔を pandas のリサンプリング文字列に変換
-        resample_map = {
-            '1min': '1min',
-            '5min': '5min',
-            '15min': '15min',
-            '30min': '30min',
-            '1h': '1H',
-            '4h': '4H',
-            '8h': '8H',
-            '12h': '12H',
-            '1d': '1D',
-            '1w': '1W'
-        }
-        
-        if interval not in resample_map:
-            logger.warning(f"Unknown interval {interval}, using 1h")
-            interval = '1h'
-        
-        resample_rule = resample_map[interval]
-        logger.info(f"リサンプリングルール: {resample_rule}")
-        
+        :param klines_data: List of klines data
+        :return: DataFrame with OHLCV data
+        """
         try:
-            # リサンプリングとOHLCの計算
-            resampled = df_copy.resample(resample_rule).agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum'
-            })
+            # Create DataFrame from klines data
+            df = pd.DataFrame(klines_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             
-            # リサンプリング後の処理
-            resampled.reset_index(inplace=True)
-            resampled = resampled.dropna()
+            # Convert data types
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
             
-            # データポイントの減少を記録（デバッグ用）
-            data_reduction = (1 - len(resampled) / len(df)) * 100 if len(df) > 0 else 0
-            logger.info(f"リサンプリング後: {len(resampled)}件 (元データから{data_reduction:.1f}%削減)")
+            # Remove any invalid data
+            df = df.dropna()
             
-            if len(resampled) > 0:
-                logger.info(f"リサンプリング後の範囲: {resampled['timestamp'].min()} から {resampled['timestamp'].max()} まで")
-            else:
-                logger.warning("リサンプリング後のデータが空です")
-                return df  # リサンプリングが失敗した場合、元のデータを返す
+            if df.empty:
+                logger.warning("No valid data after conversion")
+                return None
             
-            # 必要なカラムのみを含む新しいDataFrameを返す（直近のデータを優先的に返す）
-            result_df = resampled[['timestamp', 'open', 'high', 'low', 'close', 'volume']].tail(min(len(resampled), 100))
-            return result_df
+            # Sort by timestamp
+            df = df.sort_values('timestamp').reset_index(drop=True)
+            
+            logger.info(f"Converted {len(df)} klines data points to DataFrame")
+            return df
             
         except Exception as e:
-            logger.error(f"リサンプリング中にエラーが発生しました: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return df  # エラーが発生した場合、元のデータを返す
+            logger.error(f"Error converting klines to DataFrame: {e}")
+            return None
     
-    def get_data_with_indicators(self, symbol="XRP_JPY", interval="1h", limit=100, force_refresh=False):
+    def get_data_with_indicators(self, symbol="DOGE_JPY", interval="1h", limit=100, force_refresh=False):
         """
-        Get market data with all technical indicators calculated
+        Get market data with technical indicators
         
         :param symbol: Trading pair symbol
         :param interval: Time interval
-        :param limit: Number of candles to fetch
-        :param force_refresh: 強制的にAPIから新しいデータを取得する
-        :return: DataFrame with market data and indicators
+        :param limit: Number of data points
+        :param force_refresh: Force refresh from API
+        :return: DataFrame with OHLCV data and technical indicators
         """
         logger.info(f"Getting data with indicators for {symbol}, interval={interval}, force_refresh={force_refresh}")
         
-        # First try to get current price from ticker API
-        current_ticker = self.get_ticker(symbol)
-        current_price = None
-        if current_ticker and isinstance(current_ticker, list) and len(current_ticker) > 0:
-            try:
-                current_price = float(current_ticker[0]['last'])
-                logger.info(f"Current price from ticker: {current_price}")
-            except (KeyError, ValueError, IndexError) as e:
-                logger.warning(f"Could not get current price from ticker: {e}")
+        # Get raw klines data
+        df = self.get_klines(symbol, interval, limit, force_refresh)
         
-        # API経由で取得を試みる
-        df = self.get_klines(symbol, interval, limit, force_refresh=force_refresh)
-        
-        # If we got historical data and current price, update the last row with current price
-        if df is not None and not df.empty and current_price is not None:
-            logger.info("Updating last candle with current price")
-            # Update the last row's close price to current price
-            df.iloc[-1, df.columns.get_loc('close')] = current_price
-            # Also update high and low if current price exceeds them
-            last_high = df.iloc[-1]['high']
-            last_low = df.iloc[-1]['low']
-            if current_price > last_high:
-                df.iloc[-1, df.columns.get_loc('high')] = current_price
-            if current_price < last_low:
-                df.iloc[-1, df.columns.get_loc('low')] = current_price
-        
-        # APIから取得できない場合は、まず強化されたフォールバックを試す
         if df is None or df.empty:
-            logger.info("Primary data source failed, trying enhanced fallback")
-            df = self._create_enhanced_fallback_data(symbol, interval, limit)
-            
-        # 強化されたフォールバックも失敗した場合、データベースからデータを取得してリサンプリング
-        if (df is None or df.empty) and hasattr(self, 'db_session') and self.db_session:
-            logger.info(f"Enhanced fallback failed, trying database with resampling to {interval}")
-            try:
-                # 時間足に応じて、より多くのデータポイントを取得
-                record_limit = 500  # リサンプリングのため多めにデータを取得
-                
-                # データベースから十分なデータを取得
-                from models import MarketData
-                from sqlalchemy import desc
-                market_data = self.db_session.query(MarketData).filter_by(
-                    currency_pair=symbol
-                ).order_by(
-                    desc(MarketData.timestamp)
-                ).limit(record_limit).all()
-                
-                if market_data and len(market_data) > 0:
-                    logger.info(f"Found {len(market_data)} records in database for resampling")
-                    
-                    # データポイントをDataFrameに変換
-                    data_points = []
-                    for point in market_data:
-                        data_points.append({
-                            'timestamp': point.timestamp,
-                            'open': float(point.open_price),
-                            'high': float(point.high_price),
-                            'low': float(point.low_price),
-                            'close': float(point.close_price),
-                            'volume': float(point.volume)
-                        })
-                    
-                    df_from_db = pd.DataFrame(data_points)
-                    # 昇順にソート（古い→新しい）
-                    df_from_db = df_from_db.sort_values('timestamp').reset_index(drop=True)
-                    
-                    logger.info(f"Data range: from {df_from_db['timestamp'].min()} to {df_from_db['timestamp'].max()}")
-                    
-                    # 指定された時間間隔にリサンプリング
-                    df = self.resample_ohlcv_data(df_from_db, interval)
-                    
-                    # 必要なレコード数を確保するためにさらに多くのデータを取得
-                    if df is not None and len(df) < limit:
-                        logger.info(f"After resampling, only got {len(df)} records, need {limit}")
-                        # より多くのデータを取得してリサンプリング
-                        large_limit = record_limit * 2
-                        more_data = self.db_session.query(MarketData).filter_by(
-                            currency_pair=symbol
-                        ).order_by(
-                            desc(MarketData.timestamp)
-                        ).limit(large_limit).all()
-                        
-                        if more_data and len(more_data) > len(market_data):
-                            logger.info(f"Found {len(more_data)} additional records in database")
-                            
-                            extended_data_points = []
-                            for point in more_data:
-                                extended_data_points.append({
-                                    'timestamp': point.timestamp,
-                                    'open': float(point.open_price),
-                                    'high': float(point.high_price),
-                                    'low': float(point.low_price),
-                                    'close': float(point.close_price),
-                                    'volume': float(point.volume)
-                                })
-                            
-                            extended_df = pd.DataFrame(extended_data_points)
-                            extended_df = extended_df.sort_values('timestamp').reset_index(drop=True)
-                            df = self.resample_ohlcv_data(extended_df, interval)
-                    
-                    logger.info(f"Successfully resampled {len(df) if df is not None else 0} data points to {interval}")
-            except Exception as e:
-                logger.error(f"Error resampling data: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
+            logger.error("Failed to get klines data")
+            return None
         
-        if df is not None and not df.empty:
-            # テクニカル指標の計算
-            df_with_indicators = TechnicalIndicators.calculate_all_indicators(df)
-            return df_with_indicators
-        
-        return None
-    
-    def _process_klines_data(self, data_points, limit):
-        """
-        データポイントをデータフレームに処理する内部メソッド
-        
-        :param data_points: 処理するデータポイントのリスト
-        :param limit: 制限する行数
-        :return: 処理されたDataFrame
-        """
-        # Convert to DataFrame
-        df = pd.DataFrame(data_points, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        
-        # Convert timestamp to datetime
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        
-        # Sort by timestamp and limit to requested number of candles
-        df = df.sort_values('timestamp').tail(limit).reset_index(drop=True)
-        
-        return df
-        
-    def save_market_data_to_db(self, df, symbol, db_session):
-        """
-        Save market data to database
-        
-        :param df: DataFrame with OHLCV data
-        :param symbol: Trading pair symbol
-        :param db_session: Database session
-        :return: Boolean indicating success
-        """
         try:
-            for _, row in df.iterrows():
-                # 既存のデータをチェック
-                from models import MarketData
-                existing = db_session.query(MarketData).filter_by(
-                    currency_pair=symbol,
-                    timestamp=row['timestamp']
-                ).first()
-                
-                if not existing:
-                    # 新しいMarketDataオブジェクトを作成
-                    market_data = MarketData()
-                    market_data.currency_pair = symbol
-                    market_data.timestamp = row['timestamp']
-                    market_data.open_price = float(row['open'])
-                    market_data.high_price = float(row['high'])
-                    market_data.low_price = float(row['low'])
-                    market_data.close_price = float(row['close'])
-                    market_data.volume = float(row['volume'])
-                    db_session.add(market_data)
+            # Update the last candle with current ticker price if available
+            logger.info("Updating last candle with current price")
+            ticker_data = self.get_ticker(symbol)
+            if ticker_data and len(ticker_data) > 0:
+                current_price = float(ticker_data[0]['last'])
+                # Update the last row's close price to current price
+                df.iloc[-1, df.columns.get_loc('close')] = current_price
+                logger.info(f"Updated last candle close price to current: {current_price}")
             
-            db_session.commit()
-            return True
+            # Add technical indicators
+            df_with_indicators = TechnicalIndicators.add_all_indicators(df)
+            logger.info("All technical indicators added successfully")
+            
+            return df_with_indicators
             
         except Exception as e:
-            db_session.rollback()
-            logger.error(f"Error saving market data to database: {e}")
+            logger.error(f"Error adding indicators: {e}")
+            return df
+    
+    def get_account_margin(self):
+        """
+        Get margin account information
+        
+        :return: Margin account data
+        """
+        try:
+            return self.api.get_account_margin()
+        except Exception as e:
+            logger.error(f"Error getting margin account: {e}")
+            return None
+    
+    def get_positions(self, symbol=None):
+        """
+        Get open positions
+        
+        :param symbol: Trading pair symbol (optional filter)
+        :return: Positions data
+        """
+        try:
+            return self.api.get_positions(symbol)
+        except Exception as e:
+            logger.error(f"Error getting positions: {e}")
+            return None
+    
+    def close_position(self, position_id, size=None):
+        """
+        Close a specific position
+        
+        :param position_id: Position ID to close
+        :param size: Size to close (optional, closes all if not specified)
+        :return: Close order result
+        """
+        try:
+            return self.api.close_position(position_id, size)
+        except Exception as e:
+            logger.error(f"Error closing position: {e}")
+            return None
+    
+    def close_all_positions_by_symbol(self, symbol, side=None):
+        """
+        Close all positions for a symbol
+        
+        :param symbol: Trading pair symbol
+        :param side: Position side to close (BUY/SELL), all if None
+        :return: Close results
+        """
+        try:
+            return self.api.close_all_positions_by_symbol(symbol, side)
+        except Exception as e:
+            logger.error(f"Error closing all positions: {e}")
             return False
     
     def _create_enhanced_fallback_data(self, symbol="DOGE_JPY", interval="1h", limit=100):
@@ -666,18 +393,20 @@ class DataService:
             
             # 生成时间间隔
             now = datetime.now()
-            if interval == '1min':
+            if interval in ['1min', '1m']:
                 time_delta = timedelta(minutes=1)
-            elif interval == '5min':
+            elif interval in ['5min', '5m']:
                 time_delta = timedelta(minutes=5)
-            elif interval == '15min':
+            elif interval in ['15min', '15m']:
                 time_delta = timedelta(minutes=15)
-            elif interval == '30min':
+            elif interval in ['30min', '30m']:
                 time_delta = timedelta(minutes=30)
-            elif interval == '1h':
+            elif interval in ['1h']:
                 time_delta = timedelta(hours=1)
-            elif interval == '4h':
+            elif interval in ['4h']:
                 time_delta = timedelta(hours=4)
+            elif interval in ['1d']:
+                time_delta = timedelta(days=1)
             else:  # Default to 1h
                 time_delta = timedelta(hours=1)
             
@@ -722,32 +451,83 @@ class DataService:
                     high_candle = max(high_candle, current_price)
                     low_candle = min(low_candle, current_price)
                 
-                # 生成成交量（基于价格变动）
-                price_change = abs(close_price - open_price) / open_price
-                volume_multiplier = 1 + price_change * 2  # 价格变动越大，成交量越大
-                candle_volume = volume * random.uniform(0.5, 1.5) * volume_multiplier
+                # 生成相对现实的成交量（基于当天成交量）
+                volume_variation = random.uniform(0.5, 1.5)
+                adjusted_volume = volume * volume_variation * random.uniform(0.8, 1.2)
                 
-                df_data.append({
-                    'timestamp': timestamp,
-                    'open': max(0.001, open_price),
-                    'high': max(0.001, high_candle),
-                    'low': max(0.001, low_candle),
-                    'close': max(0.001, close_price),
-                    'volume': max(1, candle_volume)
-                })
+                df_data.append([
+                    int(timestamp.timestamp() * 1000),  # timestamp
+                    round(open_price, 3),               # open
+                    round(high_candle, 3),              # high
+                    round(low_candle, 3),               # low
+                    round(close_price, 3),              # close
+                    int(adjusted_volume)                # volume
+                ])
             
             # 转换为DataFrame
-            df = pd.DataFrame(df_data)
-            df = df.sort_values('timestamp').reset_index(drop=True)
+            df = self._convert_klines_to_dataframe(df_data)
             
-            logger.info(f"Enhanced fallback data created: {len(df)} records")
-            logger.info(f"Price range: {df['low'].min():.3f} - {df['high'].max():.3f}")
-            logger.info(f"Final close price: {df.iloc[-1]['close']:.3f} (target: {current_price:.3f})")
-            
-            return df
+            if df is not None and not df.empty:
+                logger.info(f"Enhanced fallback data created: {len(df)} records")
+                # Cache the result
+                cache_key = f"klines_{symbol}_{interval}_{limit}"
+                self.cache[cache_key] = (datetime.now(), df)
+                return df
             
         except Exception as e:
             logger.error(f"Error creating enhanced fallback data: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return None
+            
+        return None
+    
+    def save_market_data_to_db(self, symbol, df):
+        """
+        Save market data to database for future use
+        
+        :param symbol: Trading pair symbol
+        :param df: DataFrame with market data
+        :return: Success status
+        """
+        if not hasattr(self, 'db_session') or not self.db_session:
+            logger.warning("No database session available, cannot save market data")
+            return False
+        
+        try:
+            from models import MarketData
+            
+            # データベースに保存（既存データとの重複を避ける）
+            saved_count = 0
+            for _, row in df.iterrows():
+                # 既存データをチェック
+                existing = self.db_session.query(MarketData).filter_by(
+                    currency_pair=symbol,
+                    timestamp=row['timestamp']
+                ).first()
+                
+                if not existing:
+                    market_data = MarketData(
+                        currency_pair=symbol,
+                        timestamp=row['timestamp'],
+                        open_price=row['open'],
+                        high_price=row['high'],
+                        low_price=row['low'],
+                        close_price=row['close'],
+                        volume=row['volume']
+                    )
+                    self.db_session.add(market_data)
+                    saved_count += 1
+            
+            if saved_count > 0:
+                self.db_session.commit()
+                logger.info(f"Saved {saved_count} new market data points to database")
+            else:
+                logger.info("No new market data to save")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving market data to database: {e}")
+            try:
+                self.db_session.rollback()
+            except:
+                pass
+            return False

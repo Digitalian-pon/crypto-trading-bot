@@ -138,13 +138,14 @@ class FixedTradingBot:
             self.running = False
             return
         
-        # Get the trading pair from settings
+        # Get the trading pair and timeframe from settings
         symbol = self.user.settings.currency_pair
-        logger.info(f"Processing currency pair: {symbol}")
+        timeframe = getattr(self.user.settings, 'timeframe', '5m')  # デフォルト5分足
+        logger.info(f"Processing currency pair: {symbol}, timeframe: {timeframe}")
         
         # Get market data with indicators
-        logger.info(f"Fetching market data with indicators for {symbol}...")
-        df = self.data_service.get_data_with_indicators(symbol, interval="1h", limit=100)
+        logger.info(f"Fetching market data with indicators for {symbol} ({timeframe})...")
+        df = self.data_service.get_data_with_indicators(symbol, interval=timeframe, limit=100)
         
         if df is None or df.empty:
             logger.error("Failed to get market data, skipping this iteration")
