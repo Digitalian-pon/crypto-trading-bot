@@ -249,13 +249,32 @@ class DataService:
         :return: DataFrame with OHLCV data
         """
         try:
-            # Create DataFrame from klines data
-            df = pd.DataFrame(klines_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            if not klines_data:
+                logger.warning("No klines data provided")
+                return None
             
-            # Convert data types
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+            # Check if data is in dictionary format (new GMO API format)
+            if isinstance(klines_data[0], dict):
+                # Convert dictionary format to DataFrame
+                df_data = []
+                for item in klines_data:
+                    df_data.append({
+                        'timestamp': pd.to_datetime(int(item['openTime']), unit='ms'),
+                        'open': float(item['open']),
+                        'high': float(item['high']),
+                        'low': float(item['low']),
+                        'close': float(item['close']),
+                        'volume': float(item['volume'])
+                    })
+                df = pd.DataFrame(df_data)
+            else:
+                # Old format - Create DataFrame from klines data
+                df = pd.DataFrame(klines_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                
+                # Convert data types
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
             
             # Remove any invalid data
             df = df.dropna()
@@ -272,6 +291,7 @@ class DataService:
             
         except Exception as e:
             logger.error(f"Error converting klines to DataFrame: {e}")
+            logger.error(f"Sample data: {klines_data[:2] if klines_data else 'None'}")
             return None
     
     def get_data_with_indicators(self, symbol="DOGE_JPY", interval="1h", limit=100, force_refresh=False):
