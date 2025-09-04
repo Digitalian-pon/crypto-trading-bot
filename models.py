@@ -68,6 +68,8 @@ def create_models():
         profit_loss = db.Column(db.Float)
         indicators_data = db.Column(db.JSON)  # Store indicators values at trade time
         closed_at = db.Column(db.DateTime)
+        exchange_position_id = db.Column(db.String(50))  # For leverage positions
+        created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
         
         def __repr__(self):
             return f'<Trade {self.id} {self.trade_type} {self.currency_pair}>'

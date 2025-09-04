@@ -215,6 +215,12 @@ with app.app_context():
             balance_data = api.get_account_balance() if api_key and api_secret else None
             logger.info(f"Balance data success: {bool(balance_data and balance_data.get('data'))}")
             
+            # Get user settings
+            user = User.query.filter_by(username='trading_user').first()
+            settings = None
+            if user:
+                settings = TradingSettings.query.filter_by(user_id=user.id).first()
+            
             dashboard_data = {
                 'ticker': ticker_data,
                 'balance': balance_data,
@@ -227,7 +233,7 @@ with app.app_context():
                 'available_timeframes': available_timeframes
             }
             
-            return render_template('simple_dashboard.html', data=dashboard_data)
+            return render_template('simple_dashboard.html', data=dashboard_data, settings=settings)
             
         except Exception as e:
             logger.error(f"Dashboard error: {e}")

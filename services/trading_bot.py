@@ -405,17 +405,34 @@ class TradingBot:
     
     def _get_exchange_positions(self, symbol):
         """
-        Get current positions from the exchange
+        Get current positions from the exchange (including leverage positions)
         
         :param symbol: Trading symbol
         :return: List of positions
         """
         try:
-            # Get account balance to check for positions
+            positions = []
+            
+            # First check leverage positions (建玉)
+            leverage_positions = self.api.get_positions(symbol)
+            logger.info(f"Leverage positions response: {leverage_positions}")
+            
+            if 'data' in leverage_positions and 'list' in leverage_positions['data']:
+                for pos in leverage_positions['data']['list']:
+                    positions.append({
+                        'symbol': symbol,
+                        'type': pos['side'].lower(),  # 'BUY' or 'SELL' -> 'buy' or 'sell'
+                        'amount': float(pos['size']),
+                        'side': pos['side'].lower(),
+                        'position_id': pos['positionId'],
+                        'price': float(pos['price'])
+                    })
+                    logger.info(f"Found leverage position: {pos['side']} {pos['size']} {symbol} at {pos['price']}")
+            
+            # Also check spot balance for buy positions
             balance_response = self.api.get_account_balance()
             
             if 'data' in balance_response:
-                positions = []
                 crypto_symbol = symbol.split('_')[0]  # Get crypto part (e.g., DOGE from DOGE_JPY)
                 
                 for asset in balance_response['data']:
@@ -427,12 +444,12 @@ class TradingBot:
                             'amount': float(asset['available']),
                             'side': 'long'
                         })
-                        logger.info(f"Found {crypto_symbol} position: {asset['available']} units")
+                        logger.info(f"Found spot position: {crypto_symbol} {asset['available']} units")
                 
                 return positions
             else:
                 logger.warning(f"Could not get account balance: {balance_response}")
-                return []
+                return positions  # Return leverage positions even if balance fails
                 
         except Exception as e:
             logger.error(f"Error getting exchange positions: {e}")
@@ -467,9 +484,13 @@ class TradingBot:
                     new_trade.currency_pair = symbol
                     new_trade.trade_type = position['type']
                     new_trade.amount = position['amount']
-                    new_trade.price = 0  # We don't know the original price
+                    new_trade.price = position.get('price', 0)  # Use actual price if available
                     new_trade.status = 'open'
                     new_trade.created_at = datetime.utcnow()
+                    
+                    # Add leverage-specific info if available
+                    if 'position_id' in position:
+                        new_trade.exchange_position_id = position['position_id']
                     
                     self.db_session.add(new_trade)
                     self.db_session.commit()
@@ -539,12 +560,25 @@ class TradingBot:
             
             logger.info(f"注文数量を調整: {trade.currency_pair}, {trade.amount} → {size_str}")
             
-            result = self.api.place_order(
-                symbol=trade.currency_pair,
-                side=close_side,
-                execution_type="MARKET",
-                size=size_str  # 文字列として渡して小数点桁数を明示的に制御
-            )
+            # Check if this is a leverage position (has exchange_position_id)
+            if hasattr(trade, 'exchange_position_id') and trade.exchange_position_id:
+                # Use leverage position close API
+                logger.info(f"Closing leverage position {trade.exchange_position_id} with amount {size_str}")
+                result = self.api.close_position(
+                    symbol=trade.currency_pair,
+                    side=close_side,
+                    execution_type="MARKET", 
+                    size=size_str,
+                    position_id=trade.exchange_position_id
+                )
+            else:
+                # Use regular spot order API
+                result = self.api.place_order(
+                    symbol=trade.currency_pair,
+                    side=close_side,
+                    execution_type="MARKET",
+                    size=size_str  # 文字列として渡して小数点桁数を明示的に制御
+                )
             
             # API エラーの場合はログに記録
             if 'error' in result:

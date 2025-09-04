@@ -138,7 +138,13 @@
                         </div>
                         <small class="text-muted">
                             <i class="fas fa-info-circle me-1"></i>
-                            自動取引は設定ページで有効にできます。現在は監視モードです。
+                            <span id="trading-status-text">
+                                {% if settings and settings.trading_enabled %}
+                                    自動取引が有効です。実取引実行中。
+                                {% else %}
+                                    自動取引は設定ページで有効にできます。現在は監視モードです。
+                                {% endif %}
+                            </span>
                         </small>
                     </div>
                 </div>

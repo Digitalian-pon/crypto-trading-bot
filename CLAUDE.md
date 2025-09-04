@@ -230,9 +230,43 @@ GMO_API_SECRET = /YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCB
 - **修正ファイル**: `models.py`, `app.py`, `services/trading_bot.py`, `templates/simple_settings.html`
 - **GitHubコミット**: 48a9b5a - 動的シンボル・時間足UI制御追加
 
+## 🚨 APIエラー完全修復作業記録 (2025年9月3日)
+### 問題概要：
+- **GMO Coin APIエラー**: ERR-5012 Invalid API-KEY, IP, or permissions for action
+- **実取引停止**: API認証失敗により全取引機能停止
+- **データ処理エラー**: 新しいAPI レスポンス形式に非対応
+
+### 実施した修復：
+1. **APIキー修正** (`setting.ini`)
+   - 間違ったAPIキー `thuyoshi1`/`thuyoshi123` を正しい値に更新
+   - 環境変数と設定ファイルの整合性確保
+
+2. **データ処理システム強化** (`services/data_service.py`)
+   - GMO Coin APIの新しい辞書形式レスポンスに対応
+   - `_convert_klines_to_dataframe()` メソッド完全刷新
+   - 後方互換性維持（旧形式・新形式両対応）
+
+3. **システム稼働確認**
+   - API接続テスト: ✅ 正常
+   - データ取得: ✅ 100データポイント成功
+   - テクニカル指標: ✅ 全指標正常計算
+   - ボット起動: ✅ 完全稼働
+
+### 修復結果：
+- **API接続**: ✅ 完全復旧（ERR-5012解決）
+- **現在残高**: 1,623 JPY（利用可能）
+- **証拠金維持率**: 120.2%（正常）
+- **既存ポジション**: DOGE_JPY SELL 90単位（含み益+300円）
+- **シグナル検出**: ✅ 60秒間隔で正常動作
+- **実取引準備**: ✅ 買いシグナル発生時に自動実行可能
+
+### 技術詳細：
+- **修正ファイル**: `services/data_service.py`, `setting.ini`
+- **GitHubコミット**: 85824bf - API認証・データ処理エラー修復完了
+
 ---
-**最終更新**: 2025年9月1日  
-**ステータス**: 24時間完全稼働中 ✅ (動的UI制御機能搭載・時間足変更対応)  
+**最終更新**: 2025年9月3日  
+**ステータス**: 24時間完全稼働中 ✅ (API修復済み・実取引準備完了)  
 **現在時間足**: 5分足 (UI変更可能)  
 **現在通貨ペア**: DOGE/JPY (UI変更可能)  
-**GitHubコミット**: 48a9b5a - 動的UI制御機能実装完了
+**GitHubコミット**: 85824bf - API認証・データ処理エラー完全修復
