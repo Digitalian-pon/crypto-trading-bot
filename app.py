@@ -216,6 +216,7 @@ with app.app_context():
             logger.info(f"Balance data success: {bool(balance_data and balance_data.get('data'))}")
             
             # Get user settings
+            from models import User, TradingSettings
             user = User.query.filter_by(username='trading_user').first()
             settings = None
             if user:
