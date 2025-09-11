@@ -157,6 +157,12 @@ class FixedTradingBot:
         from models import Trade
         active_trades = []
         
+        # First check for exchange positions and sync with database
+        exchange_positions = self._get_exchange_positions(symbol)
+        if exchange_positions:
+            logger.info(f"Found {len(exchange_positions)} positions on exchange")
+            self._sync_exchange_positions(exchange_positions, symbol)
+        
         if self.db_session:
             try:
                 user_id = self.user.id
@@ -166,13 +172,18 @@ class FixedTradingBot:
                     status='open'
                 ).all()
                 
-                logger.info(f"Found {len(active_trades)} active trades")
+                logger.info(f"Found {len(active_trades)} active trades in database")
             except Exception as db_e:
                 logger.error(f"Database error while querying active trades: {db_e}")
                 try:
                     self.db_session.rollback()
                 except:
                     pass
+                    
+        # If no DB trades but exchange positions exist, use exchange data for closing
+        if len(active_trades) == 0 and exchange_positions:
+            logger.info("Using exchange positions for trade management")
+            self._check_exchange_positions_for_closing(exchange_positions, current_price, latest_indicators)
         
         # Check current price and existing trades
         current_price = df['close'].iloc[-1]
@@ -494,3 +505,199 @@ class FixedTradingBot:
         except Exception as e:
             logger.error(f"Error checking major trend reversal: {e}")
             return None
+    
+    def _get_exchange_positions(self, symbol):
+        """Get current positions from the exchange"""
+        try:
+            response = self.api.get_positions(symbol=symbol)
+            if response.get('status') == 0 and response.get('data'):
+                positions = response['data'].get('list', [])
+                logger.info(f"Retrieved {len(positions)} positions from exchange for {symbol}")
+                return positions
+            else:
+                logger.info(f"No positions found on exchange: {response}")
+                return []
+        except Exception as e:
+            logger.error(f"Error getting exchange positions: {e}")
+            return []
+    
+    def _sync_exchange_positions(self, exchange_positions, symbol):
+        """Sync exchange positions with database"""
+        if not self.db_session:
+            return
+            
+        try:
+            from models import Trade
+            from datetime import datetime
+            
+            for position in exchange_positions:
+                position_id = position.get('positionId')
+                side = position.get('side', '').lower()  # 'BUY' or 'SELL'
+                size = float(position.get('size', 0))
+                price = float(position.get('price', 0))
+                
+                # Check if this position already exists in database
+                existing_trade = self.db_session.query(Trade).filter_by(
+                    exchange_position_id=position_id,
+                    currency_pair=symbol
+                ).first()
+                
+                if not existing_trade:
+                    # Create new trade record
+                    new_trade = Trade()
+                    new_trade.user_id = self.user.id
+                    new_trade.currency_pair = symbol
+                    new_trade.trade_type = side
+                    new_trade.amount = size
+                    new_trade.price = price
+                    new_trade.status = 'open'
+                    new_trade.exchange_position_id = position_id
+                    new_trade.created_at = datetime.utcnow()
+                    
+                    self.db_session.add(new_trade)
+                    logger.info(f"Synced new {side.upper()} position: {size} {symbol} at {price}")
+            
+            self.db_session.commit()
+            logger.info("Exchange positions synced with database")
+            
+        except Exception as e:
+            logger.error(f"Error syncing exchange positions: {e}")
+            if self.db_session:
+                try:
+                    self.db_session.rollback()
+                except:
+                    pass
+    
+    def _check_exchange_positions_for_closing(self, exchange_positions, current_price, market_indicators):
+        """Check exchange positions for closing without database dependency"""
+        logger.info(f"Checking {len(exchange_positions)} exchange positions for closing")
+        
+        for position in exchange_positions:
+            side = position.get('side', '').lower()
+            size = float(position.get('size', 0))
+            entry_price = float(position.get('price', 0))
+            position_id = position.get('positionId')
+            
+            # Calculate current P/L
+            if side == 'buy':
+                pl_ratio = (current_price - entry_price) / entry_price * 100
+            else:
+                pl_ratio = (entry_price - current_price) / entry_price * 100
+            
+            logger.info(f"Position {position_id} ({side.upper()}): Entry={entry_price}, Current={current_price}, P/L={pl_ratio:.2f}%")
+            
+            # Check for opposite signals
+            should_close, reason = self._should_close_exchange_position(position, current_price, market_indicators)
+            
+            if should_close:
+                logger.info(f"Closing exchange position {position_id} due to: {reason}")
+                self._close_exchange_position(position, current_price, reason)
+    
+    def _should_close_exchange_position(self, position, current_price, market_indicators):
+        """Determine if an exchange position should be closed"""
+        if not market_indicators:
+            return False, "No market data"
+            
+        side = position.get('side', '').lower()
+        entry_price = float(position.get('price', 0))
+        
+        # Get indicators
+        rsi = market_indicators.get('rsi_14', 50)
+        macd_line = market_indicators.get('macd_line', 0)
+        macd_signal = market_indicators.get('macd_signal', 0)
+        ema_12 = market_indicators.get('ema_12', current_price)
+        ema_26 = market_indicators.get('ema_26', current_price)
+        bb_upper = market_indicators.get('bb_upper', current_price * 1.02)
+        bb_lower = market_indicators.get('bb_lower', current_price * 0.98)
+        bb_middle = market_indicators.get('bb_middle', current_price)
+        
+        # Stop loss and take profit checks
+        if side == 'buy':
+            pl_ratio = (current_price - entry_price) / entry_price
+            if pl_ratio <= -0.03:  # 3% loss
+                return True, "Stop loss triggered (3% loss)"
+            if pl_ratio >= 0.05:  # 5% profit
+                return True, "Take profit triggered (5% profit)"
+        else:  # sell
+            pl_ratio = (entry_price - current_price) / entry_price
+            if pl_ratio <= -0.03:  # 3% loss
+                return True, "Stop loss triggered (3% loss)"
+            if pl_ratio >= 0.05:  # 5% profit
+                return True, "Take profit triggered (5% profit)"
+        
+        # Opposite signal detection
+        if side == 'buy':
+            # Check for strong sell signals to close buy position
+            bearish_signals = 0
+            
+            if rsi > 70:  # Overbought
+                bearish_signals += 1
+            if macd_line < macd_signal and abs(macd_line - macd_signal) > 0.1:  # MACD bearish
+                bearish_signals += 1
+            if ema_12 < ema_26 and (ema_26 - ema_12) / ema_26 > 0.01:  # Death cross
+                bearish_signals += 1
+            if current_price < bb_middle and current_price < bb_lower * 1.01:  # Below BB middle
+                bearish_signals += 1
+                
+            if bearish_signals >= 2:
+                return True, f"Strong bearish reversal detected ({bearish_signals}/4 signals)"
+                
+        else:  # sell position
+            # Check for strong buy signals to close sell position
+            bullish_signals = 0
+            
+            if rsi < 30:  # Oversold
+                bullish_signals += 1
+            if macd_line > macd_signal and abs(macd_line - macd_signal) > 0.1:  # MACD bullish
+                bullish_signals += 1
+            if ema_12 > ema_26 and (ema_12 - ema_26) / ema_26 > 0.01:  # Golden cross
+                bullish_signals += 1
+            if current_price > bb_middle and current_price > bb_upper * 0.99:  # Above BB middle
+                bullish_signals += 1
+                
+            if bullish_signals >= 2:
+                return True, f"Strong bullish reversal detected ({bullish_signals}/4 signals)"
+        
+        return False, "No close signal detected"
+    
+    def _close_exchange_position(self, position, current_price, reason):
+        """Close an exchange position using individual close API"""
+        try:
+            symbol = position.get('symbol')
+            side = position.get('side')  # The current position side
+            size = position.get('size')
+            position_id = position.get('positionId')
+            
+            logger.info(f"Closing position {position_id}: {size} {symbol} {side} at {current_price}")
+            
+            # Use individual position close with opposite side
+            close_side = "SELL" if side == "BUY" else "BUY"
+            result = self.api.close_position(
+                symbol=symbol,
+                side=close_side,
+                execution_type="MARKET",
+                position_id=position_id,
+                size=str(size)
+            )
+            
+            if result.get('status') == 0:
+                logger.info(f"Position {position_id} closed successfully: {result}")
+                # Update database if trade exists
+                if self.db_session:
+                    try:
+                        from models import Trade
+                        db_trade = self.db_session.query(Trade).filter_by(
+                            exchange_position_id=position_id
+                        ).first()
+                        if db_trade:
+                            db_trade.status = 'closed'
+                            db_trade.closing_price = current_price
+                            db_trade.closed_at = datetime.utcnow()
+                            self.db_session.commit()
+                    except Exception as db_e:
+                        logger.error(f"Error updating database after close: {db_e}")
+            else:
+                logger.error(f"Failed to close position {position_id}: {result}")
+                
+        except Exception as e:
+            logger.error(f"Error closing exchange position: {e}")

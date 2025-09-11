@@ -108,11 +108,16 @@ with app.app_context():
             if user and user.settings and user.settings.trading_enabled and user.api_key and user.api_secret:
                 logger.info(f"Starting trading bot for user: {user.username}")
                 trading_bot = TradingBot(user=user, api_key=user.api_key, api_secret=user.api_secret, app=app)
-                trading_bot.set_db_session(db.session)
+                
+                # Create a new session for the bot to avoid context issues
+                from sqlalchemy.orm import sessionmaker
+                Session = sessionmaker(bind=db.engine)
+                bot_session = Session()
+                trading_bot.set_db_session(bot_session)
                 
                 # Start the bot with 60 second intervals
                 if trading_bot.start(interval=60):
-                    logger.info("Trading bot started successfully")
+                    logger.info("Trading bot started successfully with dedicated database session")
                     return True
                 else:
                     logger.error("Failed to start trading bot")
