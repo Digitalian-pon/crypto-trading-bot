@@ -291,12 +291,14 @@ with app.app_context():
     # Add API route for trading analysis
     @app.route('/api/trading-analysis/<symbol>')
     def api_trading_analysis(symbol):
-        """API endpoint for real-time trading analysis"""
+        """API endpoint using ACTUAL trading bot logic for consistency"""
         from flask import jsonify
         from datetime import datetime
         from services.gmo_api import GMOCoinAPI
         from services.data_service import DataService
-        from services.simple_trading_logic import SimpleTradingLogic
+        from services.ml_model import TradingModel
+        from services.risk_manager import RiskManager
+        from models import Trade, User
         
         try:
             api_key = config['api_credentials'].get('api_key', '')
@@ -305,59 +307,135 @@ with app.app_context():
             if not api_key or not api_secret:
                 return jsonify({'error': 'API credentials not configured'})
             
-            # Get market data with indicators using dynamic timeframe
+            # Use SAME logic as actual trading bot
             from config import get_default_timeframe
             current_timeframe = get_default_timeframe()
             data_service = DataService(api_key, api_secret)
-            df = data_service.get_data_with_indicators(symbol, interval=current_timeframe, limit=50)
+            df = data_service.get_data_with_indicators(symbol, interval=current_timeframe, limit=100)
             
             if df is None or df.empty:
-                # Fallback: Use current ticker data
-                api = GMOCoinAPI(api_key, api_secret)
-                ticker_data = api.get_ticker(symbol)
+                return jsonify({'error': 'Could not get market data'})
+            
+            # Initialize SAME components as actual bot
+            model = TradingModel()
+            risk_manager = RiskManager()
+            current_price = df['close'].iloc[-1]
+            
+            # Get ACTUAL ML prediction (same as trading bot)
+            prediction = model.predict(df)
+            
+            if not prediction:
+                # Use SAME fallback logic as trading bot
+                last_row = df.iloc[-1].to_dict()
+                rsi = last_row.get('rsi_14', 50)
+                macd_line = last_row.get('macd_line', 0)
+                macd_signal = last_row.get('macd_signal', 0)
+                macd_crossover = macd_line > macd_signal
                 
-                if ticker_data and ticker_data.get('data'):
-                    current_price = float(ticker_data['data'][0]['last'])
-                    # Create mock data for analysis
-                    latest = {
-                        'close': current_price,
-                        'rsi_14': 50.0,  # Neutral RSI
-                        'macd_line': 0.0,
-                        'macd_signal': 0.0,
-                        'bb_upper': current_price * 1.02,
-                        'bb_lower': current_price * 0.98,
-                        'bb_middle': current_price,
-                        'sma_20': current_price
-                    }
-                else:
-                    return jsonify({'error': 'Could not get market data or ticker data'})
-            else:
-                # Get latest data point
-                latest = df.iloc[-1].to_dict()
+                price = last_row.get('close', 0)
+                bb_lower = last_row.get('bb_lower', price * 0.97)
+                bb_upper = last_row.get('bb_upper', price * 1.03)
+                
+                # EXACT same logic as trading bot
+                buy_signal = (rsi < 35) or macd_crossover or (price < bb_lower * 1.02)
+                sell_signal = (rsi > 65) or (not macd_crossover) or (price > bb_upper * 0.98)
+                
+                pred_value = 1 if buy_signal and not sell_signal else 0
+                prob_value = 0.75 if (buy_signal and not sell_signal) or (sell_signal and not buy_signal) else 0.60
+                
+                prediction = {
+                    'prediction': pred_value,
+                    'probability': prob_value,
+                    'features': last_row
+                }
             
-            # Analyze trading signals
-            trading_logic = SimpleTradingLogic()
-            should_trade, trade_type, reason, confidence = trading_logic.should_trade(latest)
-            market_summary = trading_logic.get_market_summary(latest)
+            # SAME market evaluation as trading bot
+            last_row = df.iloc[-1].to_dict()
+            market_eval = risk_manager.evaluate_market_conditions(last_row)
             
+            # EXACT same trading logic as bot - FIXED LOGIC
+            should_trade = False
+            trade_type = None
+            trade_reason = ""
+            
+            # Primary signal logic based on prediction
+            if prediction['prediction'] == 1 and prediction['probability'] > 0.45:
+                if market_eval['market_trend'] != 'bearish' or market_eval['trend_strength'] < 0.7:
+                    should_trade = True
+                    trade_type = 'BUY'
+                    trade_reason = f"Bullish signal with {prediction['probability']:.2f} probability"
+            elif prediction['prediction'] == 0 and prediction['probability'] > 0.45:
+                should_trade = True  # Show signal for dashboard
+                trade_type = 'SELL'  
+                trade_reason = f"Bearish signal with {prediction['probability']:.2f} probability"
+            
+            # Secondary signal logic based on market trends (only if no primary signal)
+            if not should_trade and market_eval['trend_strength'] > 0.5:
+                if market_eval['market_trend'] == 'bullish':
+                    should_trade = True
+                    trade_type = 'BUY'
+                    trade_reason = f"Strong bullish trend. Strength: {market_eval['trend_strength']:.2f}"
+                elif market_eval['market_trend'] == 'bearish':
+                    should_trade = True
+                    trade_type = 'SELL'
+                    trade_reason = f"Bearish trend. Strength: {market_eval['trend_strength']:.2f}"
+            
+            # Override logic for extreme RSI conditions (safety check)
+            rsi = last_row.get('rsi_14', 50)
+            if rsi > 80 and trade_type == 'BUY':
+                trade_type = 'SELL'
+                trade_reason = f"RSI extremely overbought ({rsi:.1f}) - reversal expected"
+                should_trade = True
+            elif rsi < 20 and trade_type == 'SELL':
+                trade_type = 'BUY' 
+                trade_reason = f"RSI extremely oversold ({rsi:.1f}) - reversal expected"
+                should_trade = True
+            
+            # Get current positions from database for accurate status
+            user = User.query.filter_by(username='trading_user').first()
+            active_trades = []
+            if user:
+                active_trades = Trade.query.filter_by(
+                    user_id=user.id,
+                    currency_pair=symbol,
+                    status='open'
+                ).all()
+            
+            # Determine actual execution status
+            execution_status = "監視中"
+            if should_trade:
+                if trade_type == 'BUY':
+                    execution_status = "実行準備"
+                elif trade_type == 'SELL':
+                    if len(active_trades) > 0:
+                        execution_status = "決済準備"
+                    else:
+                        execution_status = "ポジションなし"
+                        
             return jsonify({
                 'should_trade': should_trade,
                 'trade_type': trade_type,
-                'reason': reason,
-                'confidence': round(confidence, 2) if confidence else 0,
-                'market_summary': market_summary,
+                'reason': trade_reason,
+                'confidence': round(prediction['probability'], 2),
+                'execution_status': execution_status,
+                'active_positions': len(active_trades),
+                'market_evaluation': {
+                    'trend': market_eval['market_trend'],
+                    'strength': round(market_eval['trend_strength'], 2),
+                    'risk_score': round(market_eval['risk_score'], 2)
+                },
                 'indicators': {
-                    'rsi': round(latest.get('rsi_14', 50), 2),
-                    'macd_line': round(latest.get('macd_line', 0), 4),
-                    'macd_signal': round(latest.get('macd_signal', 0), 4),
-                    'price': round(latest.get('close', 0), 3)
+                    'rsi': round(last_row.get('rsi_14', 50), 2),
+                    'macd_line': round(last_row.get('macd_line', 0), 4),
+                    'macd_signal': round(last_row.get('macd_signal', 0), 4),
+                    'price': round(current_price, 3)
                 },
                 'timestamp': datetime.now().isoformat(),
                 'status': 'success'
             })
             
         except Exception as e:
-            logger.error(f"Error in trading analysis: {e}")
+            logger.error(f"Error in unified trading analysis: {e}")
             return jsonify({'error': str(e)})
     
     # Add settings route

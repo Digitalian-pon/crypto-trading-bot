@@ -178,10 +178,14 @@
                     if (data.should_trade) {
                         if (data.trade_type === 'BUY') {
                             signalBadge = `<span class="badge bg-success">買いシグナル</span>`;
-                            statusBadge = `<span class="badge bg-success">実行準備</span>`;
-                        } else {
+                            statusBadge = `<span class="badge bg-success">${data.execution_status || '実行準備'}</span>`;
+                        } else if (data.trade_type === 'SELL') {
                             signalBadge = `<span class="badge bg-danger">売りシグナル</span>`;
-                            statusBadge = `<span class="badge bg-danger">実行準備</span>`;
+                            if (data.execution_status === 'ポジションなし') {
+                                statusBadge = `<span class="badge bg-warning">ポジションなし</span>`;
+                            } else {
+                                statusBadge = `<span class="badge bg-danger">${data.execution_status || '決済準備'}</span>`;
+                            }
                         }
                     } else {
                         signalBadge = `<span class="badge bg-secondary">待機中</span>`;
@@ -200,10 +204,11 @@
                             <td colspan="5">
                                 <small>
                                     <strong>判断理由:</strong> ${data.reason || 'データ取得中'}<br>
-                                    <strong>信頼度:</strong> ${data.confidence || 0}/2.0<br>
+                                    <strong>信頼度:</strong> ${data.confidence || 0}/1.0 | 
+                                    <strong>アクティブポジション:</strong> ${data.active_positions || 0}個<br>
                                     <strong>RSI:</strong> ${data.indicators ? data.indicators.rsi : 'N/A'} | 
-                                    <strong>市場状況:</strong> ${data.market_summary ? data.market_summary.condition : 'N/A'} |
-                                    <strong>ボラティリティ:</strong> ${data.market_summary ? data.market_summary.volatility : 'N/A'}
+                                    <strong>市場トレンド:</strong> ${data.market_evaluation ? data.market_evaluation.trend : 'N/A'} |
+                                    <strong>トレンド強度:</strong> ${data.market_evaluation ? data.market_evaluation.strength : 'N/A'}
                                 </small>
                             </td>
                         </tr>
