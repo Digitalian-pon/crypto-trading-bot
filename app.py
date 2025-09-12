@@ -380,13 +380,13 @@ with app.app_context():
                     trade_type = 'SELL'
                     trade_reason = f"Bearish trend. Strength: {market_eval['trend_strength']:.2f}"
             
-            # Override logic for extreme RSI conditions (safety check)
+            # Override logic for extreme RSI conditions (safety check) - FIXED
             rsi = last_row.get('rsi_14', 50)
-            if rsi > 80 and trade_type == 'BUY':
+            if rsi > 80:  # Any RSI > 80 should trigger SELL signal
                 trade_type = 'SELL'
                 trade_reason = f"RSI extremely overbought ({rsi:.1f}) - reversal expected"
                 should_trade = True
-            elif rsi < 20 and trade_type == 'SELL':
+            elif rsi < 20:  # Any RSI < 20 should trigger BUY signal
                 trade_type = 'BUY' 
                 trade_reason = f"RSI extremely oversold ({rsi:.1f}) - reversal expected"
                 should_trade = True
