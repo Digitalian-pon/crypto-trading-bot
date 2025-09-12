@@ -156,7 +156,9 @@
     <script>
         // Real-time trading analysis updates
         function updateTradingAnalysis() {
-            fetch('/api/trading-analysis/DOGE_JPY')
+            // Force cache bust with timestamp
+            const timestamp = Date.now();
+            fetch(`/api/trading-analysis/DOGE_JPY?t=${timestamp}`)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -164,6 +166,10 @@
                     return response.json();
                 })
                 .then(data => {
+                    // DEBUG: Show API response for troubleshooting
+                    console.log('API Response received:', JSON.stringify(data, null, 2));
+                    console.log('should_trade:', data.should_trade, 'trade_type:', data.trade_type);
+                    
                     if (data.error) {
                         console.error('API Error:', data.error);
                         showError(data.error);
@@ -241,9 +247,12 @@
             `;
         }
         
-        // Update every 30 seconds
+        // Update every 30 seconds - FORCE CACHE BUST v2
         updateTradingAnalysis();
         setInterval(updateTradingAnalysis, 30000);
+        
+        // Force immediate update for debugging
+        console.log('Dashboard loaded - v2.1 - Cache bust active');
     </script>
 </body>
 </html>
