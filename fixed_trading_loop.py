@@ -157,11 +157,11 @@ class FixedTradingBot:
         from models import Trade
         active_trades = []
         
-        # First check for exchange positions and sync with database
+        # First check for exchange positions and sync with database (ALWAYS sync)
         exchange_positions = self._get_exchange_positions(symbol)
-        if exchange_positions:
-            logger.info(f"Found {len(exchange_positions)} positions on exchange")
-            self._sync_exchange_positions(exchange_positions, symbol)
+        logger.info(f"Found {len(exchange_positions)} positions on exchange")
+        # Always run sync to handle orphaned positions, even if exchange_positions is empty
+        self._sync_exchange_positions(exchange_positions, symbol)
         
         if self.db_session:
             try:
@@ -522,7 +522,7 @@ class FixedTradingBot:
             return []
     
     def _sync_exchange_positions(self, exchange_positions, symbol):
-        """Sync exchange positions with database"""
+        """Bi-directional sync between exchange positions and database"""
         if not self.db_session:
             return
             
@@ -530,8 +530,12 @@ class FixedTradingBot:
             from models import Trade
             from datetime import datetime
             
+            # Get current exchange position IDs
+            exchange_position_ids = set()
             for position in exchange_positions:
                 position_id = position.get('positionId')
+                exchange_position_ids.add(position_id)
+                
                 side = position.get('side', '').lower()  # 'BUY' or 'SELL'
                 size = float(position.get('size', 0))
                 price = float(position.get('price', 0))
@@ -557,8 +561,29 @@ class FixedTradingBot:
                     self.db_session.add(new_trade)
                     logger.info(f"Synced new {side.upper()} position: {size} {symbol} at {price}")
             
+            # CRITICAL FIX: Remove orphaned positions from database
+            # Get all database trades for this user and symbol
+            db_trades = self.db_session.query(Trade).filter_by(
+                user_id=self.user.id,
+                currency_pair=symbol,
+                status='open'
+            ).all()
+            
+            orphaned_count = 0
+            for trade in db_trades:
+                if trade.exchange_position_id and trade.exchange_position_id not in exchange_position_ids:
+                    # This trade exists in DB but not on exchange - mark as closed
+                    logger.info(f"Removing orphaned position: Trade {trade.id} (Position ID: {trade.exchange_position_id})")
+                    trade.status = 'closed'
+                    trade.closing_price = trade.price  # Use entry price as close approximation
+                    trade.closed_at = datetime.utcnow()
+                    orphaned_count += 1
+            
+            if orphaned_count > 0:
+                logger.info(f"Cleaned up {orphaned_count} orphaned positions from database")
+            
             self.db_session.commit()
-            logger.info("Exchange positions synced with database")
+            logger.info("Bi-directional exchange-database sync completed")
             
         except Exception as e:
             logger.error(f"Error syncing exchange positions: {e}")
