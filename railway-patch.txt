@@ -1,0 +1,43 @@
+# Railway Deployment Patch
+# Add this code to the end of app.py file before the final line
+
+@app.route('/api/sync-positions')
+def sync_positions_api():
+    from flask import jsonify
+    from models import Trade, User
+    from services.gmo_api import GMOCoinAPI
+    from datetime import datetime
+    
+    try:
+        user = User.query.filter_by(username='trading_user').first()
+        if not user or not user.api_key or not user.api_secret:
+            return jsonify({'error': 'User/API credentials not found'})
+        
+        api = GMOCoinAPI(user.api_key, user.api_secret)
+        positions = api.get_positions('DOGE_JPY')
+        logger.info(f"Position API response: {positions}")
+        
+        synced_count = 0
+        if 'data' in positions and 'list' in positions['data']:
+            for pos in positions['data']['list']:
+                if not Trade.query.filter_by(exchange_position_id=str(pos['positionId'])).first():
+                    trade = Trade(
+                        user_id=user.id, currency_pair='DOGE_JPY',
+                        trade_type=pos['side'].lower(), amount=float(pos['size']),
+                        price=float(pos['price']), status='open',
+                        exchange_position_id=str(pos['positionId']),
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(trade)
+                    synced_count += 1
+            db.session.commit()
+        
+        active_trades = Trade.query.filter_by(user_id=user.id, status='open').count()
+        return jsonify({
+            'status': 'success', 'synced': synced_count,
+            'total_active': active_trades,
+            'message': f'Synced {synced_count} positions'
+        })
+    except Exception as e:
+        logger.error(f"Position sync error: {e}")
+        return jsonify({'error': str(e)})
