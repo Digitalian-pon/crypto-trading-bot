@@ -388,7 +388,7 @@ class RealAPIDashboard:
                 <div class="stat-grid">
                     <div class="stat-item">
                         <div class="stat-label">24時間出来高</div>
-                        <div class="stat-value">{data['ticker'].get('volume', '0'):,}</div>
+                        <div class="stat-value">{float(data['ticker'].get('volume', '0')):,.0f}</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-label">価格変動</div>
