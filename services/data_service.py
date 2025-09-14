@@ -319,9 +319,15 @@ class DataService:
             ticker_data = self.get_ticker(symbol)
             if ticker_data and len(ticker_data) > 0:
                 current_price = float(ticker_data[0]['last'])
-                # Update the last row's close price to current price
-                df.iloc[-1, df.columns.get_loc('close')] = current_price
-                logger.info(f"Updated last candle close price to current: {current_price}")
+                # Update the last row's close price to current price safely
+                try:
+                    if 'close' in df.columns:
+                        df.loc[df.index[-1], 'close'] = current_price
+                        logger.info(f"Updated last candle close price to current: {current_price}")
+                    else:
+                        logger.warning("'close' column not found in DataFrame")
+                except Exception as e:
+                    logger.error(f"Error updating close price: {e}")
             
             # Add technical indicators
             df_with_indicators = TechnicalIndicators.add_all_indicators(df)

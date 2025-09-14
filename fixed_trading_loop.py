@@ -180,17 +180,17 @@ class FixedTradingBot:
                 except:
                     pass
                     
+        # Check current price and existing trades
+        current_price = df['close'].iloc[-1]
+        logger.info(f"Current {symbol} price: {current_price}")
+
+        # Get current market indicators for trend reversal check
+        latest_indicators = df.iloc[-1].to_dict()
+
         # If no DB trades but exchange positions exist, use exchange data for closing
         if len(active_trades) == 0 and exchange_positions:
             logger.info("Using exchange positions for trade management")
             self._check_exchange_positions_for_closing(exchange_positions, current_price, latest_indicators)
-        
-        # Check current price and existing trades
-        current_price = df['close'].iloc[-1]
-        logger.info(f"Current {symbol} price: {current_price}")
-        
-        # Get current market indicators for trend reversal check
-        latest_indicators = df.iloc[-1].to_dict()
         
         # Check if any active trades need to be closed
         self._check_active_trades(active_trades, current_price, latest_indicators)

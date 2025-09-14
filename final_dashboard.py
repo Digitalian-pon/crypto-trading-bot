@@ -18,6 +18,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app import app
 from models import User
 from services.gmo_api import GMOCoinAPI
+from services.data_service import DataService
+from services.simple_trading_logic import SimpleTradingLogic
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,7 +33,11 @@ class FinalDashboard:
         self.low = 0.0
         self.api_positions = []
         self.balance_info = {}
+        self.signal_info = {'should_trade': False, 'trade_type': None, 'reason': 'システム初期化中', 'confidence': 0.0}
+        self.market_data = {}
         self.last_update = datetime.now()
+        self.data_service = None
+        self.trading_logic = SimpleTradingLogic()
         self.update_all_data()
 
     def update_all_data(self):
@@ -67,8 +73,43 @@ class FinalDashboard:
                     except Exception as e:
                         self.balance_info = {'error': f'Balance fetch failed: {str(e)}'}
 
+                # Get trading signals
+                try:
+                    if not self.data_service:
+                        self.data_service = DataService()
+
+                    # Get market data with indicators
+                    market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval='5m')
+                    if market_data_response is not None and not market_data_response.empty:
+                        # Convert DataFrame to dictionary for the last row (most recent data)
+                        self.market_data = market_data_response.iloc[-1].to_dict()
+
+                        # Generate trading signal
+                        should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(self.market_data)
+                        self.signal_info = {
+                            'should_trade': should_trade,
+                            'trade_type': trade_type,
+                            'reason': reason,
+                            'confidence': confidence
+                        }
+                    else:
+                        self.signal_info = {
+                            'should_trade': False,
+                            'trade_type': None,
+                            'reason': 'マーケットデータ取得失敗',
+                            'confidence': 0.0
+                        }
+                except Exception as e:
+                    logger.error(f"Error getting signals: {e}")
+                    self.signal_info = {
+                        'should_trade': False,
+                        'trade_type': None,
+                        'reason': f'シグナル取得エラー: {str(e)}',
+                        'confidence': 0.0
+                    }
+
                 self.last_update = datetime.now()
-                logger.info(f"Dashboard updated - Positions: {len(self.api_positions)}, Price: ¥{self.current_price}")
+                logger.info(f"Dashboard updated - Positions: {len(self.api_positions)}, Price: ¥{self.current_price}, Signal: {self.signal_info.get('trade_type', 'なし')}")
 
         except Exception as e:
             logger.error(f"Error updating dashboard data: {e}")
@@ -88,6 +129,75 @@ class FinalDashboard:
                     self.low = float(ticker['low'])
         except Exception as e:
             logger.error(f"Error getting current price: {e}")
+
+    def get_signal_html(self):
+        """Generate trading signal HTML"""
+        try:
+            signal = self.signal_info
+            should_trade = signal.get('should_trade', False)
+            trade_type = signal.get('trade_type', None)
+            reason = signal.get('reason', '不明')
+            confidence = signal.get('confidence', 0.0)
+
+            # Signal status color
+            if should_trade and trade_type:
+                if trade_type.upper() == 'BUY':
+                    signal_color = '#4CAF50'  # Green
+                    signal_icon = '📈'
+                    signal_text = '買いシグナル'
+                else:
+                    signal_color = '#F44336'  # Red
+                    signal_icon = '📉'
+                    signal_text = '売りシグナル'
+            else:
+                signal_color = '#FFC107'  # Yellow
+                signal_icon = '⏸️'
+                signal_text = 'シグナルなし'
+
+            # Get technical indicators if available
+            rsi = self.market_data.get('rsi_14', 'N/A')
+            macd_line = self.market_data.get('macd_line', 'N/A')
+            macd_signal = self.market_data.get('macd_signal', 'N/A')
+            bb_upper = self.market_data.get('bb_upper', 'N/A')
+            bb_lower = self.market_data.get('bb_lower', 'N/A')
+
+            # Format indicators
+            def format_indicator(value):
+                if value == 'N/A' or value is None:
+                    return 'N/A'
+                try:
+                    return f"{float(value):.2f}"
+                except (ValueError, TypeError):
+                    return str(value)
+
+            signal_html = f'''
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid {signal_color};">
+                    <div style="font-size: 2em; margin-bottom: 10px;">{signal_icon}</div>
+                    <div style="font-size: 1.5em; font-weight: bold; color: {signal_color}; margin-bottom: 10px;">{signal_text}</div>
+                    <div style="margin-bottom: 10px;"><strong>信頼度:</strong> {confidence:.2f}/1.0</div>
+                    <div style="font-size: 0.9em; color: #ccc;">判断理由: {reason}</div>
+                </div>
+
+                <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;">
+                    <h4 style="margin: 0 0 15px 0; color: #FFC107;">📊 テクニカル指標</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em;">
+                        <div><strong>RSI:</strong> {format_indicator(rsi)}</div>
+                        <div><strong>MACD線:</strong> {format_indicator(macd_line)}</div>
+                        <div><strong>MACDシグナル:</strong> {format_indicator(macd_signal)}</div>
+                        <div><strong>BB上限:</strong> ¥{format_indicator(bb_upper)}</div>
+                        <div><strong>BB下限:</strong> ¥{format_indicator(bb_lower)}</div>
+                        <div><strong>現在価格:</strong> ¥{self.current_price:.3f}</div>
+                    </div>
+                </div>
+            </div>
+            '''
+
+            return signal_html
+
+        except Exception as e:
+            logger.error(f"Error generating signal HTML: {e}")
+            return f'<div style="color: #ff6b6b; padding: 20px; text-align: center;">シグナル表示エラー: {str(e)}</div>'
 
     def generate_html(self):
         """Generate dashboard HTML"""
@@ -255,6 +365,11 @@ class FinalDashboard:
         </div>
 
         <div class="section">
+            <h2>📊 取引シグナル</h2>
+            {self.get_signal_html()}
+        </div>
+
+        <div class="section">
             <h2>💰 残高情報</h2>
             {balance_html}
         </div>
@@ -266,7 +381,7 @@ class FinalDashboard:
 
         <div class="section" style="text-align: center; color: #ccc; font-size: 0.9em;">
             <p>🔄 GMO Coin APIからリアルタイムデータを取得</p>
-            <p>📡 URL: http://localhost:8081</p>
+            <p>📡 URL: http://localhost:8082</p>
         </div>
     </div>
 </body>
@@ -299,7 +414,7 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(500, f"Internal Server Error: {str(e)}")
 
 if __name__ == "__main__":
-    PORT = 8081
+    PORT = 8082
     HOST = "0.0.0.0"
 
     logger.info(f"Starting Final Dashboard on {HOST}:{PORT}")
