@@ -11,7 +11,7 @@ class SimpleTradingLogic:
     
     def __init__(self):
         self.last_trade_time = None
-        self.min_trade_interval = 60 * 30  # 30 minutes between trades
+        self.min_trade_interval = 0  # No cooldown - allow immediate trading
         
     def should_trade(self, market_data):
         """
