@@ -34,7 +34,7 @@ def main():
         # Import Flask app to initialize database
         from app import app, db
         from models import User, TradingSettings
-        from services.trading_bot import TradingBot
+        from fixed_trading_loop import FixedTradingBot as TradingBot
         
         with app.app_context():
             # Find the trading user

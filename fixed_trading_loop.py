@@ -7,7 +7,7 @@ import sys
 import traceback
 from services.gmo_api import GMOCoinAPI
 from services.technical_indicators import TechnicalIndicators
-from services.ml_model import TradingModel
+from services.simple_trading_logic import SimpleTradingLogic
 from services.risk_manager import RiskManager
 from services.data_service import DataService
 from services.logger_service import TradeLogger
@@ -38,7 +38,7 @@ class FixedTradingBot:
         self.user = user
         self.api = GMOCoinAPI(api_key, api_secret)
         self.data_service = DataService(api_key, api_secret)
-        self.model = TradingModel()
+        self.trading_logic = SimpleTradingLogic()
         self.risk_manager = RiskManager()
         self.running = False
         self.thread = None
@@ -195,10 +195,28 @@ class FixedTradingBot:
         # Check if any active trades need to be closed
         self._check_active_trades(active_trades, current_price, latest_indicators)
         
-        # If no active trades, check for new trade opportunities
-        if len(active_trades) == 0:
-            logger.info("No active trades found, checking for new trade opportunities")
-            self._check_for_new_trade(df, symbol, current_price)
+        # Exchange position check to prevent multiple orders
+        exchange_positions = self._get_exchange_positions(symbol)
+        has_exchange_position = len(exchange_positions) > 0
+
+        # If no active trades in DB but exchange has position, sync first
+        if len(active_trades) == 0 and has_exchange_position:
+            logger.warning("No DB trades but exchange has positions - using exchange position management")
+            # Use exchange positions instead of DB for trade management
+            active_trades = []
+
+        # CRITICAL FIX: Always check for signals to enable opposite signal closure
+        # This ensures that existing positions can be closed by opposite signals
+        logger.info("Checking for trading signals and opposite signal closure...")
+        self._check_for_new_trade(df, symbol, current_price)
+
+        # Only open new trades if no active trades AND no exchange positions
+        if len(active_trades) == 0 and not has_exchange_position:
+            logger.info("No active trades found - new trade opportunities checked above")
+        elif len(active_trades) == 0 and has_exchange_position:
+            logger.info(f"No DB trades but {len(exchange_positions)} exchange positions exist - opposite signal closure checked above")
+        else:
+            logger.info(f"Have {len(active_trades)} active trades - opposite signal closure checked above")
     
     def _check_active_trades(self, active_trades, current_price, market_indicators=None):
         """Check if any active trades need to be closed"""
@@ -207,13 +225,25 @@ class FixedTradingBot:
         
         logger.info(f"Checking {len(active_trades)} active trades for exit conditions")
         
-        # Check for major trend reversal that requires closing all positions
+        # Check for major trend reversal that requires selective position closing
         major_reversal = self._check_major_trend_reversal(active_trades, market_indicators)
         if major_reversal:
             logger.warning(f"Major trend reversal detected: {major_reversal}")
-            logger.warning("Initiating emergency close of all positions!")
-            for trade in active_trades:
-                self._close_trade(trade, current_price, f"Emergency close: {major_reversal}")
+
+            # RSI過売り（強気転換）の場合：SELLポジションのみ決済、BUYポジションは保持
+            if "emergency close all SELL positions" in major_reversal:
+                logger.warning("RSI oversold condition - closing only SELL positions, keeping BUY positions!")
+                for trade in active_trades:
+                    if trade.trade_type.lower() == 'sell':  # SELLポジションのみ決済
+                        logger.info(f"Closing SELL position: Trade {trade.id}")
+                        self._close_trade(trade, current_price, f"Emergency close: {major_reversal}")
+                    else:
+                        logger.info(f"Keeping BUY position: Trade {trade.id} (favorable market condition)")
+            else:
+                # その他の緊急事態では全ポジション決済
+                logger.warning("General emergency condition - closing all positions!")
+                for trade in active_trades:
+                    self._close_trade(trade, current_price, f"Emergency close: {major_reversal}")
             return
         
         # Check individual trades
@@ -294,38 +324,11 @@ class FixedTradingBot:
         """Check if we should open a new trade"""
         logger.info(f"Checking for new trade opportunities for {symbol} at price {current_price}")
         
-        # Get prediction from the ML model
-        prediction = self.model.predict(df)
-        
-        if not prediction:
-            # Fallback prediction based on technical indicators
-            logger.warning("Using fallback prediction based on technical indicators")
-            last_row = df.iloc[-1].to_dict()
-            
-            rsi = last_row.get('rsi_14', 50)
-            macd_line = last_row.get('macd_line', 0)
-            macd_signal = last_row.get('macd_signal', 0)
-            macd_crossover = macd_line > macd_signal
-            
-            price = last_row.get('close', 0)
-            bb_lower = last_row.get('bb_lower', price * 0.97)
-            bb_upper = last_row.get('bb_upper', price * 1.03)
-            
-            # Buy signal logic
-            buy_signal = (rsi < 35) or macd_crossover or (price < bb_lower * 1.02)
-            # Sell signal logic
-            sell_signal = (rsi > 65) or (not macd_crossover) or (price > bb_upper * 0.98)
-            
-            pred_value = 1 if buy_signal and not sell_signal else 0
-            prob_value = 0.75 if (buy_signal and not sell_signal) or (sell_signal and not buy_signal) else 0.60
-            
-            prediction = {
-                'prediction': pred_value,
-                'probability': prob_value,
-                'features': last_row
-            }
-        
-        logger.info(f"Model prediction: {prediction['prediction']}, probability: {prediction['probability']:.4f}")
+        # Get trading signal from SimpleTradingLogic (same as dashboard)
+        last_row = df.iloc[-1].to_dict()
+        should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(last_row)
+
+        logger.info(f"Trading signal: should_trade={should_trade}, type={trade_type}, reason='{reason}', confidence={confidence:.4f}")
         
         # Evaluate market conditions
         last_row = df.iloc[-1].to_dict()
@@ -333,41 +336,62 @@ class FixedTradingBot:
         
         logger.info(f"Market evaluation: trend={market_eval['market_trend']}, risk_score={market_eval['risk_score']}")
         
-        # Determine if we should trade
-        should_trade = False
-        trade_type = None
-        trade_reason = ""
-        
-        # JPY残高のみの場合、BUY取引のみ実行可能
-        # Lower probability threshold to 0.45 for more trading opportunities
-        if prediction['prediction'] == 1 and prediction['probability'] > 0.45:
-            # Model predicts price will go up - BUY signal
-            if market_eval['market_trend'] != 'bearish' or market_eval['trend_strength'] < 0.7:
-                should_trade = True
-                trade_type = 'buy'
-                trade_reason = f"Bullish signal with {prediction['probability']:.2f} probability - Buying DOGE with JPY"
-        elif prediction['prediction'] == 0 and prediction['probability'] > 0.45:
-            # Model predicts price will go down - 通常ならSELLだが、JPY残高のためスキップ
-            logger.info(f"Bearish signal detected ({prediction['probability']:.2f} probability) but only JPY available - cannot SELL")
-            should_trade = False
-            trade_reason = "Bearish signal but insufficient DOGE holdings for SELL"
-        elif market_eval['trend_strength'] > 0.5:  # 閾値を下げて取引機会を増加
-            # Strong trend without clear ML signal
-            if market_eval['market_trend'] == 'bullish':
-                should_trade = True
-                trade_type = 'buy'
-                trade_reason = f"Strong bullish trend detected. Strength: {market_eval['trend_strength']:.2f} - Buying DOGE"
-            elif market_eval['market_trend'] == 'bearish':
-                logger.info(f"Bearish trend detected (strength: {market_eval['trend_strength']:.2f}) but only JPY available - skipping SELL")
-                should_trade = False
-                trade_reason = "Bearish trend but insufficient DOGE holdings"
-        
+        # Check available balances to determine possible trade types
+        balance_response = self.api.get_account_balance()
+        available_jpy = 0
+        available_doge = 0
+
+        if 'data' in balance_response:
+            for asset in balance_response['data']:
+                if asset['symbol'] == 'JPY':
+                    available_jpy = float(asset['available'])
+                elif asset['symbol'] == 'DOGE':
+                    available_doge = float(asset['available'])
+
+        logger.info(f"Available balances - JPY: {available_jpy}, DOGE: {available_doge}")
+
+        # Use SimpleTradingLogic result and check balance constraints
+        final_should_trade = False
+        final_trade_type = None
+        final_trade_reason = ""
+
         if should_trade and trade_type:
-            logger.info(f"Decision to trade: {trade_type} because {trade_reason}")
-            self._execute_trade(symbol, trade_type, current_price, last_row)
+            if trade_type.upper() == 'BUY':
+                if available_jpy > 100:  # Minimum JPY required for trade
+                    if market_eval['market_trend'] != 'bearish' or market_eval['trend_strength'] < 0.7:
+                        final_should_trade = True
+                        final_trade_type = 'buy'
+                        final_trade_reason = f"{reason} - Buying DOGE with JPY (confidence: {confidence:.2f})"
+                else:
+                    logger.info(f"Buy signal detected but insufficient JPY balance ({available_jpy})")
+            elif trade_type.upper() == 'SELL':
+                if available_doge >= 10:  # Minimum DOGE required for SELL order
+                    if market_eval['market_trend'] != 'bullish' or market_eval['trend_strength'] < 0.7:
+                        final_should_trade = True
+                        final_trade_type = 'sell'
+                        final_trade_reason = f"{reason} - Selling DOGE for JPY (confidence: {confidence:.2f})"
+                else:
+                    logger.info(f"Sell signal detected but insufficient DOGE balance ({available_doge})")
+        elif market_eval['trend_strength'] > 0.5:  # 閾値を下げて取引機会を増加
+            # Strong trend without clear SimpleTradingLogic signal
+            if market_eval['market_trend'] == 'bullish' and available_jpy > 100:
+                final_should_trade = True
+                final_trade_type = 'buy'
+                final_trade_reason = f"Strong bullish trend detected. Strength: {market_eval['trend_strength']:.2f} - Buying DOGE"
+            elif market_eval['market_trend'] == 'bearish' and available_doge >= 10:
+                final_should_trade = True
+                final_trade_type = 'sell'
+                final_trade_reason = f"Strong bearish trend detected. Strength: {market_eval['trend_strength']:.2f} - Selling DOGE"
+
+        # 【重要】逆シグナル検出による一括決済チェック
+        self._check_opposite_signal_closure(symbol, current_price, should_trade, trade_type, reason)
+
+        if final_should_trade and final_trade_type:
+            logger.info(f"Decision to trade: {final_trade_type} because {final_trade_reason}")
+            self._execute_trade(symbol, final_trade_type, current_price, last_row)
         else:
             logger.info("No trade opportunity at this time")
-    
+
     def _execute_trade(self, symbol, trade_type, current_price, indicators_data):
         """Execute a new trade"""
         logger.info(f"Executing {trade_type} trade for {symbol} at {current_price}")
@@ -375,27 +399,40 @@ class FixedTradingBot:
         try:
             # Get available balance
             balance_response = self.api.get_account_balance()
-            
-            available_balance = 0
+
+            available_jpy = 0
+            available_doge = 0
             if 'data' in balance_response:
                 for asset in balance_response['data']:
                     if asset['symbol'] == 'JPY':
-                        available_balance = float(asset['available'])
-                        break
-                        
-                logger.info(f"Available JPY balance for trading: {available_balance}")
-            
-            if available_balance <= 0:
-                logger.error("No available balance for trading")
-                return
-            
-            # Calculate position size (BUY注文用)
-            position_size = self.risk_manager.calculate_position_size(available_balance, current_price, symbol)
+                        available_jpy = float(asset['available'])
+                    elif asset['symbol'] == 'DOGE':
+                        available_doge = float(asset['available'])
+
+                logger.info(f"Available balance for trading - JPY: {available_jpy}, DOGE: {available_doge}")
+
+            # Calculate position size based on trade type (一括注文方式)
+            if trade_type.lower() == 'buy':
+                if available_jpy <= 100:
+                    logger.error("Insufficient JPY balance for BUY trade")
+                    return
+                # 利用可能残高の95%を使って最大限購入
+                usable_jpy = available_jpy * 0.95  # 手数料とバッファを考慮
+                position_size = usable_jpy / current_price  # JPYで購入できるDOGE数量
+                logger.info(f"一括BUY注文: 利用可能JPY {available_jpy} の95%({usable_jpy})でDOGE {position_size:.2f}を購入")
+            else:  # SELL trade
+                if available_doge < 10:
+                    logger.error("Insufficient DOGE balance for SELL trade")
+                    return
+                # 利用可能DOGEの95%を一括売却
+                position_size = available_doge * 0.95  # バッファを残す
+                logger.info(f"一括SELL注文: 利用可能DOGE {available_doge} の95%({position_size:.2f})を売却")
+
             logger.info(f"Calculated position size for {symbol}: {position_size}")
-            
+
             # Format size according to currency pair requirements
             if 'DOGE_' in symbol:
-                position_size_rounded = max(10, int(position_size))
+                position_size_rounded = max(10, int(position_size))  # 最低10DOGE、ただし計算値を優先
                 position_size_str = f"{position_size_rounded}"
             elif 'XRP_' in symbol:
                 position_size_rounded = max(10, int(position_size))
@@ -488,9 +525,9 @@ class FixedTradingBot:
                 ema_12 = market_indicators.get('ema_12', close)
                 ema_26 = market_indicators.get('ema_26', close)
                 
-                # Extremely strong bullish signals for emergency close
-                if rsi < 20:  # Extreme oversold
-                    return "Extreme RSI oversold (<20) - emergency close all SELL positions"
+                # Extremely strong bullish signals for emergency close of SELL positions
+                if rsi < 20:  # Extreme oversold - 強気転換でSELLポジションを決済
+                    return "Extreme RSI oversold (<20) - emergency close all SELL positions (keep BUY positions)"
                 
                 # Golden cross with strong momentum
                 if ema_12 > ema_26 and (ema_12 - ema_26) / ema_26 > 0.02:  # 2% gap
@@ -670,16 +707,16 @@ class FixedTradingBot:
         else:  # sell position
             # Check for strong buy signals to close sell position
             bullish_signals = 0
-            
-            if rsi < 30:  # Oversold
+
+            if rsi < 35:  # Oversold (緩和: 30 -> 35)
                 bullish_signals += 1
-            if macd_line > macd_signal and abs(macd_line - macd_signal) > 0.1:  # MACD bullish
+            if macd_line > macd_signal and abs(macd_line - macd_signal) > 0.05:  # MACD bullish (緩和: 0.1 -> 0.05)
                 bullish_signals += 1
-            if ema_12 > ema_26 and (ema_12 - ema_26) / ema_26 > 0.01:  # Golden cross
+            if ema_12 > ema_26 and (ema_12 - ema_26) / ema_26 > 0.005:  # Golden cross (緩和: 0.01 -> 0.005)
                 bullish_signals += 1
-            if current_price > bb_middle and current_price > bb_upper * 0.99:  # Above BB middle
+            if current_price > bb_lower * 1.02:  # 価格がボリンジャーバンド下限より2%上 (大幅緩和)
                 bullish_signals += 1
-                
+
             if bullish_signals >= 2:
                 return True, f"Strong bullish reversal detected ({bullish_signals}/4 signals)"
         
@@ -726,3 +763,185 @@ class FixedTradingBot:
                 
         except Exception as e:
             logger.error(f"Error closing exchange position: {e}")
+
+    def _check_for_new_trade(self, df, symbol, current_price):
+        """Check for new trading opportunities and execute opposite signal closure"""
+        try:
+            # Get market data from Simple Trading Logic
+            if df is None or df.empty:
+                logger.warning("No market data available for trading decision")
+                return
+
+            # Convert DataFrame to dictionary for the last row (latest data)
+            latest_data = df.iloc[-1].to_dict()
+
+            # Use Simple Trading Logic for signal generation
+            should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(latest_data)
+
+            logger.info(f"Signal Analysis - Should trade: {should_trade}, Type: {trade_type}, Reason: {reason}, Confidence: {confidence:.2f}")
+
+            # CRITICAL: Check for opposite signal closure FIRST
+            logger.info(f"🔍 Calling _check_opposite_signal_closure with: symbol={symbol}, should_trade={should_trade}, trade_type={trade_type}")
+            self._check_opposite_signal_closure(symbol, current_price, should_trade, trade_type, reason)
+
+            # Only place new trades if there are strong signals and no existing positions
+            if should_trade and confidence >= 0.8:
+                # Double-check exchange positions to avoid conflicts
+                exchange_positions = self._get_exchange_positions(symbol)
+                if len(exchange_positions) > 0:
+                    logger.info(f"Exchange has {len(exchange_positions)} positions - managing existing positions instead of opening new trades")
+                    return
+
+                # Check trade timing
+                if not self.trading_logic.check_trade_timing():
+                    logger.info("Trade timing restriction active - skipping new trade")
+                    return
+
+                # Execute new trade
+                if self._place_new_trade(symbol, trade_type, current_price, reason, confidence):
+                    self.trading_logic.record_trade()
+                    logger.info(f"New {trade_type} trade placed successfully")
+                else:
+                    logger.error(f"Failed to place new {trade_type} trade")
+            else:
+                logger.info(f"No strong signal for new trade - Confidence: {confidence:.2f}, Required: 0.8")
+
+        except Exception as e:
+            logger.error(f"Error checking for new trade: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def _place_new_trade(self, symbol, trade_type, current_price, reason, confidence):
+        """Place a new trade with bulk order sizing"""
+        try:
+            # Get available balance for trade sizing
+            balance_info = self.api.get_account_balance()
+
+            if 'data' not in balance_info:
+                logger.error(f"Failed to get account balance: {balance_info}")
+                return False
+
+            available_jpy = 0
+            available_doge = 0
+
+            for asset in balance_info['data']:
+                if asset['symbol'] == 'JPY':
+                    available_jpy = float(asset['available'])
+                elif asset['symbol'] == 'DOGE':
+                    available_doge = float(asset['available'])
+
+            logger.info(f"Available balances - JPY: {available_jpy}, DOGE: {available_doge}")
+
+            # Calculate trade size based on 95% of available balance
+            if trade_type.upper() == 'BUY':
+                # For BUY orders, use 95% of JPY balance
+                max_jpy = available_jpy * 0.95
+                max_doge_quantity = int(max_jpy / current_price)
+                # Round DOWN to nearest 10 DOGE (GMO requirement)
+                rounded_doge = (max_doge_quantity // 10) * 10
+                trade_size = max(10, rounded_doge)
+                logger.info(f"🔢 BUY order calculation: max_jpy={max_jpy:.2f}, price={current_price}, max_doge_quantity={max_doge_quantity}, rounded_doge={rounded_doge}, trade_size={trade_size}")
+
+                if max_jpy < 100:  # Need at least 100 JPY
+                    logger.warning(f"Insufficient JPY balance for BUY order: {available_jpy}")
+                    return False
+
+            else:  # SELL (レバレッジショートポジション)
+                # For leverage SELL orders, use JPY balance as margin
+                max_jpy = available_jpy * 0.95
+                max_doge_quantity = int(max_jpy / current_price)
+                # Round DOWN to nearest 10 DOGE (GMO requirement)
+                rounded_doge = (max_doge_quantity // 10) * 10
+                trade_size = max(10, rounded_doge)
+                logger.info(f"🔢 SELL order calculation (leverage): max_jpy={max_jpy:.2f}, price={current_price}, max_doge_quantity={max_doge_quantity}, rounded_doge={rounded_doge}, trade_size={trade_size}")
+
+                if max_jpy < 100:  # Need at least 100 JPY as margin
+                    logger.warning(f"Insufficient JPY balance for leverage SELL order: {available_jpy}")
+                    return False
+
+            logger.info(f"Placing {trade_type} order: {trade_size} DOGE at {current_price} JPY")
+            logger.info(f"Order reason: {reason} (Confidence: {confidence:.2f})")
+
+            # Place the order
+            result = self.api.place_order(
+                symbol=symbol,
+                side=trade_type.upper(),
+                execution_type="MARKET",
+                size=str(trade_size)
+            )
+
+            if 'data' in result:
+                logger.info(f"✅ {trade_type.upper()} order placed successfully!")
+                logger.info(f"Order details: {result['data']}")
+                return True
+            else:
+                logger.error(f"❌ Failed to place {trade_type} order: {result}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error placing new trade: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def _check_opposite_signal_closure(self, symbol, current_price, should_trade, trade_type, reason):
+        """
+        SimpleTradingLogicからの逆シグナル検出による一括決済
+        BUYシグナル出現時 → 全SELLポジション決済
+        SELLシグナル出現時 → 全BUYポジション決済
+        """
+        logger.info(f"🔄 _check_opposite_signal_closure called: should_trade={should_trade}, trade_type={trade_type}, reason={reason}")
+
+        if not should_trade or not trade_type:
+            logger.info(f"🚫 Early return: should_trade={should_trade}, trade_type={trade_type}")
+            return
+
+        try:
+            # 取引所のポジション一覧を取得
+            positions_response = self.api.get_positions(symbol=symbol)
+            logger.info(f"📋 Positions response: {positions_response}")
+
+            if 'data' not in positions_response or not positions_response['data']:
+                logger.info("📭 No positions found on exchange")
+                return
+
+            # GMO API returns positions in data.list format
+            if 'list' not in positions_response['data']:
+                logger.info("📭 No position list found in exchange response")
+                return
+
+            positions_to_close = []
+            all_positions = positions_response['data']['list']
+
+            # 逆シグナル検出ロジック
+            if trade_type.upper() == 'BUY':
+                # BUYシグナル → SELLポジションを全て決済
+                for position in all_positions:
+                    if position.get('symbol') == symbol and position.get('side') == 'SELL':
+                        positions_to_close.append(position)
+                        logger.info(f"📌 Found SELL position to close: {position.get('positionId')}")
+
+                if positions_to_close:
+                    logger.info(f"🔄 BUYシグナル検出！SELLポジション {len(positions_to_close)}件を一括決済します")
+                    logger.info(f"決済理由: {reason}")
+
+            elif trade_type.upper() == 'SELL':
+                # SELLシグナル → BUYポジションを全て決済
+                for position in all_positions:
+                    if position.get('symbol') == symbol and position.get('side') == 'BUY':
+                        positions_to_close.append(position)
+                        logger.info(f"📌 Found BUY position to close: {position.get('positionId')}")
+
+                if positions_to_close:
+                    logger.info(f"🔄 SELLシグナル検出！BUYポジション {len(positions_to_close)}件を一括決済します")
+                    logger.info(f"決済理由: {reason}")
+
+            # 一括決済実行
+            for position in positions_to_close:
+                logger.info(f"💥 Closing position: {position.get('positionId')}")
+                self._close_exchange_position(position, current_price, f"逆シグナル決済: {reason}")
+
+        except Exception as e:
+            logger.error(f"逆シグナル決済チェック中にエラーが発生: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
