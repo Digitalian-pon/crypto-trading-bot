@@ -208,6 +208,23 @@ class FixedTradingBot:
         # CRITICAL FIX: Always check for signals to enable opposite signal closure
         # This ensures that existing positions can be closed by opposite signals
         logger.info("Checking for trading signals and opposite signal closure...")
+
+        # 【緊急修正】既存ポジションがある場合の強制チェック
+        if has_exchange_position:
+            logger.info(f"⚠️ {len(exchange_positions)} positions detected - forcing signal check for opposite closure")
+            current_price_for_signals = df['close'].iloc[-1]
+            latest_data_for_signals = df.iloc[-1].to_dict()
+
+            # Get current signals
+            should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(latest_data_for_signals)
+            logger.info(f"🎯 Current signal: should_trade={should_trade}, trade_type={trade_type}, confidence={confidence:.2f}")
+
+            if should_trade and trade_type:
+                # Force opposite signal closure check
+                logger.info(f"🔥 FORCING opposite signal closure check")
+                closure_result = self._check_opposite_signal_closure(symbol, current_price_for_signals, should_trade, trade_type, reason)
+                logger.info(f"🔥 Opposite closure result: {closure_result}")
+
         self._check_for_new_trade(df, symbol, current_price)
 
         # Only open new trades if no active trades AND no exchange positions
@@ -1030,7 +1047,7 @@ class FixedTradingBot:
         try:
             # 取引所のポジション一覧を取得
             positions_response = self.api.get_positions(symbol=symbol)
-            logger.info(f"📋 Initial positions check: {positions_response}")
+            logger.info(f"📋 Initial positions check - status: {positions_response.get('status')}, positions count: {len(positions_response.get('data', {}).get('list', []))}")
 
             if 'data' not in positions_response or not positions_response['data']:
                 logger.info("📭 No positions found on exchange")
