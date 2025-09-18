@@ -772,6 +772,54 @@ class FixedTradingBot:
         except Exception as e:
             logger.error(f"Error closing exchange position: {e}")
 
+    def _close_exchange_position_sync(self, position, current_price, reason):
+        """個別ポジション決済（同期処理・成功確認付き）"""
+        try:
+            symbol = position.get('symbol')
+            side = position.get('side')  # The current position side
+            size = position.get('size')
+            position_id = position.get('positionId')
+
+            logger.info(f"🔄 Closing position {position_id}: {size} {symbol} {side} at {current_price}")
+
+            # Use individual position close with opposite side
+            close_side = "SELL" if side == "BUY" else "BUY"
+            result = self.api.close_position(
+                symbol=symbol,
+                side=close_side,
+                execution_type="MARKET",
+                position_id=position_id,
+                size=str(size)
+            )
+
+            if result.get('status') == 0:
+                logger.info(f"✅ Position {position_id} API call successful: {result}")
+
+                # Update database if trade exists
+                if self.db_session:
+                    try:
+                        from models import Trade
+                        db_trade = self.db_session.query(Trade).filter_by(
+                            exchange_position_id=position_id
+                        ).first()
+                        if db_trade:
+                            db_trade.status = 'closed'
+                            db_trade.closing_price = current_price
+                            db_trade.closed_at = datetime.utcnow()
+                            self.db_session.commit()
+                            logger.info(f"📊 Database updated for position {position_id}")
+                    except Exception as db_e:
+                        logger.error(f"Database update error: {db_e}")
+
+                return True
+            else:
+                logger.error(f"❌ Failed to close position {position_id}: {result}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error in sync close position: {e}")
+            return False
+
     def _check_for_new_trade(self, df, symbol, current_price):
         """Check for new trading opportunities and execute opposite signal closure"""
         try:
@@ -788,31 +836,72 @@ class FixedTradingBot:
 
             logger.info(f"Signal Analysis - Should trade: {should_trade}, Type: {trade_type}, Reason: {reason}, Confidence: {confidence:.2f}")
 
-            # CRITICAL: Check for opposite signal closure FIRST
+            # CRITICAL: Check for opposite signal closure FIRST (同期処理)
             logger.info(f"🔍 Calling _check_opposite_signal_closure with: symbol={symbol}, should_trade={should_trade}, trade_type={trade_type}")
-            self._check_opposite_signal_closure(symbol, current_price, should_trade, trade_type, reason)
+            opposite_closure_completed = self._check_opposite_signal_closure(symbol, current_price, should_trade, trade_type, reason)
 
-            # Only place new trades if there are strong signals and no existing positions
+            # 【重要】新規注文前のポジション完全確認
             if should_trade and confidence >= 0.8:
-                # Double-check exchange positions to avoid conflicts
-                exchange_positions = self._get_exchange_positions(symbol)
-                if len(exchange_positions) > 0:
-                    logger.info(f"Exchange has {len(exchange_positions)} positions - managing existing positions instead of opening new trades")
-                    return
+                logger.info(f"🎯 Strong signal detected for {trade_type} (confidence: {confidence:.2f})")
 
-                # Check trade timing
+                # 決済処理が実行された場合、追加の待機時間
+                if opposite_closure_completed:
+                    logger.info("⏳ Opposite positions were closed, waiting for settlement confirmation...")
+                    import time
+                    time.sleep(3)  # 決済処理完全完了待機
+
+                # 【最重要】新規注文前の最終ポジション確認
+                logger.info("🔍 Final position verification before new trade...")
+                final_positions_response = self.api.get_positions(symbol=symbol)
+
+                if 'data' in final_positions_response and 'list' in final_positions_response['data']:
+                    final_positions = final_positions_response['data']['list']
+                    logger.info(f"📊 Current positions count: {len(final_positions)}")
+
+                    # 反対ポジションまたは同方向ポジションの存在確認
+                    conflicting_positions = []
+                    same_direction_positions = []
+
+                    for pos in final_positions:
+                        pos_side = pos.get('side')
+                        pos_id = pos.get('positionId')
+
+                        if pos_side == trade_type.upper():
+                            same_direction_positions.append(pos_id)
+                        else:
+                            conflicting_positions.append(pos_id)
+
+                    # 反対ポジションが残っている場合は新規注文中止
+                    if conflicting_positions:
+                        logger.warning(f"❌ Conflicting positions detected: {conflicting_positions}")
+                        logger.warning(f"Cannot place {trade_type} order while opposite positions exist")
+                        return
+
+                    # 同方向ポジションが既にある場合も新規注文中止（重複防止）
+                    if same_direction_positions:
+                        logger.info(f"⚠️ Same direction positions already exist: {same_direction_positions}")
+                        logger.info(f"Skipping new {trade_type} order to avoid position duplication")
+                        return
+
+                    logger.info("✅ No conflicting positions found - proceeding with new trade")
+
+                else:
+                    logger.info("📭 No positions found - safe to place new trade")
+
+                # 取引タイミング確認
                 if not self.trading_logic.check_trade_timing():
-                    logger.info("Trade timing restriction active - skipping new trade")
+                    logger.info("⏰ Trade timing restriction active - skipping new trade")
                     return
 
-                # Execute new trade
+                # 【最終段階】新規注文実行
+                logger.info(f"🚀 Executing new {trade_type} trade...")
                 if self._place_new_trade(symbol, trade_type, current_price, reason, confidence):
                     self.trading_logic.record_trade()
-                    logger.info(f"New {trade_type} trade placed successfully")
+                    logger.info(f"✅ New {trade_type} trade placed successfully")
                 else:
-                    logger.error(f"Failed to place new {trade_type} trade")
+                    logger.error(f"❌ Failed to place new {trade_type} trade")
             else:
-                logger.info(f"No strong signal for new trade - Confidence: {confidence:.2f}, Required: 0.8")
+                logger.info(f"📊 Signal strength insufficient for new trade - Confidence: {confidence:.2f}, Required: 0.8")
 
         except Exception as e:
             logger.error(f"Error checking for new trade: {e}")
@@ -820,13 +909,17 @@ class FixedTradingBot:
             logger.error(f"Traceback: {traceback.format_exc()}")
 
     def _place_new_trade(self, symbol, trade_type, current_price, reason, confidence):
-        """Place a new trade with bulk order sizing"""
+        """Place a new trade with enhanced verification and logging"""
         try:
+            logger.info(f"🎯 === STARTING NEW TRADE PLACEMENT ===")
+            logger.info(f"📋 Trade Details: {trade_type.upper()} {symbol} at {current_price}")
+            logger.info(f"📊 Signal: {reason} (Confidence: {confidence:.2f})")
+
             # Get available balance for trade sizing
             balance_info = self.api.get_account_balance()
 
             if 'data' not in balance_info:
-                logger.error(f"Failed to get account balance: {balance_info}")
+                logger.error(f"❌ Failed to get account balance: {balance_info}")
                 return False
 
             available_jpy = 0
@@ -838,7 +931,7 @@ class FixedTradingBot:
                 elif asset['symbol'] == 'DOGE':
                     available_doge = float(asset['available'])
 
-            logger.info(f"Available balances - JPY: {available_jpy}, DOGE: {available_doge}")
+            logger.info(f"💰 Available balances - JPY: {available_jpy}, DOGE: {available_doge}")
 
             # Calculate trade size based on 95% of available balance
             if trade_type.upper() == 'BUY':
@@ -851,7 +944,7 @@ class FixedTradingBot:
                 logger.info(f"🔢 BUY order calculation: max_jpy={max_jpy:.2f}, price={current_price}, max_doge_quantity={max_doge_quantity}, rounded_doge={rounded_doge}, trade_size={trade_size}")
 
                 if max_jpy < 100:  # Need at least 100 JPY
-                    logger.warning(f"Insufficient JPY balance for BUY order: {available_jpy}")
+                    logger.warning(f"❌ Insufficient JPY balance for BUY order: {available_jpy}")
                     return False
 
             else:  # SELL (レバレッジショートポジション)
@@ -864,11 +957,26 @@ class FixedTradingBot:
                 logger.info(f"🔢 SELL order calculation (leverage): max_jpy={max_jpy:.2f}, price={current_price}, max_doge_quantity={max_doge_quantity}, rounded_doge={rounded_doge}, trade_size={trade_size}")
 
                 if max_jpy < 100:  # Need at least 100 JPY as margin
-                    logger.warning(f"Insufficient JPY balance for leverage SELL order: {available_jpy}")
+                    logger.warning(f"❌ Insufficient JPY balance for leverage SELL order: {available_jpy}")
                     return False
 
-            logger.info(f"Placing {trade_type} order: {trade_size} DOGE at {current_price} JPY")
-            logger.info(f"Order reason: {reason} (Confidence: {confidence:.2f})")
+            # 【重要】注文実行前の最終ポジション確認
+            logger.info("🔍 FINAL position check before order execution...")
+            pre_order_positions = self.api.get_positions(symbol=symbol)
+
+            if 'data' in pre_order_positions and 'list' in pre_order_positions['data']:
+                pre_positions = pre_order_positions['data']['list']
+                if pre_positions:
+                    logger.error(f"❌ ABORT: {len(pre_positions)} positions detected before order placement!")
+                    for pos in pre_positions:
+                        logger.error(f"   Position: {pos.get('side')} {pos.get('size')} @ {pos.get('price')} (ID: {pos.get('positionId')})")
+                    return False
+                else:
+                    logger.info("✅ CONFIRMED: No existing positions - safe to proceed")
+            else:
+                logger.info("✅ CONFIRMED: No position data - safe to proceed")
+
+            logger.info(f"🚀 EXECUTING {trade_type.upper()} ORDER: {trade_size} DOGE at {current_price} JPY")
 
             # Place the order
             result = self.api.place_order(
@@ -879,22 +987,37 @@ class FixedTradingBot:
             )
 
             if 'data' in result:
-                logger.info(f"✅ {trade_type.upper()} order placed successfully!")
-                logger.info(f"Order details: {result['data']}")
+                logger.info(f"✅ {trade_type.upper()} ORDER SUCCESSFUL!")
+                logger.info(f"📋 Order details: {result['data']}")
+
+                # 注文後のポジション確認
+                import time
+                time.sleep(2)  # 注文反映待機
+                post_order_positions = self.api.get_positions(symbol=symbol)
+
+                if 'data' in post_order_positions and 'list' in post_order_positions['data']:
+                    new_positions = post_order_positions['data']['list']
+                    logger.info(f"✅ Post-order verification: {len(new_positions)} positions now exist")
+                    for pos in new_positions:
+                        logger.info(f"   New Position: {pos.get('side')} {pos.get('size')} @ {pos.get('price')} (ID: {pos.get('positionId')})")
+
+                logger.info(f"🎯 === NEW TRADE PLACEMENT COMPLETED ===")
                 return True
             else:
                 logger.error(f"❌ Failed to place {trade_type} order: {result}")
+                logger.info(f"🚫 === NEW TRADE PLACEMENT FAILED ===")
                 return False
 
         except Exception as e:
-            logger.error(f"Error placing new trade: {e}")
+            logger.error(f"❌ Error placing new trade: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.info(f"🚫 === NEW TRADE PLACEMENT ERROR ===")
             return False
 
     def _check_opposite_signal_closure(self, symbol, current_price, should_trade, trade_type, reason):
         """
-        SimpleTradingLogicからの逆シグナル検出による一括決済
+        SimpleTradingLogicからの逆シグナル検出による一括決済（同期処理）
         BUYシグナル出現時 → 全SELLポジション決済
         SELLシグナル出現時 → 全BUYポジション決済
         """
@@ -902,24 +1025,25 @@ class FixedTradingBot:
 
         if not should_trade or not trade_type:
             logger.info(f"🚫 Early return: should_trade={should_trade}, trade_type={trade_type}")
-            return
+            return False  # 決済なしを返す
 
         try:
             # 取引所のポジション一覧を取得
             positions_response = self.api.get_positions(symbol=symbol)
-            logger.info(f"📋 Positions response: {positions_response}")
+            logger.info(f"📋 Initial positions check: {positions_response}")
 
             if 'data' not in positions_response or not positions_response['data']:
                 logger.info("📭 No positions found on exchange")
-                return
+                return False
 
             # GMO API returns positions in data.list format
             if 'list' not in positions_response['data']:
                 logger.info("📭 No position list found in exchange response")
-                return
+                return False
 
             positions_to_close = []
             all_positions = positions_response['data']['list']
+            initial_position_count = len(all_positions)
 
             # 逆シグナル検出ロジック
             if trade_type.upper() == 'BUY':
@@ -930,7 +1054,7 @@ class FixedTradingBot:
                         logger.info(f"📌 Found SELL position to close: {position.get('positionId')}")
 
                 if positions_to_close:
-                    logger.info(f"🔄 BUYシグナル検出！SELLポジション {len(positions_to_close)}件を一括決済します")
+                    logger.info(f"🔄 BUYシグナル検出！SELLポジション {len(positions_to_close)}件を同期決済開始")
                     logger.info(f"決済理由: {reason}")
 
             elif trade_type.upper() == 'SELL':
@@ -941,15 +1065,59 @@ class FixedTradingBot:
                         logger.info(f"📌 Found BUY position to close: {position.get('positionId')}")
 
                 if positions_to_close:
-                    logger.info(f"🔄 SELLシグナル検出！BUYポジション {len(positions_to_close)}件を一括決済します")
+                    logger.info(f"🔄 SELLシグナル検出！BUYポジション {len(positions_to_close)}件を同期決済開始")
                     logger.info(f"決済理由: {reason}")
 
-            # 一括決済実行
+            # 決済がない場合は早期リターン
+            if not positions_to_close:
+                logger.info("📭 No opposite positions to close")
+                return False
+
+            # 【重要】同期決済実行と完了確認
+            closed_positions = 0
             for position in positions_to_close:
-                logger.info(f"💥 Closing position: {position.get('positionId')}")
-                self._close_exchange_position(position, current_price, f"逆シグナル決済: {reason}")
+                position_id = position.get('positionId')
+                logger.info(f"💥 Closing position: {position_id}")
+
+                success = self._close_exchange_position_sync(position, current_price, f"逆シグナル決済: {reason}")
+                if success:
+                    closed_positions += 1
+                    logger.info(f"✅ Position {position_id} successfully closed ({closed_positions}/{len(positions_to_close)})")
+                else:
+                    logger.error(f"❌ Failed to close position {position_id}")
+
+            # 決済完了確認（最大3回リトライ）
+            import time
+            for attempt in range(3):
+                logger.info(f"🔍 Verifying closure completion (attempt {attempt + 1}/3)...")
+                time.sleep(2)  # API処理完了待機
+
+                updated_response = self.api.get_positions(symbol=symbol)
+                if 'data' in updated_response and 'list' in updated_response['data']:
+                    remaining_positions = updated_response['data']['list']
+
+                    # 決済対象の反対ポジションが残っているかチェック
+                    remaining_opposite = []
+                    for pos in remaining_positions:
+                        if trade_type.upper() == 'BUY' and pos.get('side') == 'SELL':
+                            remaining_opposite.append(pos.get('positionId'))
+                        elif trade_type.upper() == 'SELL' and pos.get('side') == 'BUY':
+                            remaining_opposite.append(pos.get('positionId'))
+
+                    if not remaining_opposite:
+                        logger.info(f"✅ All opposite positions successfully closed! Remaining total positions: {len(remaining_positions)}")
+                        return True  # 決済完了
+                    else:
+                        logger.warning(f"⚠️ {len(remaining_opposite)} opposite positions still remain: {remaining_opposite}")
+                else:
+                    logger.info("📭 No positions remaining")
+                    return True
+
+            logger.error(f"❌ Failed to complete opposite signal closure after 3 attempts")
+            return False
 
         except Exception as e:
             logger.error(f"逆シグナル決済チェック中にエラーが発生: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
