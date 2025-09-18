@@ -205,26 +205,22 @@ class FixedTradingBot:
             # Use exchange positions instead of DB for trade management
             active_trades = []
 
-        # CRITICAL FIX: Always check for signals to enable opposite signal closure
-        # This ensures that existing positions can be closed by opposite signals
-        logger.info("Checking for trading signals and opposite signal closure...")
+        # 【根本修正】ポジション状態機械による厳格制御
+        logger.info("🔄 Starting position state machine control...")
 
-        # 【緊急修正】既存ポジションがある場合の強制チェック
+        # ポジション存在時は新規注文を完全禁止し、決済のみ実行
         if has_exchange_position:
-            logger.info(f"⚠️ {len(exchange_positions)} positions detected - forcing signal check for opposite closure")
-            current_price_for_signals = df['close'].iloc[-1]
-            latest_data_for_signals = df.iloc[-1].to_dict()
+            logger.info(f"🚨 POSITION STATE: {len(exchange_positions)} positions exist - BLOCKING all new orders")
 
-            # Get current signals
-            should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(latest_data_for_signals)
-            logger.info(f"🎯 Current signal: should_trade={should_trade}, trade_type={trade_type}, confidence={confidence:.2f}")
+            # 既存ポジションの決済チェックのみ実行
+            self._check_existing_positions_for_closure_only(exchange_positions, current_price, latest_indicators)
 
-            if should_trade and trade_type:
-                # Force opposite signal closure check
-                logger.info(f"🔥 FORCING opposite signal closure check")
-                closure_result = self._check_opposite_signal_closure(symbol, current_price_for_signals, should_trade, trade_type, reason)
-                logger.info(f"🔥 Opposite closure result: {closure_result}")
+            # 強制的に新規注文をブロック
+            logger.info("🛑 NEW ORDER BLOCKED: Cannot place new orders while positions exist")
+            return
 
+        # ポジション0個の場合のみ新規注文許可
+        logger.info("✅ POSITION STATE: No positions - new orders allowed")
         self._check_for_new_trade(df, symbol, current_price)
 
         # Only open new trades if no active trades AND no exchange positions
@@ -789,6 +785,86 @@ class FixedTradingBot:
         except Exception as e:
             logger.error(f"Error closing exchange position: {e}")
 
+    def _check_existing_positions_for_closure_only(self, positions, current_price, market_indicators):
+        """既存ポジション決済のみを実行（新規注文は一切行わない）"""
+        logger.info(f"🔍 Checking {len(positions)} existing positions for closure only")
+
+        for position in positions:
+            side = position.get('side')
+            size = position.get('size')
+            entry_price = float(position.get('price', 0))
+            position_id = position.get('positionId')
+
+            # Calculate P/L
+            if side == 'BUY':
+                pl_ratio = (current_price - entry_price) / entry_price
+            else:
+                pl_ratio = (entry_price - current_price) / entry_price
+
+            logger.info(f"📊 Position {position_id} ({side}): Entry={entry_price}, Current={current_price}, P/L={pl_ratio:.4f}")
+
+            # Check closure conditions
+            should_close, reason = self._should_close_position_strict(position, current_price, market_indicators)
+
+            if should_close:
+                logger.info(f"🔄 Closing position {position_id}: {reason}")
+                success = self._close_exchange_position_sync(position, current_price, reason)
+                if success:
+                    logger.info(f"✅ Position {position_id} closed successfully")
+                else:
+                    logger.error(f"❌ Failed to close position {position_id}")
+            else:
+                logger.info(f"📌 Position {position_id} remains open: {reason}")
+
+    def _should_close_position_strict(self, position, current_price, market_indicators):
+        """厳格なポジション決済判定（利確・損切り・反転シグナル）"""
+        side = position.get('side')
+        entry_price = float(position.get('price', 0))
+
+        # Calculate profit/loss ratio
+        if side == 'BUY':
+            pl_ratio = (current_price - entry_price) / entry_price
+        else:
+            pl_ratio = (entry_price - current_price) / entry_price
+
+        # Stop loss check (3% loss)
+        if pl_ratio <= -0.03:
+            return True, f"Stop loss triggered: {pl_ratio:.4f}"
+
+        # Take profit check (5% profit)
+        if pl_ratio >= 0.05:
+            return True, f"Take profit triggered: {pl_ratio:.4f}"
+
+        # Market reversal check
+        if market_indicators:
+            rsi = market_indicators.get('rsi_14', 50)
+            macd_line = market_indicators.get('macd_line', 0)
+            macd_signal = market_indicators.get('macd_signal', 0)
+
+            reversal_signals = 0
+
+            if side == 'BUY':
+                # Strong bearish signals to close BUY position
+                if rsi > 75:  # Extremely overbought
+                    reversal_signals += 1
+                if macd_line < macd_signal and abs(macd_line - macd_signal) > 0.5:
+                    reversal_signals += 1
+
+                if reversal_signals >= 2:
+                    return True, f"Strong bearish reversal detected ({reversal_signals}/2 signals)"
+
+            else:  # SELL position
+                # Strong bullish signals to close SELL position
+                if rsi < 25:  # Extremely oversold
+                    reversal_signals += 1
+                if macd_line > macd_signal and abs(macd_line - macd_signal) > 0.5:
+                    reversal_signals += 1
+
+                if reversal_signals >= 2:
+                    return True, f"Strong bullish reversal detected ({reversal_signals}/2 signals)"
+
+        return False, "No closure condition met"
+
     def _close_exchange_position_sync(self, position, current_price, reason):
         """個別ポジション決済（同期処理・成功確認付き）"""
         try:
@@ -977,21 +1053,27 @@ class FixedTradingBot:
                     logger.warning(f"❌ Insufficient JPY balance for leverage SELL order: {available_jpy}")
                     return False
 
-            # 【重要】注文実行前の最終ポジション確認
-            logger.info("🔍 FINAL position check before order execution...")
-            pre_order_positions = self.api.get_positions(symbol=symbol)
+            # 【最重要】注文実行前の3段階ポジション確認
+            logger.info("🔍 TRIPLE POSITION CHECK before order execution...")
 
-            if 'data' in pre_order_positions and 'list' in pre_order_positions['data']:
-                pre_positions = pre_order_positions['data']['list']
-                if pre_positions:
-                    logger.error(f"❌ ABORT: {len(pre_positions)} positions detected before order placement!")
-                    for pos in pre_positions:
-                        logger.error(f"   Position: {pos.get('side')} {pos.get('size')} @ {pos.get('price')} (ID: {pos.get('positionId')})")
-                    return False
-                else:
-                    logger.info("✅ CONFIRMED: No existing positions - safe to proceed")
-            else:
-                logger.info("✅ CONFIRMED: No position data - safe to proceed")
+            for check_round in range(3):
+                logger.info(f"🔍 Position check round {check_round + 1}/3...")
+                pre_order_positions = self.api.get_positions(symbol=symbol)
+
+                if 'data' in pre_order_positions and 'list' in pre_order_positions['data']:
+                    pre_positions = pre_order_positions['data']['list']
+                    if pre_positions:
+                        logger.error(f"❌ ABORT ROUND {check_round + 1}: {len(pre_positions)} positions detected!")
+                        for pos in pre_positions:
+                            logger.error(f"   Position: {pos.get('side')} {pos.get('size')} @ {pos.get('price')} (ID: {pos.get('positionId')})")
+                        return False
+
+                # Wait between checks
+                if check_round < 2:
+                    import time
+                    time.sleep(1)
+
+            logger.info("✅ TRIPLE CHECK PASSED: No positions detected in any round - safe to proceed")
 
             logger.info(f"🚀 EXECUTING {trade_type.upper()} ORDER: {trade_size} DOGE at {current_price} JPY")
 
