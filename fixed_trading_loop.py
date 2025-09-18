@@ -411,22 +411,26 @@ class FixedTradingBot:
 
                 logger.info(f"Available balance for trading - JPY: {available_jpy}, DOGE: {available_doge}")
 
-            # Calculate position size based on trade type (一括注文方式)
+            # Calculate optimal position size using enhanced risk management
+            confidence = indicators_data.get('signal_confidence', 0.8)  # Default confidence
+            position_size = self.risk_manager.calculate_position_size(
+                available_balance=available_jpy,
+                current_price=current_price,
+                symbol=symbol,
+                market_indicators=indicators_data,
+                confidence=confidence
+            )
+
             if trade_type.lower() == 'buy':
                 if available_jpy <= 100:
                     logger.error("Insufficient JPY balance for BUY trade")
                     return
-                # 利用可能残高の95%を使って最大限購入
-                usable_jpy = available_jpy * 0.95  # 手数料とバッファを考慮
-                position_size = usable_jpy / current_price  # JPYで購入できるDOGE数量
-                logger.info(f"一括BUY注文: 利用可能JPY {available_jpy} の95%({usable_jpy})でDOGE {position_size:.2f}を購入")
+                logger.info(f"Enhanced BUY order: {position_size:.2f} DOGE (optimized for market conditions)")
             else:  # SELL trade
-                if available_doge < 10:
-                    logger.error("Insufficient DOGE balance for SELL trade")
+                if available_jpy <= 100:  # For leverage SELL, need JPY as margin
+                    logger.error("Insufficient JPY balance for leverage SELL trade")
                     return
-                # 利用可能DOGEの95%を一括売却
-                position_size = available_doge * 0.95  # バッファを残す
-                logger.info(f"一括SELL注文: 利用可能DOGE {available_doge} の95%({position_size:.2f})を売却")
+                logger.info(f"Enhanced SELL order: {position_size:.2f} DOGE (optimized for market conditions)")
 
             logger.info(f"Calculated position size for {symbol}: {position_size}")
 
@@ -466,6 +470,10 @@ class FixedTradingBot:
                 new_trade.price = current_price
                 new_trade.status = 'open'
                 new_trade.indicators_data = indicators_data
+
+                # Initialize trailing stop price attribute if enabled
+                if self.risk_manager.trailing_stop_enabled:
+                    new_trade.trailing_stop_price = None
                 
                 if self.db_session:
                     self.db_session.add(new_trade)

@@ -33,13 +33,28 @@ class SimpleTradingLogic:
             # Calculate signals
             signals = []
             
-            # 1. RSI Signals (Strong weight)
-            if rsi < 35:
-                signals.append(('BUY', 'RSI Oversold', 0.8))
-                logger.info(f"RSI Buy Signal: {rsi:.2f} < 35 (oversold)")
-            elif rsi > 65:
-                signals.append(('SELL', 'RSI Overbought', 0.8))
-                logger.info(f"RSI Sell Signal: {rsi:.2f} > 65 (overbought)")
+            # 1. RSI Signals (Adaptive thresholds based on volatility)
+            volatility_score = self._calculate_market_volatility(market_data)
+
+            # Dynamic RSI thresholds - tighter in volatile markets, wider in stable markets
+            if volatility_score > 0.7:  # High volatility
+                rsi_oversold = 40  # Less sensitive in volatile markets
+                rsi_overbought = 60
+            elif volatility_score < 0.3:  # Low volatility
+                rsi_oversold = 30  # More sensitive in stable markets
+                rsi_overbought = 70
+            else:  # Medium volatility
+                rsi_oversold = 33  # Improved sensitivity (was 35)
+                rsi_overbought = 67  # Improved sensitivity (was 65)
+
+            if rsi < rsi_oversold:
+                signal_strength = 0.8 + (rsi_oversold - rsi) / 100  # Stronger signal for deeper oversold
+                signals.append(('BUY', 'RSI Oversold', min(signal_strength, 1.0)))
+                logger.info(f"RSI Buy Signal: {rsi:.2f} < {rsi_oversold} (adaptive oversold)")
+            elif rsi > rsi_overbought:
+                signal_strength = 0.8 + (rsi - rsi_overbought) / 100  # Stronger signal for deeper overbought
+                signals.append(('SELL', 'RSI Overbought', min(signal_strength, 1.0)))
+                logger.info(f"RSI Sell Signal: {rsi:.2f} > {rsi_overbought} (adaptive overbought)")
             
             # 2. MACD Signals (Medium weight)
             if macd_line > macd_signal and macd_line > 0:
@@ -75,8 +90,13 @@ class SimpleTradingLogic:
             logger.info(f"Buy signals: {[f'{s[1]}({s[2]})' for s in buy_signals]}")
             logger.info(f"Sell signals: {[f'{s[1]}({s[2]})' for s in sell_signals]}")
             
-            # Decision making
-            min_signal_strength = 0.8  # Lower threshold for more trades
+            # Dynamic decision threshold based on market volatility
+            if volatility_score > 0.7:  # High volatility - require stronger signals
+                min_signal_strength = 1.0
+            elif volatility_score < 0.3:  # Low volatility - accept weaker signals
+                min_signal_strength = 0.6
+            else:  # Medium volatility
+                min_signal_strength = 0.8
             
             if buy_strength >= min_signal_strength and buy_strength > sell_strength:
                 reasons = [s[1] for s in buy_signals]
@@ -137,3 +157,37 @@ class SimpleTradingLogic:
         except Exception as e:
             logger.error(f"Error getting market summary: {e}")
             return {'condition': 'Error', 'price': 0}
+
+    def _calculate_market_volatility(self, market_data):
+        """Calculate market volatility score from 0-1 based on indicators"""
+        try:
+            volatility_factors = []
+
+            # RSI volatility - distance from neutral
+            rsi = market_data.get('rsi_14', 50)
+            rsi_volatility = abs(rsi - 50) / 50
+            volatility_factors.append(min(rsi_volatility, 1))
+
+            # Bollinger Band width
+            bb_upper = market_data.get('bb_upper', 0)
+            bb_lower = market_data.get('bb_lower', 0)
+            close = market_data.get('close', 0)
+            if bb_upper > 0 and bb_lower > 0 and close > 0:
+                bb_width = (bb_upper - bb_lower) / close
+                bb_volatility = min(bb_width * 50, 1)
+                volatility_factors.append(bb_volatility)
+
+            # MACD momentum
+            macd_histogram = market_data.get('macd_histogram', 0)
+            macd_volatility = min(abs(macd_histogram) * 10, 1)
+            volatility_factors.append(macd_volatility)
+
+            # Average the factors
+            if volatility_factors:
+                return sum(volatility_factors) / len(volatility_factors)
+            else:
+                return 0.5  # Default medium volatility
+
+        except Exception as e:
+            logger.error(f"Error calculating market volatility: {e}")
+            return 0.5
