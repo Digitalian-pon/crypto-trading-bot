@@ -163,20 +163,25 @@ class FixedTradingBot:
         # Always run sync to handle orphaned positions, even if exchange_positions is empty
         self._sync_exchange_positions(exchange_positions, symbol)
         
-        if self.db_session:
+        if self.db_session and self.app:
             try:
-                user_id = self.user.id
-                active_trades = self.db_session.query(Trade).filter_by(
-                    user_id=user_id,
-                    currency_pair=symbol,
-                    status='open'
-                ).all()
-                
-                logger.info(f"Found {len(active_trades)} active trades in database")
+                with self.app.app_context():
+                    user_id = self.user.id
+                    active_trades = self.db_session.query(Trade).filter_by(
+                        user_id=user_id,
+                        currency_pair=symbol,
+                        status='open'
+                    ).all()
+
+                    logger.info(f"Found {len(active_trades)} active trades in database")
             except Exception as db_e:
                 logger.error(f"Database error while querying active trades: {db_e}")
                 try:
-                    self.db_session.rollback()
+                    if self.app:
+                        with self.app.app_context():
+                            self.db_session.rollback()
+                    else:
+                        self.db_session.rollback()
                 except:
                     pass
                     
@@ -318,17 +323,19 @@ class FixedTradingBot:
                 trade.profit_loss = pl['amount']
                 trade.closed_at = datetime.utcnow()
                 
-                if self.db_session:
-                    self.db_session.commit()
+                if self.db_session and self.app:
+                    with self.app.app_context():
+                        self.db_session.commit()
                 
                 logger.info(f"Trade {trade.id} closed successfully with P/L: {pl['amount']} ({pl['percentage']:.2f}%)")
             else:
                 logger.error(f"Failed to close trade {trade.id}: {result}")
                 
         except Exception as e:
-            if self.db_session:
+            if self.db_session and self.app:
                 try:
-                    self.db_session.rollback()
+                    with self.app.app_context():
+                        self.db_session.rollback()
                 except:
                     pass
             logger.error(f"Error closing trade {trade.id}: {e}")
@@ -488,9 +495,10 @@ class FixedTradingBot:
                 if self.risk_manager.trailing_stop_enabled:
                     new_trade.trailing_stop_price = None
                 
-                if self.db_session:
-                    self.db_session.add(new_trade)
-                    self.db_session.commit()
+                if self.db_session and self.app:
+                    with self.app.app_context():
+                        self.db_session.add(new_trade)
+                        self.db_session.commit()
                 
                 logger.info(f"New {trade_type} trade executed: {position_size_rounded} {symbol} at {current_price}")
             else:
@@ -498,9 +506,10 @@ class FixedTradingBot:
                 
         except Exception as e:
             logger.error(f"Error executing {trade_type} trade: {e}")
-            if self.db_session:
+            if self.db_session and self.app:
                 try:
-                    self.db_session.rollback()
+                    with self.app.app_context():
+                        self.db_session.rollback()
                 except:
                     pass
     
@@ -599,55 +608,60 @@ class FixedTradingBot:
                 price = float(position.get('price', 0))
                 
                 # Check if this position already exists in database
-                existing_trade = self.db_session.query(Trade).filter_by(
-                    exchange_position_id=position_id,
-                    currency_pair=symbol
-                ).first()
-                
-                if not existing_trade:
-                    # Create new trade record
-                    new_trade = Trade()
-                    new_trade.user_id = self.user.id
-                    new_trade.currency_pair = symbol
-                    new_trade.trade_type = side
-                    new_trade.amount = size
-                    new_trade.price = price
-                    new_trade.status = 'open'
-                    new_trade.exchange_position_id = position_id
-                    new_trade.created_at = datetime.utcnow()
-                    
-                    self.db_session.add(new_trade)
-                    logger.info(f"Synced new {side.upper()} position: {size} {symbol} at {price}")
-            
+                if self.app:
+                    with self.app.app_context():
+                        existing_trade = self.db_session.query(Trade).filter_by(
+                            exchange_position_id=position_id,
+                            currency_pair=symbol
+                        ).first()
+
+                        if not existing_trade:
+                            # Create new trade record
+                            new_trade = Trade()
+                            new_trade.user_id = self.user.id
+                            new_trade.currency_pair = symbol
+                            new_trade.trade_type = side
+                            new_trade.amount = size
+                            new_trade.price = price
+                            new_trade.status = 'open'
+                            new_trade.exchange_position_id = position_id
+                            new_trade.created_at = datetime.utcnow()
+
+                            self.db_session.add(new_trade)
+                            logger.info(f"Synced new {side.upper()} position: {size} {symbol} at {price}")
+
             # CRITICAL FIX: Remove orphaned positions from database
             # Get all database trades for this user and symbol
-            db_trades = self.db_session.query(Trade).filter_by(
-                user_id=self.user.id,
-                currency_pair=symbol,
-                status='open'
-            ).all()
-            
-            orphaned_count = 0
-            for trade in db_trades:
-                if trade.exchange_position_id and trade.exchange_position_id not in exchange_position_ids:
-                    # This trade exists in DB but not on exchange - mark as closed
-                    logger.info(f"Removing orphaned position: Trade {trade.id} (Position ID: {trade.exchange_position_id})")
-                    trade.status = 'closed'
-                    trade.closing_price = trade.price  # Use entry price as close approximation
-                    trade.closed_at = datetime.utcnow()
-                    orphaned_count += 1
-            
-            if orphaned_count > 0:
-                logger.info(f"Cleaned up {orphaned_count} orphaned positions from database")
-            
-            self.db_session.commit()
-            logger.info("Bi-directional exchange-database sync completed")
+            if self.app:
+                with self.app.app_context():
+                    db_trades = self.db_session.query(Trade).filter_by(
+                        user_id=self.user.id,
+                        currency_pair=symbol,
+                        status='open'
+                    ).all()
+
+                    orphaned_count = 0
+                    for trade in db_trades:
+                        if trade.exchange_position_id and trade.exchange_position_id not in exchange_position_ids:
+                            # This trade exists in DB but not on exchange - mark as closed
+                            logger.info(f"Removing orphaned position: Trade {trade.id} (Position ID: {trade.exchange_position_id})")
+                            trade.status = 'closed'
+                            trade.closing_price = trade.price  # Use entry price as close approximation
+                            trade.closed_at = datetime.utcnow()
+                            orphaned_count += 1
+
+                    if orphaned_count > 0:
+                        logger.info(f"Cleaned up {orphaned_count} orphaned positions from database")
+
+                    self.db_session.commit()
+                    logger.info("Bi-directional exchange-database sync completed")
             
         except Exception as e:
             logger.error(f"Error syncing exchange positions: {e}")
-            if self.db_session:
+            if self.db_session and self.app:
                 try:
-                    self.db_session.rollback()
+                    with self.app.app_context():
+                        self.db_session.rollback()
                 except:
                     pass
     
@@ -766,17 +780,18 @@ class FixedTradingBot:
             if result.get('status') == 0:
                 logger.info(f"Position {position_id} closed successfully: {result}")
                 # Update database if trade exists
-                if self.db_session:
+                if self.db_session and self.app:
                     try:
                         from models import Trade
-                        db_trade = self.db_session.query(Trade).filter_by(
-                            exchange_position_id=position_id
-                        ).first()
-                        if db_trade:
-                            db_trade.status = 'closed'
-                            db_trade.closing_price = current_price
-                            db_trade.closed_at = datetime.utcnow()
-                            self.db_session.commit()
+                        with self.app.app_context():
+                            db_trade = self.db_session.query(Trade).filter_by(
+                                exchange_position_id=position_id
+                            ).first()
+                            if db_trade:
+                                db_trade.status = 'closed'
+                                db_trade.closing_price = current_price
+                                db_trade.closed_at = datetime.utcnow()
+                                self.db_session.commit()
                     except Exception as db_e:
                         logger.error(f"Error updating database after close: {db_e}")
             else:
@@ -889,18 +904,19 @@ class FixedTradingBot:
                 logger.info(f"✅ Position {position_id} API call successful: {result}")
 
                 # Update database if trade exists
-                if self.db_session:
+                if self.db_session and self.app:
                     try:
                         from models import Trade
-                        db_trade = self.db_session.query(Trade).filter_by(
-                            exchange_position_id=position_id
-                        ).first()
-                        if db_trade:
-                            db_trade.status = 'closed'
-                            db_trade.closing_price = current_price
-                            db_trade.closed_at = datetime.utcnow()
-                            self.db_session.commit()
-                            logger.info(f"📊 Database updated for position {position_id}")
+                        with self.app.app_context():
+                            db_trade = self.db_session.query(Trade).filter_by(
+                                exchange_position_id=position_id
+                            ).first()
+                            if db_trade:
+                                db_trade.status = 'closed'
+                                db_trade.closing_price = current_price
+                                db_trade.closed_at = datetime.utcnow()
+                                self.db_session.commit()
+                                logger.info(f"📊 Database updated for position {position_id}")
                     except Exception as db_e:
                         logger.error(f"Database update error: {db_e}")
 
