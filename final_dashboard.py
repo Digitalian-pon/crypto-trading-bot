@@ -139,18 +139,18 @@ class FinalDashboard:
             reason = signal.get('reason', '不明')
             confidence = signal.get('confidence', 0.0)
 
-            # Signal status color
+            # Signal status color - 高コントラスト版
             if should_trade and trade_type:
                 if trade_type.upper() == 'BUY':
-                    signal_color = '#4CAF50'  # Green
+                    signal_color = '#00E676'  # Bright Green
                     signal_icon = '📈'
                     signal_text = '買いシグナル'
                 else:
-                    signal_color = '#F44336'  # Red
+                    signal_color = '#FF1744'  # Bright Red
                     signal_icon = '📉'
                     signal_text = '売りシグナル'
             else:
-                signal_color = '#FFC107'  # Yellow
+                signal_color = '#FFEB3B'  # Bright Yellow
                 signal_icon = '⏸️'
                 signal_text = 'シグナルなし'
 
@@ -172,22 +172,22 @@ class FinalDashboard:
 
             signal_html = f'''
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid {signal_color};">
+                <div style="background: rgba(255,255,255,0.12); padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid {signal_color}; border: 1px solid rgba(255,255,255,0.15);">
                     <div style="font-size: 2em; margin-bottom: 10px;">{signal_icon}</div>
-                    <div style="font-size: 1.5em; font-weight: bold; color: {signal_color}; margin-bottom: 10px;">{signal_text}</div>
-                    <div style="margin-bottom: 10px;"><strong>信頼度:</strong> {confidence:.2f}/1.0</div>
-                    <div style="font-size: 0.9em; color: #ccc;">判断理由: {reason}</div>
+                    <div style="font-size: 1.5em; font-weight: bold; color: {signal_color}; margin-bottom: 10px; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{signal_text}</div>
+                    <div style="margin-bottom: 10px; color: #ffffff;"><strong>信頼度:</strong> {confidence:.2f}/1.0</div>
+                    <div style="font-size: 0.9em; color: #e0e0e0;">判断理由: {reason}</div>
                 </div>
 
-                <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;">
-                    <h4 style="margin: 0 0 15px 0; color: #FFC107;">📊 テクニカル指標</h4>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em;">
-                        <div><strong>RSI:</strong> {format_indicator(rsi)}</div>
-                        <div><strong>MACD線:</strong> {format_indicator(macd_line)}</div>
-                        <div><strong>MACDシグナル:</strong> {format_indicator(macd_signal)}</div>
-                        <div><strong>BB上限:</strong> ¥{format_indicator(bb_upper)}</div>
-                        <div><strong>BB下限:</strong> ¥{format_indicator(bb_lower)}</div>
-                        <div><strong>現在価格:</strong> ¥{self.current_price:.3f}</div>
+                <div style="background: rgba(255,255,255,0.12); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15);">
+                    <h4 style="margin: 0 0 15px 0; color: #FFEB3B; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">📊 テクニカル指標</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em; color: #ffffff;">
+                        <div style="color: #ffffff;"><strong>RSI:</strong> {format_indicator(rsi)}</div>
+                        <div style="color: #ffffff;"><strong>MACD線:</strong> {format_indicator(macd_line)}</div>
+                        <div style="color: #ffffff;"><strong>MACDシグナル:</strong> {format_indicator(macd_signal)}</div>
+                        <div style="color: #ffffff;"><strong>BB上限:</strong> ¥{format_indicator(bb_upper)}</div>
+                        <div style="color: #ffffff;"><strong>BB下限:</strong> ¥{format_indicator(bb_lower)}</div>
+                        <div style="color: #ffffff;"><strong>現在価格:</strong> ¥{self.current_price:.3f}</div>
                     </div>
                 </div>
             </div>
@@ -220,16 +220,16 @@ class FinalDashboard:
                         pnl = (entry_price - self.current_price) * size
                     total_pnl += pnl
 
-                pnl_color = "#4CAF50" if pnl > 0 else "#F44336" if pnl < 0 else "#FFC107"
+                pnl_color = "#00E676" if pnl > 0 else "#FF1744" if pnl < 0 else "#FFEB3B"
 
                 position_html += f'''
-                <div style="background: rgba(255,255,255,0.1); padding: 15px; margin: 8px; border-radius: 8px; border-left: 4px solid #2196F3;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <div style="background: rgba(255,255,255,0.12); padding: 15px; margin: 8px; border-radius: 8px; border-left: 4px solid #2196F3; border: 1px solid rgba(255,255,255,0.15);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; color: #ffffff;">
                         <strong>ポジションID: {pos['positionId']}</strong>
-                        <strong style="color: {pnl_color};">含み損益: ¥{pnl:+,.0f}</strong>
+                        <strong style="color: {pnl_color}; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">含み損益: ¥{pnl:+,.0f}</strong>
                     </div>
-                    <div><strong>方向:</strong> {pos['side']} | <strong>数量:</strong> {pos['size']} | <strong>エントリー価格:</strong> ¥{pos['price']}</div>
-                    <div><strong>レバレッジ:</strong> {pos['leverage']}倍 | <strong>ロスカット価格:</strong> ¥{pos['losscutPrice']}</div>
+                    <div style="color: #ffffff;"><strong>方向:</strong> {pos['side']} | <strong>数量:</strong> {pos['size']} | <strong>エントリー価格:</strong> ¥{pos['price']}</div>
+                    <div style="color: #ffffff;"><strong>レバレッジ:</strong> {pos['leverage']}倍 | <strong>ロスカット価格:</strong> ¥{pos['losscutPrice']}</div>
                 </div>
                 '''
         else:
@@ -259,10 +259,10 @@ class FinalDashboard:
                 balance_html = f'''
                 <div style="background: rgba(76, 175, 80, 0.15); padding: 20px; border-radius: 8px; margin: 5px;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div><strong>利用可能残高:</strong><br><span style="font-size: 1.3em; color: #4CAF50;">¥{format_value(available)}</span></div>
-                        <div><strong>証拠金:</strong><br><span style="font-size: 1.3em; color: #FF9800;">¥{format_value(margin)}</span></div>
-                        <div><strong>実現損益:</strong><br><span style="font-size: 1.3em; color: #2196F3;">¥{format_value(actual_pnl)}</span></div>
-                        <div><strong>含み損益合計:</strong><br><span style="font-size: 1.3em; color: {'#4CAF50' if total_pnl >= 0 else '#F44336'};">¥{total_pnl:+,.0f}</span></div>
+                        <div style="color: #ffffff;"><strong>利用可能残高:</strong><br><span style="font-size: 1.3em; color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{format_value(available)}</span></div>
+                        <div style="color: #ffffff;"><strong>証拠金:</strong><br><span style="font-size: 1.3em; color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{format_value(margin)}</span></div>
+                        <div style="color: #ffffff;"><strong>実現損益:</strong><br><span style="font-size: 1.3em; color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{format_value(actual_pnl)}</span></div>
+                        <div style="color: #ffffff;"><strong>含み損益合計:</strong><br><span style="font-size: 1.3em; color: {'#00E676' if total_pnl >= 0 else '#FF1744'}; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{total_pnl:+,.0f}</span></div>
                     </div>
                 </div>
                 '''
@@ -279,8 +279,8 @@ class FinalDashboard:
     <style>
         body {{
             font-family: Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #ffffff;
             margin: 0;
             padding: 20px;
             min-height: 100vh;
@@ -291,18 +291,19 @@ class FinalDashboard:
         }}
         .header {{
             text-align: center;
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.15);
             padding: 30px;
             border-radius: 15px;
             margin-bottom: 20px;
             backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }}
         .price {{
             font-size: 4em;
-            color: #4CAF50;
+            color: #00E676;
             font-weight: bold;
             margin: 20px 0;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            text-shadow: 2px 2px 8px rgba(0,0,0,0.5);
         }}
         .status-grid {{
             display: grid;
@@ -311,11 +312,12 @@ class FinalDashboard:
             margin-bottom: 30px;
         }}
         .status-card {{
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.12);
             padding: 20px;
             border-radius: 10px;
             text-align: center;
             backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
         }}
         .status-value {{
             font-size: 2em;
@@ -323,11 +325,12 @@ class FinalDashboard:
             margin: 10px 0;
         }}
         .section {{
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255, 255, 255, 0.08);
             padding: 25px;
             border-radius: 15px;
             margin-bottom: 20px;
             backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
         }}
         .section h2 {{
             margin: 0 0 20px 0;
@@ -347,20 +350,20 @@ class FinalDashboard:
 
         <div class="status-grid">
             <div class="status-card">
-                <div>アクティブポジション</div>
-                <div class="status-value" style="color: #2196F3;">{len(self.api_positions)}個</div>
+                <div style="color: #ffffff;">アクティブポジション</div>
+                <div class="status-value" style="color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{len(self.api_positions)}個</div>
             </div>
             <div class="status-card">
-                <div>24時間高値</div>
-                <div class="status-value" style="color: #4CAF50;">¥{self.high:.3f}</div>
+                <div style="color: #ffffff;">24時間高値</div>
+                <div class="status-value" style="color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{self.high:.3f}</div>
             </div>
             <div class="status-card">
-                <div>24時間安値</div>
-                <div class="status-value" style="color: #F44336;">¥{self.low:.3f}</div>
+                <div style="color: #ffffff;">24時間安値</div>
+                <div class="status-value" style="color: #FF1744; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{self.low:.3f}</div>
             </div>
             <div class="status-card">
-                <div>24時間出来高</div>
-                <div class="status-value" style="color: #FF9800;">{self.volume:,.0f}</div>
+                <div style="color: #ffffff;">24時間出来高</div>
+                <div class="status-value" style="color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{self.volume:,.0f}</div>
             </div>
         </div>
 
@@ -381,7 +384,7 @@ class FinalDashboard:
 
         <div class="section" style="text-align: center; color: #ccc; font-size: 0.9em;">
             <p>🔄 GMO Coin APIからリアルタイムデータを取得</p>
-            <p>📡 URL: http://localhost:8082</p>
+            <p>📡 URL: http://localhost:8083</p>
         </div>
     </div>
 </body>
@@ -414,7 +417,7 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(500, f"Internal Server Error: {str(e)}")
 
 if __name__ == "__main__":
-    PORT = 8082
+    PORT = 8083
     HOST = "0.0.0.0"
 
     logger.info(f"Starting Final Dashboard on {HOST}:{PORT}")
