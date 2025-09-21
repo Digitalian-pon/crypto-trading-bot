@@ -417,7 +417,7 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(500, f"Internal Server Error: {str(e)}")
 
 if __name__ == "__main__":
-    PORT = 8083
+    PORT = 8082
     HOST = "0.0.0.0"
 
     logger.info(f"Starting Final Dashboard on {HOST}:{PORT}")
