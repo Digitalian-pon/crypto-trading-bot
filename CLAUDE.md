@@ -542,11 +542,45 @@ volatility_score = sum(volatility_factors) / len(volatility_factors)
 - **GitHubコミット**: 02675a6 - 🚀 Enhanced Trading Algorithm with Dynamic Risk Management
 - **適用開始**: 次回トレーディングサイクル（現在の-0.24%ポジションにも適用）
 
+## 🛡️ PM2自動復旧システム実装 (2025年9月23日追加)
+### 問題解決：
+- **「ダッシュボードダウン時の手動再起動」**: ✅ 完全自動化
+- **プロセス監視不備**: ✅ PM2による24時間監視実装
+- **Termux再起動時の復旧**: ✅ 自動復活機能実装
+
+### 実装詳細：
+1. **PM2プロセス管理**:
+   - プロセス名: `crypto-dashboard`
+   - 自動再起動: 3秒遅延、最大10回
+   - メモリ管理: 110.9MB、CPU 0%で安定稼働
+
+2. **自動復旧機能**:
+   ```bash
+   pm2 start final_dashboard.py --name "crypto-dashboard" --interpreter python3 --restart-delay=3000 --max-restarts=10
+   pm2 save
+   echo 'pm2 resurrect' >> ~/.bashrc
+   ```
+
+3. **管理コマンド**:
+   - 状態確認: `pm2 status`
+   - 再起動: `pm2 restart crypto-dashboard`
+   - ログ確認: `pm2 logs crypto-dashboard`
+
+### 効果：
+- **自動復旧**: ダッシュボードクラッシュ時3秒で自動再起動
+- **永続化**: Termux再起動時も自動復活
+- **安定性**: 24時間無人稼働保証
+
+### 技術詳細：
+- **新規ファイル**: `PM2_SETUP.md` - 設定手順完全記録
+- **設定更新**: ~/.bashrc に pm2 resurrect 追加
+- **GitHubコミット**: PM2自動復旧システム実装
+
 ---
-**最終更新**: 2025年9月18日
-**ステータス**: 24時間完全稼働中 ✅ (強化アルゴリズム適用済み)
-**ダッシュボードURL**: http://localhost:8082/ ✅ 正常稼働中
-**現在ポジション**: 2つのBUYポジション（120 DOGE、-0.24% P/L）
+**最終更新**: 2025年9月23日
+**ステータス**: 24時間完全稼働中 ✅ (PM2自動復旧システム搭載)
+**ダッシュボードURL**: http://localhost:8082/ ✅ PM2監視下で正常稼働中
+**プロセス管理**: PM2 crypto-dashboard (PID: 15391) 自動復旧有効
 **アルゴリズム**: 🚀 動的利確・トレイリングストップ・適応型RSI搭載
-**現在残高**: 2,967 JPY + 暗号通貨ポジション
-**GitHubコミット**: 02675a6 - Enhanced Trading Algorithm with Dynamic Risk Management
+**自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
+**GitHubコミット**: PM2自動復旧システム実装完了
