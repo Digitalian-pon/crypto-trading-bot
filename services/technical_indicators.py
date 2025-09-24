@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import logging
+import talib
+from config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -68,44 +70,90 @@ class TechnicalIndicators:
         d_percent = k_percent.rolling(window=d_window).mean()
         
         return k_percent, d_percent
-    
+
+    @staticmethod
+    def calculate_atr(high, low, close, timeperiod=14):
+        """Average True Range"""
+        return talib.ATR(high.to_numpy(), low.to_numpy(), close.to_numpy(), timeperiod=timeperiod)
+
     @staticmethod
     def add_all_indicators(df):
-        """Add all technical indicators to DataFrame"""
+        """Add all technical indicators to DataFrame with dynamic adjustments."""
         try:
-            # Basic moving averages - Changed SMA to EMA for better responsiveness
-            df['ema_20'] = TechnicalIndicators.calculate_ema(df['close'], 20)
-            df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], 12)
-            df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], 26)
+            config = load_config()
+
+            # Ensure high, low, close columns exist
+            if not all(col in df.columns for col in ['high', 'low', 'close']):
+                logger.error("DataFrame must contain 'high', 'low', and 'close' columns.")
+                return df
+
+            # --- Dynamic Parameter Logic ---
+            df['atr'] = TechnicalIndicators.calculate_atr(df['high'], df['low'], df['close'])
+            latest_atr = df['atr'].rolling(window=3).mean().iloc[-1]
             
-            # RSI
-            df['rsi_14'] = TechnicalIndicators.calculate_rsi(df['close'], 14)
+            volatility_threshold = config.getfloat('DynamicParameters', 'volatility_threshold', fallback=50000)
+
+            if latest_atr > volatility_threshold:
+                profile = "HighVolatility"
+            else:
+                profile = "LowVolatility"
+
+            # Load parameters from config based on profile
+            rsi_window = config.getint(profile, 'rsi_window')
+            ema_window = config.getint(profile, 'ema_window')
+            macd_fast = config.getint(profile, 'macd_fast')
+            macd_slow = config.getint(profile, 'macd_slow')
+            macd_signal = config.getint(profile, 'macd_signal')
+            bb_window = config.getint(profile, 'bb_window')
+            bb_std = config.getfloat(profile, 'bb_std')
+
+            # Store dynamic params for debugging/logging
+            df['dynamic_profile'] = profile.replace("Volatility", "")
+            df['dynamic_rsi_window'] = rsi_window
+
+            # --- Indicator Calculations ---
+            # EMA
+            df[f'ema_{ema_window}'] = TechnicalIndicators.calculate_ema(df['close'], ema_window)
             
-            # MACD
-            macd_line, signal_line, histogram = TechnicalIndicators.calculate_macd(df['close'])
+            # RSI with dynamic window
+            df[f'rsi_{rsi_window}'] = TechnicalIndicators.calculate_rsi(df['close'], rsi_window)
+            
+            # MACD with dynamic parameters
+            macd_line, signal_line, histogram = TechnicalIndicators.calculate_macd(
+                df['close'], fast=macd_fast, slow=macd_slow, signal=macd_signal
+            )
             df['macd_line'] = macd_line
             df['macd_signal'] = signal_line
             df['macd_histogram'] = histogram
             
-            # Bollinger Bands - Updated to use EMA instead of SMA for middle band
-            bb_upper, bb_lower, bb_middle = TechnicalIndicators.calculate_bollinger_bands_ema(df['close'])
+            # Bollinger Bands with dynamic parameters
+            bb_upper, bb_lower, bb_middle = TechnicalIndicators.calculate_bollinger_bands_ema(
+                df['close'], window=bb_window, std=bb_std
+            )
             df['bb_upper'] = bb_upper
             df['bb_lower'] = bb_lower
             df['bb_middle'] = bb_middle
             
-            # Stochastic (if high/low columns exist)
-            if 'high' in df.columns and 'low' in df.columns:
-                stoch_k, stoch_d = TechnicalIndicators.calculate_stochastic(
-                    df['high'], df['low'], df['close']
-                )
-                df['stoch_k'] = stoch_k
-                df['stoch_d'] = stoch_d
+            # Stochastic (remains with fixed params for now)
+            stoch_k, stoch_d = TechnicalIndicators.calculate_stochastic(
+                df['high'], df['low'], df['close']
+            )
+            df['stoch_k'] = stoch_k
+            df['stoch_d'] = stoch_d
             
-            logger.info("All technical indicators added successfully")
+            log_msg = (
+                f"Indicators added with profile: {profile}. "
+                f"RSI_win: {rsi_window}, "
+                f"MACD:({macd_fast},{macd_slow},{macd_signal}), "
+                f"BB:({bb_window},{bb_std})"
+            )
+            logger.info(log_msg)
             return df
             
         except Exception as e:
             logger.error(f"Error calculating technical indicators: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return df
     
     @staticmethod
