@@ -726,16 +726,16 @@ class FixedTradingBot:
         if side == 'buy':
             # Check for strong sell signals to close buy position
             bearish_signals = 0
-            
+
             if rsi > 70:  # Overbought
                 bearish_signals += 1
             if macd_line < macd_signal and abs(macd_line - macd_signal) > 0.1:  # MACD bearish
                 bearish_signals += 1
             if ema_12 < ema_26 and (ema_26 - ema_12) / ema_26 > 0.01:  # Death cross
                 bearish_signals += 1
-            if current_price < bb_middle and current_price < bb_lower * 1.01:  # Below BB middle
+            if current_price > bb_upper * 0.98:  # Price near upper BB (overbought reversal)
                 bearish_signals += 1
-                
+
             if bearish_signals >= 2:
                 return True, f"Strong bearish reversal detected ({bearish_signals}/4 signals)"
                 
@@ -743,13 +743,13 @@ class FixedTradingBot:
             # Check for strong buy signals to close sell position
             bullish_signals = 0
 
-            if rsi < 35:  # Oversold (緩和: 30 -> 35)
+            if rsi < 35:  # Oversold
                 bullish_signals += 1
-            if macd_line > macd_signal and abs(macd_line - macd_signal) > 0.05:  # MACD bullish (緩和: 0.1 -> 0.05)
+            if macd_line > macd_signal and abs(macd_line - macd_signal) > 0.05:  # MACD bullish
                 bullish_signals += 1
-            if ema_12 > ema_26 and (ema_12 - ema_26) / ema_26 > 0.005:  # Golden cross (緩和: 0.01 -> 0.005)
+            if ema_12 > ema_26 and (ema_12 - ema_26) / ema_26 > 0.005:  # Golden cross
                 bullish_signals += 1
-            if current_price > bb_lower * 1.02:  # 価格がボリンジャーバンド下限より2%上 (大幅緩和)
+            if current_price < bb_lower * 1.02:  # Price near lower BB (oversold bounce)
                 bullish_signals += 1
 
             if bullish_signals >= 2:
