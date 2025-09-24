@@ -70,28 +70,118 @@ class TechnicalIndicators:
         return k_percent, d_percent
     
     @staticmethod
+    def calculate_market_regime(df):
+        """Calculate market regime: trending, ranging, or volatile"""
+        if len(df) < 50:
+            return 'ranging', 0.5
+
+        # ATR-based volatility
+        atr = TechnicalIndicators.calculate_atr(df['high'], df['low'], df['close'], 14)
+        atr_pct = (atr / df['close']) * 100
+
+        # Trend strength using ADX concept
+        high_low_range = df['high'].rolling(20).max() - df['low'].rolling(20).min()
+        close_range = df['close'].iloc[-1] - df['close'].iloc[-20] if len(df) >= 20 else 0
+        trend_strength = abs(close_range) / high_low_range.iloc[-1] if high_low_range.iloc[-1] > 0 else 0
+
+        volatility_score = atr_pct.iloc[-1]
+
+        if volatility_score > 3.0:  # High volatility
+            return 'volatile', volatility_score / 5.0
+        elif trend_strength > 0.6:  # Strong trend
+            return 'trending', trend_strength
+        else:
+            return 'ranging', 0.5
+
+    @staticmethod
+    def calculate_atr(high, low, close, period=14):
+        """Average True Range"""
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return tr.rolling(period).mean()
+
+    @staticmethod
+    def get_adaptive_parameters(df):
+        """Get adaptive parameters based on market regime"""
+        regime, strength = TechnicalIndicators.calculate_market_regime(df)
+
+        if regime == 'volatile':
+            # Volatile market: wider bands, longer periods
+            return {
+                'rsi_period': 21,  # Slower RSI
+                'bb_period': 30,   # Wider BB
+                'bb_std': 2.5,     # Wider bands
+                'ema_fast': 15,
+                'ema_slow': 35,
+                'macd_fast': 15,
+                'macd_slow': 35,
+                'regime': regime
+            }
+        elif regime == 'trending':
+            # Trending market: standard parameters
+            return {
+                'rsi_period': 14,
+                'bb_period': 20,
+                'bb_std': 2.0,
+                'ema_fast': 12,
+                'ema_slow': 26,
+                'macd_fast': 12,
+                'macd_slow': 26,
+                'regime': regime
+            }
+        else:  # ranging
+            # Ranging market: tighter bands, shorter periods
+            return {
+                'rsi_period': 9,   # Faster RSI
+                'bb_period': 15,   # Tighter BB
+                'bb_std': 1.5,     # Narrower bands
+                'ema_fast': 8,
+                'ema_slow': 21,
+                'macd_fast': 8,
+                'macd_slow': 21,
+                'regime': regime
+            }
+
+    @staticmethod
     def add_all_indicators(df):
-        """Add all technical indicators to DataFrame"""
+        """Add all technical indicators to DataFrame with adaptive parameters"""
         try:
-            # Basic moving averages - Changed SMA to EMA for better responsiveness
-            df['ema_20'] = TechnicalIndicators.calculate_ema(df['close'], 20)
-            df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], 12)
-            df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], 26)
-            
-            # RSI
-            df['rsi_14'] = TechnicalIndicators.calculate_rsi(df['close'], 14)
-            
-            # MACD
-            macd_line, signal_line, histogram = TechnicalIndicators.calculate_macd(df['close'])
+            # Get adaptive parameters based on market regime
+            params = TechnicalIndicators.get_adaptive_parameters(df)
+
+            # Basic moving averages with adaptive periods
+            df['ema_20'] = TechnicalIndicators.calculate_ema(df['close'], 20)  # Keep for compatibility
+            df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_fast'])
+            df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_slow'])
+
+            # RSI with adaptive period
+            df['rsi_14'] = TechnicalIndicators.calculate_rsi(df['close'], params['rsi_period'])
+
+            # MACD with adaptive parameters
+            macd_line, signal_line, histogram = TechnicalIndicators.calculate_macd(
+                df['close'],
+                fast=params['macd_fast'],
+                slow=params['macd_slow'],
+                signal=9
+            )
             df['macd_line'] = macd_line
             df['macd_signal'] = signal_line
             df['macd_histogram'] = histogram
-            
-            # Bollinger Bands - Updated to use EMA instead of SMA for middle band
-            bb_upper, bb_lower, bb_middle = TechnicalIndicators.calculate_bollinger_bands_ema(df['close'])
+
+            # Bollinger Bands with adaptive parameters
+            bb_upper, bb_lower, bb_middle = TechnicalIndicators.calculate_bollinger_bands_ema(
+                df['close'],
+                window=params['bb_period'],
+                std=params['bb_std']
+            )
             df['bb_upper'] = bb_upper
             df['bb_lower'] = bb_lower
             df['bb_middle'] = bb_middle
+
+            # Store market regime info
+            df['market_regime'] = params['regime']
             
             # Stochastic (if high/low columns exist)
             if 'high' in df.columns and 'low' in df.columns:
@@ -101,7 +191,7 @@ class TechnicalIndicators:
                 df['stoch_k'] = stoch_k
                 df['stoch_d'] = stoch_d
             
-            logger.info("All technical indicators added successfully")
+            logger.info(f"Technical indicators added with adaptive parameters (regime: {params['regime']})")
             return df
             
         except Exception as e:
