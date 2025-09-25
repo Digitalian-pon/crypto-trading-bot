@@ -423,12 +423,43 @@ if __name__ == "__main__":
     logger.info(f"Starting Final Dashboard on {HOST}:{PORT}")
     logger.info("Features: Real positions, balance, P&L calculation")
 
+    # エラーハンドリング強化
+    import signal
+    import sys
+    import traceback
+
+    def signal_handler(signum, frame):
+        logger.info("Received shutdown signal - graceful shutdown")
+        sys.exit(0)
+
+    def exception_handler(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    # シグナル・例外ハンドラ設定
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    sys.excepthook = exception_handler
+
     try:
         with socketserver.TCPServer((HOST, PORT), FinalDashboardHandler) as httpd:
             logger.info("Final dashboard server started successfully")
             httpd.serve_forever()
     except KeyboardInterrupt:
         logger.info("Dashboard server stopped by user")
+        sys.exit(0)
     except Exception as e:
         logger.error(f"Server error: {e}")
-        raise
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+        # 自動再起動試行
+        logger.info("Attempting automatic recovery...")
+        try:
+            import subprocess
+            subprocess.run(['./auto_recovery.sh'], check=True, cwd='/data/data/com.termux/files/home/crypto-trading-bot')
+        except Exception as recovery_error:
+            logger.error(f"Auto recovery failed: {recovery_error}")
+
+        sys.exit(1)
