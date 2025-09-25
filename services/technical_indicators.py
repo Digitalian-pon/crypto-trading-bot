@@ -153,6 +153,7 @@ class TechnicalIndicators:
 
             # Basic moving averages with adaptive periods
             df['ema_20'] = TechnicalIndicators.calculate_ema(df['close'], 20)  # Keep for compatibility
+            df['ema_50'] = TechnicalIndicators.calculate_ema(df['close'], 50)  # Add for trend confirmation
             df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_fast'])
             df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_slow'])
 

@@ -7,7 +7,7 @@ import sys
 import traceback
 from services.gmo_api import GMOCoinAPI
 from services.technical_indicators import TechnicalIndicators
-from services.simple_trading_logic import SimpleTradingLogic
+from services.enhanced_trading_logic import EnhancedTradingLogic as SimpleTradingLogic
 from services.risk_manager import RiskManager
 from services.data_service import DataService
 from services.logger_service import TradeLogger

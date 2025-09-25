@@ -19,7 +19,7 @@ from app import app
 from models import User
 from services.gmo_api import GMOCoinAPI
 from services.data_service import DataService
-from services.simple_trading_logic import SimpleTradingLogic
+from services.enhanced_trading_logic import EnhancedTradingLogic as SimpleTradingLogic
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -139,16 +139,48 @@ class FinalDashboard:
             reason = signal.get('reason', '不明')
             confidence = signal.get('confidence', 0.0)
 
-            # Signal status color - 高コントラスト版
+            # Enhanced Signal Logic - Consider Current Positions
             if should_trade and trade_type:
+                # Check if we have existing positions
+                has_buy_position = any(pos['side'].upper() == 'BUY' for pos in self.api_positions)
+                has_sell_position = any(pos['side'].upper() == 'SELL' for pos in self.api_positions)
+
                 if trade_type.upper() == 'BUY':
-                    signal_color = '#00E676'  # Bright Green
-                    signal_icon = '📈'
-                    signal_text = '買いシグナル'
-                else:
-                    signal_color = '#FF1744'  # Bright Red
-                    signal_icon = '📉'
-                    signal_text = '売りシグナル'
+                    if has_sell_position:
+                        # BUY signal with SELL position = Close SELL position
+                        signal_color = '#00E676'  # Bright Green
+                        signal_icon = '🔄'
+                        signal_text = 'SELL決済シグナル'
+                        reason = f'SELL決済: {reason}'
+                    elif has_buy_position:
+                        # BUY signal with BUY position = Hold/Wait
+                        signal_color = '#FFEB3B'  # Yellow
+                        signal_icon = '⏸️'
+                        signal_text = 'BUYポジション保持中'
+                        reason = 'ポジション保持・決済待ち'
+                    else:
+                        # BUY signal with no position = New BUY
+                        signal_color = '#00E676'  # Bright Green
+                        signal_icon = '📈'
+                        signal_text = '新規買いシグナル'
+                else:  # SELL signal
+                    if has_buy_position:
+                        # SELL signal with BUY position = Close BUY position
+                        signal_color = '#FF1744'  # Bright Red
+                        signal_icon = '🔄'
+                        signal_text = 'BUY決済シグナル'
+                        reason = f'BUY決済: {reason}'
+                    elif has_sell_position:
+                        # SELL signal with SELL position = Hold/Wait
+                        signal_color = '#FFEB3B'  # Yellow
+                        signal_icon = '⏸️'
+                        signal_text = 'SELLポジション保持中'
+                        reason = 'ポジション保持・決済待ち'
+                    else:
+                        # SELL signal with no position = New SELL
+                        signal_color = '#FF1744'  # Bright Red
+                        signal_icon = '📉'
+                        signal_text = '新規売りシグナル'
             else:
                 signal_color = '#FFEB3B'  # Bright Yellow
                 signal_icon = '⏸️'
