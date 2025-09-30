@@ -160,13 +160,25 @@ class GMOCoinAPI:
     def get_ticker(self, symbol="BTC_JPY"):
         """
         Get current ticker information for a symbol
-        
+
         :param symbol: Trading pair symbol (default: BTC_JPY)
-        :return: Ticker data
+        :return: Ticker data (dict or None)
         """
         endpoint = "/v1/ticker"
         params = {"symbol": symbol}
-        return self._public_request("GET", endpoint, params)
+        response = self._public_request("GET", endpoint, params)
+
+        # APIレスポンスからデータを抽出
+        if response and response.get('status') == 0 and response.get('data'):
+            data = response['data']
+            # dataがリストの場合は最初の要素を返す
+            if isinstance(data, list) and len(data) > 0:
+                return data[0]
+            # dataが辞書の場合はそのまま返す
+            elif isinstance(data, dict):
+                return data
+
+        return None
     
     def get_orderbooks(self, symbol="BTC_JPY"):
         """
@@ -298,28 +310,46 @@ class GMOCoinAPI:
     def get_margin_account(self):
         """
         Get margin account information including open positions
-        
-        :return: Margin account data with positions
+
+        :return: Margin account data with positions (dict or None)
         """
         endpoint = "/v1/account/margin"
-        return self._private_request("GET", endpoint)
+        response = self._private_request("GET", endpoint)
+
+        # APIレスポンスからデータを抽出
+        if response and response.get('status') == 0 and response.get('data'):
+            return response['data']
+
+        return None
     
     def get_positions(self, symbol=None, page=1, count=100):
         """
         Get detailed open positions (建玉一覧を取得)
-        
+
         :param symbol: Trading pair symbol (e.g., 'DOGE_JPY')
         :param page: Page number (default: 1)
         :param count: Number of positions per page (default: 100)
-        :return: Open positions data
+        :return: List of open positions or empty list
         """
         endpoint = "/v1/openPositions"
         params = {"page": page, "count": count}
-        
+
         if symbol:
             params["symbol"] = symbol
-            
-        return self._private_request("GET", endpoint, params)
+
+        response = self._private_request("GET", endpoint, params)
+
+        # APIレスポンスからデータを抽出
+        if response and response.get('status') == 0:
+            data = response.get('data', {})
+            # dataの中のlistを返す
+            if isinstance(data, dict) and 'list' in data:
+                return data['list']
+            # dataが空の辞書の場合は空リストを返す
+            elif isinstance(data, dict) and not data:
+                return []
+
+        return []
     
     def close_position(self, symbol, side, execution_type="MARKET", position_id=None, size=None, price=None):
         """

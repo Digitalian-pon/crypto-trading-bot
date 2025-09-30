@@ -54,24 +54,19 @@ class FinalDashboard:
                 # Get current price
                 self.get_current_price()
 
-                # Get API positions
-                positions_response = api.get_positions('DOGE_JPY')
-                self.api_positions = []
-                if 'data' in positions_response and 'list' in positions_response['data']:
-                    self.api_positions = positions_response['data']['list']
+                # Get API positions (修正: 直接リストを取得)
+                self.api_positions = api.get_positions('DOGE_JPY')
+                if not isinstance(self.api_positions, list):
+                    self.api_positions = []
 
-                # Get balance information
+                # Get balance information (修正: 直接データを取得)
                 try:
-                    balance_response = api.get_margin_account()
-                    if 'data' in balance_response:
-                        self.balance_info = balance_response['data']
-                except Exception:
-                    try:
-                        balance_response = api.get_account_balance()
-                        if 'data' in balance_response:
-                            self.balance_info = balance_response['data']
-                    except Exception as e:
-                        self.balance_info = {'error': f'Balance fetch failed: {str(e)}'}
+                    self.balance_info = api.get_margin_account()
+                    if not isinstance(self.balance_info, dict) or not self.balance_info:
+                        self.balance_info = {}
+                except Exception as e:
+                    logger.error(f"Balance fetch failed: {e}")
+                    self.balance_info = {}
 
                 # Get trading signals
                 try:
