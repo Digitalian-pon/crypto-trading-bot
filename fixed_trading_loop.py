@@ -576,14 +576,9 @@ class FixedTradingBot:
     def _get_exchange_positions(self, symbol):
         """Get current positions from the exchange"""
         try:
-            response = self.api.get_positions(symbol=symbol)
-            if response.get('status') == 0 and response.get('data'):
-                positions = response['data'].get('list', [])
-                logger.info(f"Retrieved {len(positions)} positions from exchange for {symbol}")
-                return positions
-            else:
-                logger.info(f"No positions found on exchange: {response}")
-                return []
+            positions = self.api.get_positions(symbol=symbol)
+            logger.info(f"Retrieved {len(positions)} positions from exchange for {symbol}")
+            return positions
         except Exception as e:
             logger.error(f"Error getting exchange positions: {e}")
             return []
@@ -961,10 +956,9 @@ class FixedTradingBot:
 
                 # 【最重要】新規注文前の最終ポジション確認
                 logger.info("🔍 Final position verification before new trade...")
-                final_positions_response = self.api.get_positions(symbol=symbol)
+                final_positions = self.api.get_positions(symbol=symbol)
 
-                if 'data' in final_positions_response and 'list' in final_positions_response['data']:
-                    final_positions = final_positions_response['data']['list']
+                if final_positions:
                     logger.info(f"📊 Current positions count: {len(final_positions)}")
 
                     # 反対ポジションまたは同方向ポジションの存在確認
@@ -1074,15 +1068,13 @@ class FixedTradingBot:
 
             for check_round in range(3):
                 logger.info(f"🔍 Position check round {check_round + 1}/3...")
-                pre_order_positions = self.api.get_positions(symbol=symbol)
+                pre_positions = self.api.get_positions(symbol=symbol)
 
-                if 'data' in pre_order_positions and 'list' in pre_order_positions['data']:
-                    pre_positions = pre_order_positions['data']['list']
-                    if pre_positions:
-                        logger.error(f"❌ ABORT ROUND {check_round + 1}: {len(pre_positions)} positions detected!")
-                        for pos in pre_positions:
-                            logger.error(f"   Position: {pos.get('side')} {pos.get('size')} @ {pos.get('price')} (ID: {pos.get('positionId')})")
-                        return False
+                if pre_positions:
+                    logger.error(f"❌ ABORT ROUND {check_round + 1}: {len(pre_positions)} positions detected!")
+                    for pos in pre_positions:
+                        logger.error(f"   Position: {pos.get('side')} {pos.get('size')} @ {pos.get('price')} (ID: {pos.get('positionId')})")
+                    return False
 
                 # Wait between checks
                 if check_round < 2:
@@ -1108,10 +1100,9 @@ class FixedTradingBot:
                 # 注文後のポジション確認
                 import time
                 time.sleep(2)  # 注文反映待機
-                post_order_positions = self.api.get_positions(symbol=symbol)
+                new_positions = self.api.get_positions(symbol=symbol)
 
-                if 'data' in post_order_positions and 'list' in post_order_positions['data']:
-                    new_positions = post_order_positions['data']['list']
+                if new_positions:
                     logger.info(f"✅ Post-order verification: {len(new_positions)} positions now exist")
                     for pos in new_positions:
                         logger.info(f"   New Position: {pos.get('side')} {pos.get('size')} @ {pos.get('price')} (ID: {pos.get('positionId')})")
@@ -1143,21 +1134,17 @@ class FixedTradingBot:
             return False  # 決済なしを返す
 
         try:
-            # 取引所のポジション一覧を取得
-            positions_response = self.api.get_positions(symbol=symbol)
-            logger.info(f"📋 Initial positions check - status: {positions_response.get('status')}, positions count: {len(positions_response.get('data', {}).get('list', []))}")
+            # 取引所のポジション一覧を取得 (get_positionsはリストを返す)
+            positions = self.api.get_positions(symbol=symbol)
+            logger.info(f"📋 Initial positions check - positions count: {len(positions)}")
 
-            if 'data' not in positions_response or not positions_response['data']:
+            if not positions:
                 logger.info("📭 No positions found on exchange")
                 return False
 
-            # GMO API returns positions in data.list format
-            if 'list' not in positions_response['data']:
-                logger.info("📭 No position list found in exchange response")
-                return False
-
+            # GMO API returns positions as a list
             positions_to_close = []
-            all_positions = positions_response['data']['list']
+            all_positions = positions
             initial_position_count = len(all_positions)
 
             # 逆シグナル検出ロジック
@@ -1207,10 +1194,8 @@ class FixedTradingBot:
                 logger.info(f"🔍 Verifying closure completion (attempt {attempt + 1}/3)...")
                 time.sleep(2)  # API処理完了待機
 
-                updated_response = self.api.get_positions(symbol=symbol)
-                if 'data' in updated_response and 'list' in updated_response['data']:
-                    remaining_positions = updated_response['data']['list']
-
+                remaining_positions = self.api.get_positions(symbol=symbol)
+                if remaining_positions:
                     # 決済対象の反対ポジションが残っているかチェック
                     remaining_opposite = []
                     for pos in remaining_positions:
