@@ -9,20 +9,20 @@ class RiskManager:
     """
     
     def __init__(self):
-        self.max_position_size_ratio = 0.05  # Max 5% of balance per trade
-        self.stop_loss_ratio = 0.02  # 2% stop loss
-        self.take_profit_ratio = 0.04  # 4% take profit (dynamic)
-        self.max_daily_loss = 0.10  # Max 10% daily loss
-        self.max_open_trades = 3
+        self.max_position_size_ratio = 0.15  # Max 15% of balance per trade (増加: 5% → 15%)
+        self.stop_loss_ratio = 0.03  # 3% stop loss (緩和: 2% → 3%)
+        self.take_profit_ratio = 0.025  # 2.5% take profit (早期利確: 4% → 2.5%)
+        self.max_daily_loss = 0.15  # Max 15% daily loss (緩和: 10% → 15%)
+        self.max_open_trades = 5  # 最大5ポジション (増加: 3 → 5)
 
         # Dynamic profit-taking parameters
         self.min_take_profit = 0.015  # 1.5% minimum profit
-        self.max_take_profit = 0.08   # 8% maximum profit
+        self.max_take_profit = 0.05   # 5% maximum profit (調整: 8% → 5%)
         self.volatility_multiplier = 2.0  # Volatility adjustment factor
 
-        # Trailing stop parameters
+        # Trailing stop parameters (早期開始)
         self.trailing_stop_enabled = True
-        self.trailing_start_profit = 0.02  # Start trailing at 2% profit
+        self.trailing_start_profit = 0.015  # Start trailing at 1.5% profit (早期化: 2% → 1.5%)
         self.trailing_distance = 0.01      # 1% trailing distance
         
     def update_settings(self, settings):
@@ -54,16 +54,16 @@ class RiskManager:
             # Adjust position size ratio based on volatility and confidence
             base_ratio = self.max_position_size_ratio
 
-            # Volatility adjustment
+            # Volatility adjustment (緩和版 - ボラティリティによる削減を抑制)
             if volatility_score > 0.7:  # High volatility - reduce position size
-                volatility_multiplier = 0.5  # 50% of normal size
-                logger.info(f"High volatility ({volatility_score:.3f}) - reducing position size")
+                volatility_multiplier = 0.75  # 75% of normal size (緩和: 50% → 75%)
+                logger.info(f"High volatility ({volatility_score:.3f}) - slightly reducing position size")
             elif volatility_score < 0.3:  # Low volatility - can increase position size
                 volatility_multiplier = 1.5  # 150% of normal size
                 logger.info(f"Low volatility ({volatility_score:.3f}) - increasing position size")
             else:  # Medium volatility
-                volatility_multiplier = 1.0
-                logger.info(f"Medium volatility ({volatility_score:.3f}) - normal position size")
+                volatility_multiplier = 1.2  # 通常より大きく (増加: 1.0 → 1.2)
+                logger.info(f"Medium volatility ({volatility_score:.3f}) - slightly increased position size")
 
             # Confidence adjustment (0.5 - 1.5 multiplier)
             confidence_multiplier = 0.5 + confidence

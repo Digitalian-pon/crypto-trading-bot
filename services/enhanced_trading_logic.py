@@ -39,25 +39,31 @@ class EnhancedTradingLogic:
 
             signals = []
 
-            # === 2. 強化されたRSIシグナル（トレンドフィルター付き） ===
+            # === 2. 強化されたRSIシグナル（柔軟なトレンドフィルター） ===
             if trend_direction == 'STRONG_DOWN':
-                # 強い下降トレンド中はRSIの買いシグナルを無視
-                if rsi > 70:
+                # 強い下降トレンド中でも極端なRSIは逆張り許可
+                if rsi < 20:  # 極端な売られすぎは反転期待
+                    signals.append(('BUY', 'RSI Extreme Oversold - Reversal Expected', 0.7))
+                    logger.info(f"Contrarian RSI Buy: {rsi:.2f} < 20 (reversal expected in downtrend)")
+                elif rsi > 70:
                     signals.append(('SELL', 'RSI Overbought + Strong Downtrend', 0.9))
                     logger.info(f"Enhanced RSI Sell: {rsi:.2f} > 70 (strong downtrend)")
             elif trend_direction == 'STRONG_UP':
-                # 強い上昇トレンド中はRSIの売りシグナルを無視
+                # 強い上昇トレンド中でも極端なRSIは逆張り許可
                 if rsi < 30:
                     signals.append(('BUY', 'RSI Oversold + Strong Uptrend', 0.9))
                     logger.info(f"Enhanced RSI Buy: {rsi:.2f} < 30 (strong uptrend)")
+                elif rsi > 80:  # 極端な買われすぎは反転期待
+                    signals.append(('SELL', 'RSI Extreme Overbought - Reversal Expected', 0.7))
+                    logger.info(f"Contrarian RSI Sell: {rsi:.2f} > 80 (reversal expected in uptrend)")
             else:
-                # 中立・弱いトレンド時のみ従来のRSI判定
-                if rsi < 25:  # より厳格な閾値
-                    signals.append(('BUY', 'RSI Extreme Oversold', 0.7))
-                    logger.info(f"RSI Extreme Buy: {rsi:.2f} < 25")
-                elif rsi > 75:  # より厳格な閾値
-                    signals.append(('SELL', 'RSI Extreme Overbought', 0.7))
-                    logger.info(f"RSI Extreme Sell: {rsi:.2f} > 75")
+                # 中立・弱いトレンド時は閾値緩和
+                if rsi < 30:  # 緩和: 25 → 30
+                    signals.append(('BUY', 'RSI Oversold', 0.7))
+                    logger.info(f"RSI Buy: {rsi:.2f} < 30")
+                elif rsi > 70:  # 緩和: 75 → 70
+                    signals.append(('SELL', 'RSI Overbought', 0.7))
+                    logger.info(f"RSI Sell: {rsi:.2f} > 70")
 
             # === 3. 強化されたMACDシグナル ===
             if macd_line > macd_signal:
@@ -108,13 +114,13 @@ class EnhancedTradingLogic:
             buy_strength = sum([s[2] for s in buy_signals])
             sell_strength = sum([s[2] for s in sell_signals])
 
-            # トレンド強度に応じた閾値調整
+            # トレンド強度に応じた閾値調整（緩和版）
             if abs(trend_strength) > 0.02:  # 強いトレンド
-                min_signal_strength = 1.2  # より厳格
+                min_signal_strength = 0.8  # 緩和: 1.2 → 0.8
             elif abs(trend_strength) > 0.01:  # 中程度トレンド
-                min_signal_strength = 0.9
+                min_signal_strength = 0.6  # 緩和: 0.9 → 0.6
             else:  # 弱いトレンド
-                min_signal_strength = 0.6
+                min_signal_strength = 0.4  # 緩和: 0.6 → 0.4
 
             logger.info(f"Enhanced Signal Analysis:")
             logger.info(f"  Buy Strength: {buy_strength:.2f}")
