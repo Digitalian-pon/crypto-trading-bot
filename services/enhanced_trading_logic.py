@@ -39,72 +39,92 @@ class EnhancedTradingLogic:
 
             signals = []
 
-            # === 2. 強化されたRSIシグナル（柔軟なトレンドフィルター） ===
+            # === 2. RSIシグナル（補助的・重み削減） ===
             if trend_direction == 'STRONG_DOWN':
                 # 強い下降トレンド中でも極端なRSIは逆張り許可
                 if rsi < 20:  # 極端な売られすぎは反転期待
-                    signals.append(('BUY', 'RSI Extreme Oversold - Reversal Expected', 0.7))
+                    signals.append(('BUY', 'RSI Extreme Oversold - Reversal Expected', 0.5))
                     logger.info(f"Contrarian RSI Buy: {rsi:.2f} < 20 (reversal expected in downtrend)")
                 elif rsi > 70:
-                    signals.append(('SELL', 'RSI Overbought + Strong Downtrend', 0.9))
+                    signals.append(('SELL', 'RSI Overbought + Strong Downtrend', 0.6))
                     logger.info(f"Enhanced RSI Sell: {rsi:.2f} > 70 (strong downtrend)")
             elif trend_direction == 'STRONG_UP':
                 # 強い上昇トレンド中でも極端なRSIは逆張り許可
                 if rsi < 30:
-                    signals.append(('BUY', 'RSI Oversold + Strong Uptrend', 0.9))
+                    signals.append(('BUY', 'RSI Oversold + Strong Uptrend', 0.6))
                     logger.info(f"Enhanced RSI Buy: {rsi:.2f} < 30 (strong uptrend)")
                 elif rsi > 80:  # 極端な買われすぎは反転期待
-                    signals.append(('SELL', 'RSI Extreme Overbought - Reversal Expected', 0.7))
+                    signals.append(('SELL', 'RSI Extreme Overbought - Reversal Expected', 0.5))
                     logger.info(f"Contrarian RSI Sell: {rsi:.2f} > 80 (reversal expected in uptrend)")
             else:
                 # 中立・弱いトレンド時は閾値緩和
                 if rsi < 30:  # 緩和: 25 → 30
-                    signals.append(('BUY', 'RSI Oversold', 0.7))
+                    signals.append(('BUY', 'RSI Oversold', 0.5))
                     logger.info(f"RSI Buy: {rsi:.2f} < 30")
                 elif rsi > 70:  # 緩和: 75 → 70
-                    signals.append(('SELL', 'RSI Overbought', 0.7))
+                    signals.append(('SELL', 'RSI Overbought', 0.5))
                     logger.info(f"RSI Sell: {rsi:.2f} > 70")
 
-            # === 3. 強化されたMACDシグナル ===
-            if macd_line > macd_signal:
-                if macd_line > 0 and trend_direction in ['UP', 'STRONG_UP', 'NEUTRAL']:
-                    signals.append(('BUY', 'MACD Bullish Confirmed', 0.8))
-                    logger.info("Enhanced MACD Buy: Positive and trending up")
-                elif macd_line > 0:
-                    signals.append(('BUY', 'MACD Bullish Weak', 0.4))
-                    logger.info("Weak MACD Buy: Positive but downtrend")
-            elif macd_line < macd_signal:
-                if macd_line < 0 and trend_direction in ['DOWN', 'STRONG_DOWN', 'NEUTRAL']:
-                    signals.append(('SELL', 'MACD Bearish Confirmed', 0.8))
-                    logger.info("Enhanced MACD Sell: Negative and trending down")
+            # === 3. 最優先MACDシグナル（重み大幅増加） ===
+            macd_diff = abs(macd_line - macd_signal)
 
-            # === 4. トレンド確認付きBBシグナル ===
+            if macd_line > macd_signal:
+                # MACDクロスオーバー - 最優先買いシグナル
+                if macd_line > 0:
+                    # ポジティブゾーンでのクロスオーバー - 非常に強い
+                    if macd_diff > 0.5:
+                        signals.append(('BUY', 'MACD Strong Bullish Crossover', 1.5))
+                        logger.info(f"🔥 PRIORITY MACD Buy: Strong positive crossover (diff: {macd_diff:.3f})")
+                    else:
+                        signals.append(('BUY', 'MACD Bullish Crossover', 1.2))
+                        logger.info(f"⚡ PRIORITY MACD Buy: Positive crossover (diff: {macd_diff:.3f})")
+                else:
+                    # ネガティブゾーンからの転換 - 強い
+                    signals.append(('BUY', 'MACD Bullish Reversal', 1.0))
+                    logger.info(f"📈 PRIORITY MACD Buy: Reversal from negative (diff: {macd_diff:.3f})")
+
+            elif macd_line < macd_signal:
+                # MACDクロスアンダー - 最優先売りシグナル
+                if macd_line < 0:
+                    # ネガティブゾーンでのクロスアンダー - 非常に強い
+                    if macd_diff > 0.5:
+                        signals.append(('SELL', 'MACD Strong Bearish Crossunder', 1.5))
+                        logger.info(f"🔥 PRIORITY MACD Sell: Strong negative crossunder (diff: {macd_diff:.3f})")
+                    else:
+                        signals.append(('SELL', 'MACD Bearish Crossunder', 1.2))
+                        logger.info(f"⚡ PRIORITY MACD Sell: Negative crossunder (diff: {macd_diff:.3f})")
+                else:
+                    # ポジティブゾーンからの転換 - 強い
+                    signals.append(('SELL', 'MACD Bearish Reversal', 1.0))
+                    logger.info(f"📉 PRIORITY MACD Sell: Reversal from positive (diff: {macd_diff:.3f})")
+
+            # === 4. Bollinger Bandsシグナル（補助的・重み削減） ===
             bb_position = (current_price - bb_lower) / (bb_upper - bb_lower)
 
             if current_price < bb_lower * 1.01:  # BB下限近く
                 if trend_direction in ['UP', 'STRONG_UP']:
-                    signals.append(('BUY', 'BB Bounce + Uptrend', 0.8))
-                    logger.info(f"Strong BB Buy: Lower band + uptrend")
+                    signals.append(('BUY', 'BB Bounce + Uptrend', 0.5))
+                    logger.info(f"BB Buy: Lower band + uptrend")
                 elif trend_direction == 'NEUTRAL':
-                    signals.append(('BUY', 'BB Bounce Neutral', 0.5))
+                    signals.append(('BUY', 'BB Bounce Neutral', 0.4))
                     logger.info(f"Weak BB Buy: Lower band + neutral")
                 else:
                     logger.info(f"BB Buy IGNORED: Lower band but downtrend")
 
             elif current_price > bb_upper * 0.99:  # BB上限近く
                 if trend_direction in ['DOWN', 'STRONG_DOWN']:
-                    signals.append(('SELL', 'BB Reversal + Downtrend', 0.8))
-                    logger.info(f"Strong BB Sell: Upper band + downtrend")
+                    signals.append(('SELL', 'BB Reversal + Downtrend', 0.5))
+                    logger.info(f"BB Sell: Upper band + downtrend")
                 elif trend_direction == 'NEUTRAL':
-                    signals.append(('SELL', 'BB Reversal Neutral', 0.5))
+                    signals.append(('SELL', 'BB Reversal Neutral', 0.4))
                     logger.info(f"Weak BB Sell: Upper band + neutral")
 
-            # === 5. EMAトレンド確認 ===
+            # === 5. EMAトレンド確認（補助的・重み削減） ===
             if current_price > ema_20 * 1.015 and ema_20 > ema_50:
-                signals.append(('BUY', 'EMA Bullish Alignment', 0.6))
+                signals.append(('BUY', 'EMA Bullish Alignment', 0.4))
                 logger.info("EMA Buy: Price above EMA20 > EMA50")
             elif current_price < ema_20 * 0.985 and ema_20 < ema_50:
-                signals.append(('SELL', 'EMA Bearish Alignment', 0.6))
+                signals.append(('SELL', 'EMA Bearish Alignment', 0.4))
                 logger.info("EMA Sell: Price below EMA20 < EMA50")
 
             # === 6. シグナル統合・判定 ===
