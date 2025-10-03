@@ -65,7 +65,7 @@ def main():
             
             # Create and start trading bot
             logger.info("Creating trading bot instance...")
-            trading_bot = TradingBot(user=user, api_key=user.api_key, api_secret=user.api_secret)
+            trading_bot = TradingBot(user=user, api_key=user.api_key, api_secret=user.api_secret, app=app)
             trading_bot.set_db_session(db.session)
             
             logger.info("Starting trading bot...")

@@ -483,10 +483,104 @@ GMO_API_SECRET = /YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCB
 - **同期完了**: ローカル⇔GitHub完全同期確認
 - **メモリ更新**: プロジェクト記録完全更新
 
+## 🚀 トレーディングアルゴリズム大幅改善実装 (2025年9月18日)
+### 改善概要：
+- **動的利確システム**: 市場ボラティリティに応じて1.5%-8%の範囲で利確レベル自動調整
+- **トレイリングストップ機能**: 2%利益達成時に1%距離でトレイリング開始
+- **RSI感度最適化**: 適応型閾値（30-70 ↔ 33-67 ↔ 40-60）でボラティリティ対応
+- **インテリジェント・ポジションサイジング**: ボラティリティ・信頼度による動的サイズ調整
+- **ボラティリティベース・シグナル適応**: 市場状況に応じたシグナル強度閾値
+
+### 実装詳細：
+
+#### 1. **動的利確システム** (`risk_manager.py:365`):
+```python
+# 高ボラティリティ（>0.7）: 1.5%で素早く利確（資本保護）
+# 低ボラティリティ（<0.3）: 8%で大きな利益狙い
+# 中ボラティリティ: 1.5%-8%間で線形調整
+dynamic_tp = self._calculate_dynamic_take_profit(market_indicators)
+```
+
+#### 2. **トレイリングストップ機能** (`risk_manager.py:101`):
+```python
+# 2%利益達成時にトレイリング開始、1%距離で追跡
+if profit_loss_ratio >= self.trailing_start_profit:
+    new_trailing_stop = current_price * (1 - self.trailing_distance)
+```
+
+#### 3. **適応型RSIシグナル** (`simple_trading_logic.py:39`):
+```python
+# ボラティリティに応じた動的閾値
+if volatility_score > 0.7:
+    rsi_oversold, rsi_overbought = 40, 60  # 保守的
+elif volatility_score < 0.3:
+    rsi_oversold, rsi_overbought = 30, 70  # 積極的
+else:
+    rsi_oversold, rsi_overbought = 33, 67  # 改善（35/65から）
+```
+
+#### 4. **最適化ポジションサイジング** (`risk_manager.py:46`):
+```python
+# ボラティリティ調整（50%-150%）× 信頼度調整（0.5x-1.5x）
+adjusted_ratio = base_ratio * volatility_multiplier * confidence_multiplier
+# 安全限界: 残高の1%-80%
+```
+
+#### 5. **ボラティリティスコア計算** (`risk_manager.py:392`):
+```python
+# RSI距離 + ボリンジャーバンド幅 + MACD勢い + 移動平均乖離
+volatility_score = sum(volatility_factors) / len(volatility_factors)
+```
+
+### 期待される改善効果：
+- **リスク削減**: トレイリングストップ・ボラティリティ適応型サイジング
+- **収益性向上**: 市場状況に応じた利確レベル・感度向上によるシグナル捕捉
+- **安定性強化**: 多要素ボラティリティ分析・包括的市場状況判定
+
+### 技術詳細：
+- **修正ファイル**: `services/risk_manager.py`, `services/simple_trading_logic.py`, `fixed_trading_loop.py`
+- **GitHubコミット**: 02675a6 - 🚀 Enhanced Trading Algorithm with Dynamic Risk Management
+- **適用開始**: 次回トレーディングサイクル（現在の-0.24%ポジションにも適用）
+
+## 🛡️ PM2自動復旧システム実装 (2025年9月23日追加)
+### 問題解決：
+- **「ダッシュボードダウン時の手動再起動」**: ✅ 完全自動化
+- **プロセス監視不備**: ✅ PM2による24時間監視実装
+- **Termux再起動時の復旧**: ✅ 自動復活機能実装
+
+### 実装詳細：
+1. **PM2プロセス管理**:
+   - プロセス名: `crypto-dashboard`
+   - 自動再起動: 3秒遅延、最大10回
+   - メモリ管理: 110.9MB、CPU 0%で安定稼働
+
+2. **自動復旧機能**:
+   ```bash
+   pm2 start final_dashboard.py --name "crypto-dashboard" --interpreter python3 --restart-delay=3000 --max-restarts=10
+   pm2 save
+   echo 'pm2 resurrect' >> ~/.bashrc
+   ```
+
+3. **管理コマンド**:
+   - 状態確認: `pm2 status`
+   - 再起動: `pm2 restart crypto-dashboard`
+   - ログ確認: `pm2 logs crypto-dashboard`
+
+### 効果：
+- **自動復旧**: ダッシュボードクラッシュ時3秒で自動再起動
+- **永続化**: Termux再起動時も自動復活
+- **安定性**: 24時間無人稼働保証
+
+### 技術詳細：
+- **新規ファイル**: `PM2_SETUP.md` - 設定手順完全記録
+- **設定更新**: ~/.bashrc に pm2 resurrect 追加
+- **GitHubコミット**: PM2自動復旧システム実装
+
 ---
-**最終更新**: 2025年9月17日
-**ステータス**: 24時間完全稼働中 ✅ (ポート8082ダッシュボード確認完了)
-**ダッシュボードURL**: http://localhost:8082/ ✅ 正常稼働中
-**現在ポジション**: 2つのBUYポジション（120 DOGE）保有中
-**現在残高**: 2,967 JPY + 暗号通貨ポジション
-**GitHubコミット**: 5a7c4d4 - クールダウン削除・ポート8082ダッシュボード設定
+**最終更新**: 2025年9月23日
+**ステータス**: 24時間完全稼働中 ✅ (PM2自動復旧システム搭載)
+**ダッシュボードURL**: http://localhost:8082/ ✅ PM2監視下で正常稼働中
+**プロセス管理**: PM2 crypto-dashboard (PID: 15391) 自動復旧有効
+**アルゴリズム**: 🚀 動的利確・トレイリングストップ・適応型RSI搭載
+**自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
+**GitHubコミット**: PM2自動復旧システム実装完了

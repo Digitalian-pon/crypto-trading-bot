@@ -73,67 +73,92 @@ class TechnicalIndicators:
 
     @staticmethod
     def calculate_atr(high, low, close, timeperiod=14):
-        """Average True Range"""
+        """Average True Range using TA-Lib"""
         return talib.ATR(high.to_numpy(), low.to_numpy(), close.to_numpy(), timeperiod=timeperiod)
 
     @staticmethod
-    def add_all_indicators(df):
-        """Add all technical indicators to DataFrame with dynamic adjustments."""
-        try:
-            config = load_config()
+    def calculate_market_regime(df):
+        """Calculate market regime: trending, ranging, or volatile"""
+        if len(df) < 50:
+            return 'ranging'
 
-            # Ensure high, low, close columns exist
+        # ATR-based volatility
+        atr = TechnicalIndicators.calculate_atr(df['high'], df['low'], df['close'], timeperiod=14)
+        atr_pct = (atr / df['close']) * 100
+
+        # Trend strength using ADX concept
+        high_low_range = df['high'].rolling(20).max() - df['low'].rolling(20).min()
+        close_range = df['close'].iloc[-1] - df['close'].iloc[-20] if len(df) >= 20 else 0
+        trend_strength = abs(close_range) / high_low_range.iloc[-1] if high_low_range.iloc[-1] > 0 else 0
+
+        volatility_score = atr_pct.iloc[-1]
+
+        if volatility_score > 3.0:
+            return 'volatile'
+        elif trend_strength > 0.6:
+            return 'trending'
+        else:
+            return 'ranging'
+
+    @staticmethod
+    def get_adaptive_parameters(df):
+        """Get adaptive parameters based on market regime by reading from config."""
+        regime = TechnicalIndicators.calculate_market_regime(df)
+        config = load_config()
+        
+        # Capitalize to match section names in setting.ini (e.g., "Volatile")
+        section = regime.capitalize()
+        
+        if section not in config:
+            logger.warning(f"'{section}' section not found in setting.ini. Falling back to 'Trending'.")
+            section = 'Trending'
+
+        params = {
+            'rsi_window': config.getint(section, 'rsi_window', fallback=14),
+            'bb_window': config.getint(section, 'bb_window', fallback=20),
+            'bb_std': config.getfloat(section, 'bb_std', fallback=2.0),
+            'macd_fast': config.getint(section, 'macd_fast', fallback=12),
+            'macd_slow': config.getint(section, 'macd_slow', fallback=26),
+            'macd_signal': config.getint(section, 'macd_signal', fallback=9),
+            'regime': regime
+        }
+        return params
+
+    @staticmethod
+    def add_all_indicators(df):
+        """Add all technical indicators to DataFrame with adaptive parameters"""
+        try:
             if not all(col in df.columns for col in ['high', 'low', 'close']):
-                logger.error("DataFrame must contain 'high', 'low', and 'close' columns.")
+                logger.error("DataFrame must contain 'high', 'low', and 'close' columns for adaptive indicators.")
                 return df
 
-            # --- Dynamic Parameter Logic ---
-            df['atr'] = TechnicalIndicators.calculate_atr(df['high'], df['low'], df['close'])
-            latest_atr = df['atr'].rolling(window=3).mean().iloc[-1]
-            
-            volatility_threshold = config.getfloat('DynamicParameters', 'volatility_threshold', fallback=50000)
+            # Get adaptive parameters based on market regime
+            params = TechnicalIndicators.get_adaptive_parameters(df)
 
-            if latest_atr > volatility_threshold:
-                profile = "HighVolatility"
-            else:
-                profile = "LowVolatility"
+            # RSI with adaptive period
+            df['rsi'] = TechnicalIndicators.calculate_rsi(df['close'], window=params['rsi_window'])
 
-            # Load parameters from config based on profile
-            rsi_window = config.getint(profile, 'rsi_window')
-            ema_window = config.getint(profile, 'ema_window')
-            macd_fast = config.getint(profile, 'macd_fast')
-            macd_slow = config.getint(profile, 'macd_slow')
-            macd_signal = config.getint(profile, 'macd_signal')
-            bb_window = config.getint(profile, 'bb_window')
-            bb_std = config.getfloat(profile, 'bb_std')
-
-            # Store dynamic params for debugging/logging
-            df['dynamic_profile'] = profile.replace("Volatility", "")
-            df['dynamic_rsi_window'] = rsi_window
-
-            # --- Indicator Calculations ---
-            # EMA
-            df[f'ema_{ema_window}'] = TechnicalIndicators.calculate_ema(df['close'], ema_window)
-            
-            # RSI with dynamic window
-            df[f'rsi_{rsi_window}'] = TechnicalIndicators.calculate_rsi(df['close'], rsi_window)
-            
-            # MACD with dynamic parameters
+            # MACD with adaptive parameters
             macd_line, signal_line, histogram = TechnicalIndicators.calculate_macd(
-                df['close'], fast=macd_fast, slow=macd_slow, signal=macd_signal
+                df['close'],
+                fast=params['macd_fast'],
+                slow=params['macd_slow'],
+                signal=params['macd_signal']
             )
             df['macd_line'] = macd_line
             df['macd_signal'] = signal_line
             df['macd_histogram'] = histogram
-            
-            # Bollinger Bands with dynamic parameters
+
+            # Bollinger Bands with adaptive parameters
             bb_upper, bb_lower, bb_middle = TechnicalIndicators.calculate_bollinger_bands_ema(
-                df['close'], window=bb_window, std=bb_std
+                df['close'],
+                window=params['bb_window'],
+                std=params['bb_std']
             )
             df['bb_upper'] = bb_upper
             df['bb_lower'] = bb_lower
             df['bb_middle'] = bb_middle
-            
+
             # Stochastic (remains with fixed params for now)
             stoch_k, stoch_d = TechnicalIndicators.calculate_stochastic(
                 df['high'], df['low'], df['close']
@@ -141,13 +166,10 @@ class TechnicalIndicators:
             df['stoch_k'] = stoch_k
             df['stoch_d'] = stoch_d
             
-            log_msg = (
-                f"Indicators added with profile: {profile}. "
-                f"RSI_win: {rsi_window}, "
-                f"MACD:({macd_fast},{macd_slow},{macd_signal}), "
-                f"BB:({bb_window},{bb_std})"
-            )
-            logger.info(log_msg)
+            # Store market regime info for logging and analysis
+            df['market_regime'] = params['regime']
+            
+            logger.info(f"Indicators added with adaptive parameters (Regime: {params['regime']})")
             return df
             
         except Exception as e:

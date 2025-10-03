@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced AI Trading Settings - 統合AI取引設定</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .settings-card {
+            border: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        .settings-card .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+        }
+        .form-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        .form-control, .form-select {
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            transition: border-color 0.3s ease;
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+        }
+        .alert {
+            border: none;
+            border-radius: 8px;
+        }
+        .info-tooltip {
+            cursor: help;
+            color: #6c757d;
+        }
+        .settings-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .form-switch .form-check-input {
+            width: 3rem;
+            height: 1.5rem;
+        }
+        .risk-indicator {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-weight: bold;
+        }
+        .risk-low { background-color: #d4edda; color: #155724; }
+        .risk-medium { background-color: #fff3cd; color: #856404; }
+        .risk-high { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('enhanced_dashboard.dashboard') }}">
+                <i class="fas fa-arrow-left me-2"></i>Enhanced AI Trading Settings
+            </a>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+                        <i class="fas {{ 'fa-check-circle' if category == 'success' else 'fa-exclamation-triangle' }} me-2"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" id="settings-form">
+            <div class="row">
+                <div class="col-md-8">
+                    <!-- Trading Configuration -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-chart-line me-2"></i>Trading Configuration
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="settings-section">
+                                <h6 class="text-primary mb-3">
+                                    <i class="fas fa-coins me-2"></i>Currency & Timeframe
+                                </h6>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="currency_pair" class="form-label">
+                                                Currency Pair 
+                                                <i class="fas fa-info-circle info-tooltip ms-1" title="Select the cryptocurrency pair to trade"></i>
+                                            </label>
+                                            <select class="form-select" id="currency_pair" name="currency_pair" required>
+                                                <option value="DOGE_JPY" {{ 'selected' if user.settings and user.settings.currency_pair == 'DOGE_JPY' }}>DOGE/JPY</option>
+                                                <option value="BTC_JPY" {{ 'selected' if user.settings and user.settings.currency_pair == 'BTC_JPY' }}>BTC/JPY</option>
+                                                <option value="ETH_JPY" {{ 'selected' if user.settings and user.settings.currency_pair == 'ETH_JPY' }}>ETH/JPY</option>
+                                                <option value="XRP_JPY" {{ 'selected' if user.settings and user.settings.currency_pair == 'XRP_JPY' }}>XRP/JPY</option>
+                                                <option value="LTC_JPY" {{ 'selected' if user.settings and user.settings.currency_pair == 'LTC_JPY' }}>LTC/JPY</option>
+                                                <option value="BCH_JPY" {{ 'selected' if user.settings and user.settings.currency_pair == 'BCH_JPY' }}>BCH/JPY</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="timeframe" class="form-label">
+                                                Timeframe 
+                                                <i class="fas fa-info-circle info-tooltip ms-1" title="Chart timeframe for analysis"></i>
+                                            </label>
+                                            <select class="form-select" id="timeframe" name="timeframe" required>
+                                                <option value="1m" {{ 'selected' if user.settings and user.settings.timeframe == '1m' }}>1 Minute</option>
+                                                <option value="5m" {{ 'selected' if user.settings and user.settings.timeframe == '5m' }}>5 Minutes</option>
+                                                <option value="15m" {{ 'selected' if user.settings and user.settings.timeframe == '15m' }}>15 Minutes</option>
+                                                <option value="30m" {{ 'selected' if user.settings and user.settings.timeframe == '30m' }}>30 Minutes</option>
+                                                <option value="1h" {{ 'selected' if user.settings and user.settings.timeframe == '1h' }}>1 Hour</option>
+                                                <option value="4h" {{ 'selected' if user.settings and user.settings.timeframe == '4h' }}>4 Hours</option>
+                                                <option value="1d" {{ 'selected' if user.settings and user.settings.timeframe == '1d' }}>1 Day</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section">
+                                <h6 class="text-primary mb-3">
+                                    <i class="fas fa-shield-alt me-2"></i>Risk Management
+                                </h6>
+                                
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="risk_level" class="form-label">
+                                                Risk Level 
+                                                <i class="fas fa-info-circle info-tooltip ms-1" title="Overall risk appetite for trading"></i>
+                                            </label>
+                                            <select class="form-select" id="risk_level" name="risk_level" required>
+                                                <option value="low" {{ 'selected' if user.settings and user.settings.risk_level == 'low' }}>Low</option>
+                                                <option value="medium" {{ 'selected' if user.settings and user.settings.risk_level == 'medium' }}>Medium</option>
+                                                <option value="high" {{ 'selected' if user.settings and user.settings.risk_level == 'high' }}>High</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="stop_loss_percentage" class="form-label">
+                                                Stop Loss (%) 
+                                                <i class="fas fa-info-circle info-tooltip ms-1" title="Maximum loss percentage before auto-close"></i>
+                                            </label>
+                                            <input type="number" class="form-control" id="stop_loss_percentage" name="stop_loss_percentage" 
+                                                   min="0.5" max="10" step="0.1" 
+                                                   value="{{ user.settings.stop_loss_percentage if user.settings else '3.0' }}" required>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="take_profit_percentage" class="form-label">
+                                                Take Profit (%) 
+                                                <i class="fas fa-info-circle info-tooltip ms-1" title="Target profit percentage for auto-close"></i>
+                                            </label>
+                                            <input type="number" class="form-control" id="take_profit_percentage" name="take_profit_percentage" 
+                                                   min="1" max="20" step="0.1" 
+                                                   value="{{ user.settings.take_profit_percentage if user.settings else '5.0' }}" required>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Risk Level Impact:</strong>
+                                    <ul class="mb-0 mt-2">
+                                        <li><strong>Low:</strong> Conservative position sizing, stricter signal requirements</li>
+                                        <li><strong>Medium:</strong> Balanced approach with moderate position sizes</li>
+                                        <li><strong>High:</strong> Aggressive position sizing, more frequent trades</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Configuration -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-robot me-2"></i>AI Configuration
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="settings-section">
+                                <h6 class="text-primary mb-3">
+                                    <i class="fas fa-brain me-2"></i>AI Features
+                                </h6>
+                                
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    <strong>Enhanced AI Controller Features:</strong>
+                                    <ul class="mb-0 mt-2">
+                                        <li>Combined ML prediction and technical analysis</li>
+                                        <li>Dynamic parameter optimization (24h cycle)</li>
+                                        <li>Multi-signal confirmation system</li>
+                                        <li>Advanced risk management integration</li>
+                                        <li>Real-time market evaluation</li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h6>Technical Indicators Used:</h6>
+                                        <ul class="list-unstyled">
+                                            <li><i class="fas fa-check text-success me-2"></i>EMA (12, 26) - Trend following</li>
+                                            <li><i class="fas fa-check text-success me-2"></i>RSI (14) - Momentum</li>
+                                            <li><i class="fas fa-check text-success me-2"></i>MACD - Signal crossovers</li>
+                                            <li><i class="fas fa-check text-success me-2"></i>Bollinger Bands - Volatility</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h6>ML Features:</h6>
+                                        <ul class="list-unstyled">
+                                            <li><i class="fas fa-check text-success me-2"></i>Random Forest classification</li>
+                                            <li><i class="fas fa-check text-success me-2"></i>Multi-timeframe analysis</li>
+                                            <li><i class="fas fa-check text-success me-2"></i>Feature importance ranking</li>
+                                            <li><i class="fas fa-check text-success me-2"></i>Dynamic parameter tuning</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar -->
+                <div class="col-md-4">
+                    <!-- Enable Trading -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-power-off me-2"></i>Trading Control
+                            </h5>
+                        </div>
+                        <div class="card-body text-center">
+                            <div class="form-check form-switch d-flex justify-content-center mb-3">
+                                <input class="form-check-input" type="checkbox" id="trading_enabled" name="trading_enabled" 
+                                       {{ 'checked' if user.settings and user.settings.trading_enabled }}>
+                                <label class="form-check-label ms-2" for="trading_enabled">
+                                    <strong>Enable AI Trading</strong>
+                                </label>
+                            </div>
+                            
+                            <div class="alert alert-{{ 'success' if user.settings and user.settings.trading_enabled else 'warning' }} mb-3">
+                                <i class="fas {{ 'fa-check-circle' if user.settings and user.settings.trading_enabled else 'fa-exclamation-triangle' }} me-2"></i>
+                                AI Trading is currently <strong>{{ 'ENABLED' if user.settings and user.settings.trading_enabled else 'DISABLED' }}</strong>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary btn-lg w-100">
+                                <i class="fas fa-save me-2"></i>Save Settings
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Current Status -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-info-circle me-2"></i>Current Status
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <table class="table table-borderless table-sm">
+                                <tr>
+                                    <td>Currency Pair:</td>
+                                    <td class="text-end"><code>{{ user.settings.currency_pair if user.settings else 'Not set' }}</code></td>
+                                </tr>
+                                <tr>
+                                    <td>Timeframe:</td>
+                                    <td class="text-end"><code>{{ user.settings.timeframe if user.settings else 'Not set' }}</code></td>
+                                </tr>
+                                <tr>
+                                    <td>Risk Level:</td>
+                                    <td class="text-end">
+                                        <span class="risk-indicator risk-{{ user.settings.risk_level if user.settings else 'medium' }}">
+                                            {{ (user.settings.risk_level if user.settings else 'medium').upper() }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>Stop Loss:</td>
+                                    <td class="text-end">{{ user.settings.stop_loss_percentage if user.settings else '3.0' }}%</td>
+                                </tr>
+                                <tr>
+                                    <td>Take Profit:</td>
+                                    <td class="text-end">{{ user.settings.take_profit_percentage if user.settings else '5.0' }}%</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-bolt me-2"></i>Quick Actions
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-grid gap-2">
+                                <a href="{{ url_for('enhanced_dashboard.dashboard') }}" class="btn btn-outline-primary">
+                                    <i class="fas fa-chart-line me-2"></i>Dashboard
+                                </a>
+                                <button type="button" class="btn btn-outline-info" onclick="resetToDefaults()">
+                                    <i class="fas fa-undo me-2"></i>Reset to Defaults
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="exportSettings()">
+                                    <i class="fas fa-download me-2"></i>Export Settings
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Enable Bootstrap tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
+
+        // Form validation
+        document.getElementById('settings-form').addEventListener('submit', function(e) {
+            const stopLoss = parseFloat(document.getElementById('stop_loss_percentage').value);
+            const takeProfit = parseFloat(document.getElementById('take_profit_percentage').value);
+            
+            if (stopLoss >= takeProfit) {
+                e.preventDefault();
+                alert('Take profit must be higher than stop loss percentage');
+                return false;
+            }
+            
+            if (stopLoss < 0.5 || stopLoss > 10) {
+                e.preventDefault();
+                alert('Stop loss must be between 0.5% and 10%');
+                return false;
+            }
+            
+            if (takeProfit < 1 || takeProfit > 20) {
+                e.preventDefault();
+                alert('Take profit must be between 1% and 20%');
+                return false;
+            }
+        });
+
+        // Reset to defaults
+        function resetToDefaults() {
+            if (confirm('Are you sure you want to reset all settings to defaults?')) {
+                document.getElementById('currency_pair').value = 'DOGE_JPY';
+                document.getElementById('timeframe').value = '5m';
+                document.getElementById('risk_level').value = 'medium';
+                document.getElementById('stop_loss_percentage').value = '3.0';
+                document.getElementById('take_profit_percentage').value = '5.0';
+                document.getElementById('trading_enabled').checked = false;
+            }
+        }
+
+        // Export settings
+        function exportSettings() {
+            const settings = {
+                currency_pair: document.getElementById('currency_pair').value,
+                timeframe: document.getElementById('timeframe').value,
+                risk_level: document.getElementById('risk_level').value,
+                stop_loss_percentage: document.getElementById('stop_loss_percentage').value,
+                take_profit_percentage: document.getElementById('take_profit_percentage').value,
+                trading_enabled: document.getElementById('trading_enabled').checked,
+                exported_at: new Date().toISOString()
+            };
+            
+            const dataStr = JSON.stringify(settings, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            
+            const exportFileDefaultName = 'ai_trading_settings.json';
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+        }
+
+        // Dynamic risk level indicator
+        document.getElementById('risk_level').addEventListener('change', function() {
+            const riskLevel = this.value;
+            const indicator = document.querySelector('.risk-indicator');
+            
+            if (indicator) {
+                indicator.classList.remove('risk-low', 'risk-medium', 'risk-high');
+                indicator.classList.add(`risk-${riskLevel}`);
+                indicator.textContent = riskLevel.toUpperCase();
+            }
+        });
+
+        // Real-time validation feedback
+        document.getElementById('stop_loss_percentage').addEventListener('input', function() {
+            const value = parseFloat(this.value);
+            const takeProfit = parseFloat(document.getElementById('take_profit_percentage').value);
+            
+            if (value >= takeProfit) {
+                this.classList.add('is-invalid');
+            } else {
+                this.classList.remove('is-invalid');
+            }
+        });
+
+        document.getElementById('take_profit_percentage').addEventListener('input', function() {
+            const value = parseFloat(this.value);
+            const stopLoss = parseFloat(document.getElementById('stop_loss_percentage').value);
+            
+            if (value <= stopLoss) {
+                this.classList.add('is-invalid');
+            } else {
+                this.classList.remove('is-invalid');
+            }
+        });
+    </script>
+</body>
+</html>
