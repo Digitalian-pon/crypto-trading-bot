@@ -71,11 +71,15 @@ class DataService:
         # Fetch fresh data
         response = self.api.get_ticker(symbol)
         logger.info(f"Ticker response: {response}")
-        
+
         if isinstance(response, dict) and 'data' in response:
+            data = response['data']
+            # dataがリストの場合は最初の要素を取得
+            if isinstance(data, list) and len(data) > 0:
+                data = data[0]
             # Cache the result
-            self.cache[cache_key] = (datetime.now(), response['data'])
-            return response['data']
+            self.cache[cache_key] = (datetime.now(), data)
+            return data
         else:
             logger.error(f"Failed to get ticker data: {response}")
             return None

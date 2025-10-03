@@ -19,7 +19,7 @@ from app import app
 from models import User
 from services.gmo_api import GMOCoinAPI
 from services.data_service import DataService
-from services.simple_trading_logic import SimpleTradingLogic
+from services.enhanced_trading_logic import EnhancedTradingLogic as SimpleTradingLogic
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -54,24 +54,19 @@ class FinalDashboard:
                 # Get current price
                 self.get_current_price()
 
-                # Get API positions
-                positions_response = api.get_positions('DOGE_JPY')
-                self.api_positions = []
-                if 'data' in positions_response and 'list' in positions_response['data']:
-                    self.api_positions = positions_response['data']['list']
+                # Get API positions (修正: 直接リストを取得)
+                self.api_positions = api.get_positions('DOGE_JPY')
+                if not isinstance(self.api_positions, list):
+                    self.api_positions = []
 
-                # Get balance information
+                # Get balance information (修正: 直接データを取得)
                 try:
-                    balance_response = api.get_margin_account()
-                    if 'data' in balance_response:
-                        self.balance_info = balance_response['data']
-                except Exception:
-                    try:
-                        balance_response = api.get_account_balance()
-                        if 'data' in balance_response:
-                            self.balance_info = balance_response['data']
-                    except Exception as e:
-                        self.balance_info = {'error': f'Balance fetch failed: {str(e)}'}
+                    self.balance_info = api.get_margin_account()
+                    if not isinstance(self.balance_info, dict) or not self.balance_info:
+                        self.balance_info = {}
+                except Exception as e:
+                    logger.error(f"Balance fetch failed: {e}")
+                    self.balance_info = {}
 
                 # Get trading signals
                 try:
@@ -139,16 +134,48 @@ class FinalDashboard:
             reason = signal.get('reason', '不明')
             confidence = signal.get('confidence', 0.0)
 
-            # Signal status color - 高コントラスト版
+            # Enhanced Signal Logic - Consider Current Positions
             if should_trade and trade_type:
+                # Check if we have existing positions
+                has_buy_position = any(pos['side'].upper() == 'BUY' for pos in self.api_positions)
+                has_sell_position = any(pos['side'].upper() == 'SELL' for pos in self.api_positions)
+
                 if trade_type.upper() == 'BUY':
-                    signal_color = '#00E676'  # Bright Green
-                    signal_icon = '📈'
-                    signal_text = '買いシグナル'
-                else:
-                    signal_color = '#FF1744'  # Bright Red
-                    signal_icon = '📉'
-                    signal_text = '売りシグナル'
+                    if has_sell_position:
+                        # BUY signal with SELL position = Close SELL position
+                        signal_color = '#00E676'  # Bright Green
+                        signal_icon = '🔄'
+                        signal_text = 'SELL決済シグナル'
+                        reason = f'SELL決済: {reason}'
+                    elif has_buy_position:
+                        # BUY signal with BUY position = Hold/Wait
+                        signal_color = '#FFEB3B'  # Yellow
+                        signal_icon = '⏸️'
+                        signal_text = 'BUYポジション保持中'
+                        reason = 'ポジション保持・決済待ち'
+                    else:
+                        # BUY signal with no position = New BUY
+                        signal_color = '#00E676'  # Bright Green
+                        signal_icon = '📈'
+                        signal_text = '新規買いシグナル'
+                else:  # SELL signal
+                    if has_buy_position:
+                        # SELL signal with BUY position = Close BUY position
+                        signal_color = '#FF1744'  # Bright Red
+                        signal_icon = '🔄'
+                        signal_text = 'BUY決済シグナル'
+                        reason = f'BUY決済: {reason}'
+                    elif has_sell_position:
+                        # SELL signal with SELL position = Hold/Wait
+                        signal_color = '#FFEB3B'  # Yellow
+                        signal_icon = '⏸️'
+                        signal_text = 'SELLポジション保持中'
+                        reason = 'ポジション保持・決済待ち'
+                    else:
+                        # SELL signal with no position = New SELL
+                        signal_color = '#FF1744'  # Bright Red
+                        signal_icon = '📉'
+                        signal_text = '新規売りシグナル'
             else:
                 signal_color = '#FFEB3B'  # Bright Yellow
                 signal_icon = '⏸️'
@@ -423,12 +450,43 @@ if __name__ == "__main__":
     logger.info(f"Starting Final Dashboard on {HOST}:{PORT}")
     logger.info("Features: Real positions, balance, P&L calculation")
 
+    # エラーハンドリング強化
+    import signal
+    import sys
+    import traceback
+
+    def signal_handler(signum, frame):
+        logger.info("Received shutdown signal - graceful shutdown")
+        sys.exit(0)
+
+    def exception_handler(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    # シグナル・例外ハンドラ設定
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    sys.excepthook = exception_handler
+
     try:
         with socketserver.TCPServer((HOST, PORT), FinalDashboardHandler) as httpd:
             logger.info("Final dashboard server started successfully")
             httpd.serve_forever()
     except KeyboardInterrupt:
         logger.info("Dashboard server stopped by user")
+        sys.exit(0)
     except Exception as e:
         logger.error(f"Server error: {e}")
-        raise
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+        # 自動再起動試行
+        logger.info("Attempting automatic recovery...")
+        try:
+            import subprocess
+            subprocess.run(['./auto_recovery.sh'], check=True, cwd='/data/data/com.termux/files/home/crypto-trading-bot')
+        except Exception as recovery_error:
+            logger.error(f"Auto recovery failed: {recovery_error}")
+
+        sys.exit(1)

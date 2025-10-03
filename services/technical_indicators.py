@@ -135,6 +135,11 @@ class TechnicalIndicators:
             # Get adaptive parameters based on market regime
             params = TechnicalIndicators.get_adaptive_parameters(df)
 
+            # Basic moving averages with adaptive periods
+            df['ema_20'] = TechnicalIndicators.calculate_ema(df['close'], 20)  # Keep for compatibility
+            df['ema_50'] = TechnicalIndicators.calculate_ema(df['close'], 50)  # Add for trend confirmation
+            df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_fast'])
+            df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_slow'])
             # RSI with adaptive period
             df['rsi'] = TechnicalIndicators.calculate_rsi(df['close'], window=params['rsi_window'])
 

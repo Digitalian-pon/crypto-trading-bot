@@ -36,33 +36,49 @@ class SimpleTradingLogic:
             # 1. RSI Signals (Adaptive thresholds based on volatility)
             volatility_score = self._calculate_market_volatility(market_data)
 
-            # Dynamic RSI thresholds - tighter in volatile markets, wider in stable markets
-            if volatility_score > 0.7:  # High volatility
-                rsi_oversold = 40  # Less sensitive in volatile markets
-                rsi_overbought = 60
-            elif volatility_score < 0.3:  # Low volatility
-                rsi_oversold = 30  # More sensitive in stable markets
+            # Dynamic RSI thresholds - conservative approach to avoid false signals
+            if volatility_score > 0.7:  # High volatility - be very conservative
+                rsi_oversold = 25  # Strong oversold before buying
+                rsi_overbought = 75  # Strong overbought before selling
+            elif volatility_score < 0.3:  # Low volatility - standard thresholds
+                rsi_oversold = 30
                 rsi_overbought = 70
-            else:  # Medium volatility
-                rsi_oversold = 33  # Improved sensitivity (was 35)
-                rsi_overbought = 67  # Improved sensitivity (was 65)
+            else:  # Medium volatility - slightly conservative
+                rsi_oversold = 28  # More conservative than 33
+                rsi_overbought = 72  # More conservative than 67
 
-            if rsi < rsi_oversold:
-                signal_strength = 0.8 + (rsi_oversold - rsi) / 100  # Stronger signal for deeper oversold
-                signals.append(('BUY', 'RSI Oversold', min(signal_strength, 1.0)))
-                logger.info(f"RSI Buy Signal: {rsi:.2f} < {rsi_oversold} (adaptive oversold)")
-            elif rsi > rsi_overbought:
-                signal_strength = 0.8 + (rsi - rsi_overbought) / 100  # Stronger signal for deeper overbought
-                signals.append(('SELL', 'RSI Overbought', min(signal_strength, 1.0)))
-                logger.info(f"RSI Sell Signal: {rsi:.2f} > {rsi_overbought} (adaptive overbought)")
+            # Check for trend confirmation to avoid false signals
+            current_price = market_data.get('close', 0)
+            ema_20 = market_data.get('ema_20', current_price)
+
+            # RSI signals with trend confirmation
+            if rsi < rsi_oversold and current_price > ema_20 * 0.995:  # Price above EMA for uptrend
+                signal_strength = 0.8 + (rsi_oversold - rsi) / 100
+                signals.append(('BUY', 'RSI Oversold + Uptrend', min(signal_strength, 1.0)))
+                logger.info(f"RSI Buy Signal: {rsi:.2f} < {rsi_oversold} with trend confirmation")
+            elif rsi > rsi_overbought and current_price < ema_20 * 1.005:  # Price below EMA for downtrend
+                signal_strength = 0.8 + (rsi - rsi_overbought) / 100
+                signals.append(('SELL', 'RSI Overbought + Downtrend', min(signal_strength, 1.0)))
+                logger.info(f"RSI Sell Signal: {rsi:.2f} > {rsi_overbought} with trend confirmation")
             
-            # 2. MACD Signals (Medium weight)
-            if macd_line > macd_signal and macd_line > 0:
-                signals.append(('BUY', 'MACD Bullish', 0.6))
-                logger.info("MACD Buy Signal: Line > Signal and positive")
-            elif macd_line < macd_signal and macd_line < 0:
-                signals.append(('SELL', 'MACD Bearish', 0.6))
-                logger.info("MACD Sell Signal: Line < Signal and negative")
+            # 2. MACD Signals (Medium weight) - Fixed crossover logic
+            macd_histogram = market_data.get('macd_histogram', macd_line - macd_signal)
+
+            # MACD crossover signals - focus on momentum changes
+            if macd_line > macd_signal:
+                # Bullish crossover - but verify momentum is increasing
+                if macd_histogram > 0.002:  # Minimum momentum threshold
+                    signals.append(('BUY', 'MACD Bullish Crossover', 0.6))
+                    logger.info(f"MACD Buy Signal: Line {macd_line:.4f} > Signal {macd_signal:.4f}, momentum {macd_histogram:.4f}")
+            elif macd_line < macd_signal:
+                # Bearish crossover - verify momentum is decreasing
+                if macd_histogram < -0.002:  # Minimum momentum threshold
+                    signals.append(('SELL', 'MACD Bearish Crossover', 0.6))
+                    logger.info(f"MACD Sell Signal: Line {macd_line:.4f} < Signal {macd_signal:.4f}, momentum {macd_histogram:.4f}")
+                else:
+                    # Weak bearish signal - reduce weight
+                    signals.append(('SELL', 'MACD Weak Bearish', 0.3))
+                    logger.info(f"MACD Weak Sell: Line {macd_line:.4f} < Signal {macd_signal:.4f}, weak momentum {macd_histogram:.4f}")
             
             # 3. Bollinger Band Signals (Medium weight)
             if current_price < bb_lower * 1.005:  # Near lower band
