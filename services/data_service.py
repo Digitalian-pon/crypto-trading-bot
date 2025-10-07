@@ -70,16 +70,26 @@ class DataService:
         
         # Fetch fresh data
         response = self.api.get_ticker(symbol)
-        logger.info(f"Ticker response: {response}")
+        logger.debug(f"Ticker response: {response}")
 
-        if isinstance(response, dict) and 'data' in response:
-            data = response['data']
-            # dataがリストの場合は最初の要素を取得
-            if isinstance(data, list) and len(data) > 0:
-                data = data[0]
-            # Cache the result
-            self.cache[cache_key] = (datetime.now(), data)
-            return data
+        if isinstance(response, dict):
+            # レスポンスが {'data': [...]} 形式の場合
+            if 'data' in response:
+                data = response['data']
+                # dataがリストの場合は最初の要素を取得
+                if isinstance(data, list) and len(data) > 0:
+                    data = data[0]
+                # Cache the result
+                self.cache[cache_key] = (datetime.now(), data)
+                return data
+            # レスポンスが直接 {'ask': ..., 'bid': ..., 'last': ...} 形式の場合
+            elif 'last' in response or 'ask' in response:
+                # Cache the result
+                self.cache[cache_key] = (datetime.now(), response)
+                return response
+            else:
+                logger.warning(f"Unexpected ticker data format: {response}")
+                return None
         else:
             logger.error(f"Failed to get ticker data: {response}")
             return None

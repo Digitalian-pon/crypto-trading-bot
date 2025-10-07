@@ -144,6 +144,15 @@ class GMOCoinAPI:
             return json_response
             
         except requests.exceptions.HTTPError as e:
+            # マージン不足エラーは警告レベルで記録（ERRORではない）
+            error_msg = str(e)
+            if json_response and isinstance(json_response, dict):
+                error_code = json_response.get('messages', [{}])[0].get('message_code', '') if 'messages' in json_response else ''
+                # ERR-5122: 証拠金不足エラー
+                if error_code == 'ERR-5122' or 'insufficient' in error_msg.lower() or 'margin' in error_msg.lower():
+                    logger.info(f"Margin insufficient (expected condition): {json_response}")
+                    return json_response
+
             logger.error(f"API HTTP error: {e} for URL: {url} with params: {params}")
             # Return JSON error response if available
             if json_response:
