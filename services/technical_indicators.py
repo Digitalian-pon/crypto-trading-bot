@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging
-import talib
+# import talib  # Not required - using pandas/numpy implementations
 from config import load_config
 
 logger = logging.getLogger(__name__)
