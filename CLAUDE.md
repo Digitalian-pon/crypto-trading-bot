@@ -656,3 +656,152 @@ volatility_score = sum(volatility_factors) / len(volatility_factors)
 **自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
 **ログ管理**: 🔧 誤検知エラー削減・マージン不足エラー無視・肥大化防止
 **ローカルコミット**: 89c2729 - 時間足30分変更・talib依存削除（GitHubプッシュ待ち）
+## 🎯 完全トレンドフォロー戦略実装 (2025年10月11日)
+### 問題概要：
+- **下降トレンド中の無駄な逆張りBUY**: RSI < 20で「落ちるナイフを掴む」動作
+- **インジケーター計算エラー**: 全指標が0.00で計算されず、シグナル未発動
+- **MACDの無差別シグナル**: トレンドに関係なく常にクロスでシグナル発動
+
+### 実施した完全修復：
+
+#### 1. **インジケーター計算バグ修正** (`services/technical_indicators.py`)
+- ❌ **KeyError修正**: `params['ema_fast']` → `params['macd_fast']`に修正
+- ❌ **ticker_data形式エラー**: `ticker_data[0]['last']` → `ticker_data.get('last')`に修正
+- ❌ **ATR計算エラー**: talib依存削除、pandas/numpy実装に変更
+- ✅ **全指標正常計算**: RSI, MACD, BB, EMA全て正常動作確認
+
+#### 2. **RSIトレンドフォロー実装** (`services/enhanced_trading_logic.py`)
+```python
+# 下降トレンド中
+if trend_direction == 'STRONG_DOWN':
+    if rsi < 20:
+        # 極端な売られすぎでも逆張りしない
+        logger.info("RSI Extreme Oversold: NO contrarian trade (falling knife)")
+    elif rsi > 60:
+        # 戻り売りチャンス
+        signals.append(('SELL', 'RSI Pullback in Downtrend', 0.7))
+
+# 上昇トレンド中
+elif trend_direction == 'STRONG_UP':
+    if rsi < 40:
+        # 押し目買いチャンス
+        signals.append(('BUY', 'RSI Dip in Uptrend', 0.7))
+    elif rsi > 80:
+        # 極端な買われすぎでも逆張りしない
+        logger.info("RSI Extreme Overbought: NO contrarian trade in uptrend")
+```
+
+#### 3. **MACDトレンドフィルター実装** (`services/enhanced_trading_logic.py`)
+```python
+# MACDブリッシュクロスオーバー
+if macd_line > macd_signal:
+    if trend_direction in ['UP', 'STRONG_UP', 'NEUTRAL']:
+        # 上昇トレンド/中立時のみBUYシグナル
+        signals.append(('BUY', 'MACD Bullish + Uptrend', 1.2))
+    else:
+        # 下降トレンド中は無視
+        logger.info("MACD IGNORED: Bullish in downtrend (falling knife risk)")
+
+# MACDベアリッシュクロスアンダー
+elif macd_line < macd_signal:
+    if trend_direction in ['DOWN', 'STRONG_DOWN', 'NEUTRAL']:
+        # 下降トレンド/中立時のみSELLシグナル
+        signals.append(('SELL', 'MACD Bearish + Downtrend', 1.2))
+    else:
+        # 上昇トレンド中は無視
+        logger.info("MACD IGNORED: Bearish in uptrend (temporary pullback)")
+```
+
+#### 4. **ボリンジャーバンドトレンドフォロー** (`services/enhanced_trading_logic.py`)
+```python
+# BB下限タッチ
+if current_price < bb_lower * 1.01:
+    if trend_direction in ['UP', 'STRONG_UP']:
+        # 上昇トレンド中は押し目買い
+        signals.append(('BUY', 'BB Dip in Uptrend', 0.6))
+    else:
+        # 下降トレンド中は無視
+        logger.info("BB IGNORED: Lower band in downtrend (falling knife)")
+
+# BB上限タッチ
+elif current_price > bb_upper * 0.99:
+    if trend_direction in ['DOWN', 'STRONG_DOWN']:
+        # 下降トレンド中は戻り売り
+        signals.append(('SELL', 'BB Rally in Downtrend', 0.6))
+    else:
+        # 上昇トレンド中は無視
+        logger.info("BB IGNORED: Upper band in uptrend (strong momentum)")
+```
+
+#### 5. **データサービスエラーハンドリング強化** (`services/data_service.py`)
+```python
+# ticker_data構造修正
+ticker_data = self.get_ticker(symbol)
+if ticker_data:
+    # リストではなく辞書として扱う
+    current_price = float(ticker_data.get('last', ticker_data.get('bid', 0)))
+    
+# エラートレースバック追加
+except Exception as e:
+    logger.error(f"Error adding indicators: {e}")
+    import traceback
+    logger.error(traceback.format_exc())
+```
+
+### 実装結果：
+
+#### **修正前の問題**
+- 価格: 38.804円 → 35.680円 (-8.05%下落)
+- RSI: 9.81（極端な売られすぎ）
+- MACD: -0.8064 / -0.5802（ベアリッシュ）
+- シグナル: 全インジケーター0.00、シグナル未発動
+- 問題: RSI < 20で逆張りBUY検討（落ちるナイフ）
+
+#### **修正後の動作**
+- ✅ インジケーター正常計算: RSI=9.81, MACD=-0.8064/-0.5802
+- ✅ SELL信号正常発動: MACD Bearish + Downtrend (1.2) + EMA Bearish (0.5) = 1.7
+- ✅ RSI極端値無視: "RSI Extreme Oversold: NO contrarian trade (falling knife)"
+- ✅ トレンドフォロー実行: 2つのSELLポジション実行（+0.15%利益）
+
+### トレンドフォロー統合マトリクス
+
+| インジケーター | 下降トレンド | 上昇トレンド | 中立 |
+|--------------|------------|------------|------|
+| **RSI** | 戻り売り（RSI>60）<br>❌ 逆張りBUY禁止 | 押し目買い（RSI<40）<br>❌ 逆張りSELL禁止 | 逆張り許可 |
+| **MACD** | ベアリッシュのみ<br>❌ ブリッシュ無視 | ブリッシュのみ<br>❌ ベアリッシュ無視 | 両方向採用 |
+| **BB** | 上限で売り<br>❌ 下限無視 | 下限で買い<br>❌ 上限無視 | 両方向採用 |
+| **EMA** | EMA<で売り強化 | EMA>で買い強化 | - |
+
+### 実際の取引結果：
+- **現在価格**: ¥35.607
+- **保有ポジション**: 2つのSELLポジション
+  - Position 268617089: Entry=35.659, P/L=+0.15%
+  - Position 268617088: Entry=35.659, P/L=+0.15%
+- **市場状況**: 下降トレンド継続中（-8.24%）
+- **トレンドフォロー**: 正常動作確認
+
+### 期待される効果：
+1. **損失削減**: 下降トレンド中の無駄な逆張りBUY排除 → 「落ちるナイフ」回避
+2. **収益性向上**: トレンド継続中の押し目買い・戻り売り
+3. **安定性向上**: 騙しシグナルの大幅削減（RSI極端値、MACD逆張り）
+4. **機会損失削減**: トレンド転換時の素早い反転（BUYシグナルで決済→反転）
+
+### 技術詳細：
+- **修正ファイル**: 
+  - `services/enhanced_trading_logic.py` (179行、トレンドフォロー完全実装)
+  - `services/technical_indicators.py` (14行、バグ修正・ATR実装)
+  - `services/data_service.py` (26行、エラーハンドリング強化)
+- **GitHubコミット**: 7a45a6a - 🎯 Implement comprehensive trend-following strategy
+- **現在のポジション**: 2x SELL at 35.659 JPY (+0.15% profit)
+- **システム**: PM2監視下で24時間稼働中
+
+---
+**最終更新**: 2025年10月11日
+**ステータス**: 24時間完全稼働中 ✅ (トレンドフォロー戦略実装完了)
+**ダッシュボードURL**: http://localhost:8082/ ✅ final_dashboard.py (PM2監視下)
+**プロセス管理**: PM2 trading-bot + dashboard 自動復旧有効
+**時間足**: ⏱️ 30分足（長期トレンド重視）
+**アルゴリズム**: 🎯 完全トレンドフォロー（落ちるナイフ回避・押し目買い・戻り売り）
+**インジケーター**: ✅ RSI, MACD, BB, EMA全て正常計算・シグナル発動
+**自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
+**GitHubコミット**: 7a45a6a - トレンドフォロー戦略完全実装
