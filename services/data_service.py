@@ -331,17 +331,19 @@ class DataService:
             # Update the last candle with current ticker price if available
             logger.info("Updating last candle with current price")
             ticker_data = self.get_ticker(symbol)
-            if ticker_data and len(ticker_data) > 0:
-                current_price = float(ticker_data[0]['last'])
-                # Update the last row's close price to current price safely
-                try:
-                    if 'close' in df.columns:
-                        df.loc[df.index[-1], 'close'] = current_price
-                        logger.info(f"Updated last candle close price to current: {current_price}")
-                    else:
-                        logger.warning("'close' column not found in DataFrame")
-                except Exception as e:
-                    logger.error(f"Error updating close price: {e}")
+            if ticker_data:
+                # ticker_data is already a dict, not a list
+                current_price = float(ticker_data.get('last', ticker_data.get('bid', 0)))
+                if current_price > 0:
+                    # Update the last row's close price to current price safely
+                    try:
+                        if 'close' in df.columns:
+                            df.loc[df.index[-1], 'close'] = current_price
+                            logger.info(f"Updated last candle close price to current: {current_price}")
+                        else:
+                            logger.warning("'close' column not found in DataFrame")
+                    except Exception as e:
+                        logger.error(f"Error updating close price: {e}")
             
             # Add technical indicators
             df_with_indicators = TechnicalIndicators.add_all_indicators(df)
@@ -351,6 +353,8 @@ class DataService:
             
         except Exception as e:
             logger.error(f"Error adding indicators: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return df
     
     def get_account_margin(self):

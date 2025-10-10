@@ -73,8 +73,14 @@ class TechnicalIndicators:
 
     @staticmethod
     def calculate_atr(high, low, close, timeperiod=14):
-        """Average True Range using TA-Lib"""
-        return talib.ATR(high.to_numpy(), low.to_numpy(), close.to_numpy(), timeperiod=timeperiod)
+        """Average True Range using pandas/numpy"""
+        high_low = high - low
+        high_close = abs(high - close.shift())
+        low_close = abs(low - close.shift())
+
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        atr = true_range.rolling(window=timeperiod).mean()
+        return atr
 
     @staticmethod
     def calculate_market_regime(df):
@@ -138,8 +144,8 @@ class TechnicalIndicators:
             # Basic moving averages with adaptive periods
             df['ema_20'] = TechnicalIndicators.calculate_ema(df['close'], 20)  # Keep for compatibility
             df['ema_50'] = TechnicalIndicators.calculate_ema(df['close'], 50)  # Add for trend confirmation
-            df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_fast'])
-            df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], params['ema_slow'])
+            df['ema_12'] = TechnicalIndicators.calculate_ema(df['close'], params['macd_fast'])
+            df['ema_26'] = TechnicalIndicators.calculate_ema(df['close'], params['macd_slow'])
             # RSI with adaptive period
             df['rsi'] = TechnicalIndicators.calculate_rsi(df['close'], window=params['rsi_window'])
 
