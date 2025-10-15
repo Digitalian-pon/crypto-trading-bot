@@ -124,13 +124,13 @@ class SimpleSpotTradingBot:
 #### 2. **設定ファイル更新** (`setting.ini`)
 ```ini
 [trading]
-default_symbol = BTC_JPY    # DOGE_JPY → BTC_JPY
-default_timeframe = 30m      # 5m → 30m
+default_symbol = BTC    # DOGE_JPY → BTC_JPY → BTC (現物)
+default_timeframe = 30m  # 5m → 30m
 ```
 
 #### 3. **データベース更新**
 ```sql
-UPDATE trading_settings SET currency_pair = 'BTC_JPY', timeframe = '30m'
+UPDATE trading_settings SET currency_pair = 'BTC', timeframe = '30m'
 ```
 
 #### 4. **旧ボット削除・新ボット起動**
@@ -163,35 +163,66 @@ pm2 save                     # 保存
 - **PM2プロセス**: btc-spot-bot (online)
 - **ダッシュボード**: dashboard (online, port 8082)
 
-#### 5. **ダッシュボード完全対応** (2025年10月15日追加)
-**問題**: ダッシュボードが DOGE_JPY のまま表示されていた
-**原因**: `final_dashboard.py` 内に DOGE_JPY がハードコードされていた（5箇所）
+#### 5. **正しいシンボルへの修正** (2025年10月15日)
+**重大発見**: BTC_JPY はレバレッジ取引専用シンボルだった！
+
+**GMO Coin APIの仕様**:
+- ✅ **BTC** = 現物取引（スポット）シンボル
+- ❌ **BTC_JPY** = レバレッジ取引専用シンボル
+- 最小単位: 0.0001 BTC（両方同じ）
 
 **修正内容**:
-```python
-# Line 58: ポジション取得
-self.api_positions = api.get_positions('BTC_JPY')  # DOGE_JPY → BTC_JPY
+```ini
+# setting.ini
+default_symbol = BTC  # BTC_JPY → BTC
 
-# Line 77: マーケットデータ取得
-market_data_response = self.data_service.get_data_with_indicators('BTC_JPY', interval='30m')  # DOGE_JPY/5m → BTC_JPY/30m
-
-# Line 116: ティッカーAPI
-response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC_JPY', timeout=5)  # DOGE_JPY → BTC_JPY
-
-# Line 303: HTMLタイトル
-<title>BTC/JPY取引ダッシュボード</title>  # DOGE/JPY → BTC/JPY
-
-# Line 373-374: ヘッダーと価格表示
-<h1>🪙 BTC/JPY 現物取引ダッシュボード</h1>
-<div class="price">¥{self.current_price:,.0f}</div>  # 小数点3桁 → カンマ区切り整数
+# database
+UPDATE trading_settings SET currency_pair = 'BTC'
 ```
 
+```python
+# final_dashboard.py - シンボル修正
+api.get_positions('BTC')  # BTC_JPY → BTC
+get_data_with_indicators('BTC', interval='30m')
+requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC')
+```
+
+#### 6. **エンドポイント修正** (2025年10月15日)
+**問題**: レバレッジ取引用エンドポイントを使用していた
+
+**削除したエンドポイント**:
+- ❌ `/v1/openPositions` - ポジション一覧（現物には不要）
+- ❌ `/v1/account/margin` - 証拠金情報（現物には不要）
+
+**使用するエンドポイント**:
+- ✅ `/v1/account/assets` - 残高取得（JPY, BTC）
+- ✅ `/v1/order` - 注文（現物/レバレッジ共通）
+- ✅ `/v1/ticker` - 価格情報（symbol=BTC）
+
+**ダッシュボードUI変更**:
+```python
+# Before (レバレッジ用)
+self.api_positions = api.get_positions('BTC')
+self.balance_info = api.get_margin_account()
+
+# After (現物用)
+self.api_positions = []  # 現物にポジションなし
+balance_response = api.get_account_balance()  # /v1/account/assets
+self.balance_info = {'jpy': JPY残高, 'btc': BTC残高}
+```
+
+**残高表示**:
+- JPY残高: 1,094円
+- BTC残高: 0.00002090 BTC
+- BTC評価額: 355円
+- 総資産（JPY換算）: 1,449円
+
 **動作確認結果**:
-- ✅ ダッシュボード正常起動 (port 8082)
-- ✅ BTC/JPY 価格正常表示 (~17,000,000円)
-- ✅ 30分足データ取得・表示
-- ✅ トレンドフォローシグナル正常表示
-- ✅ テクニカル指標 (RSI, MACD, BB) 正常表示
+- ✅ BTC現物シンボルで正常動作
+- ✅ /v1/account/assets で残高取得成功
+- ✅ ポジション・証拠金の概念を完全削除
+- ✅ 現物取引専用ダッシュボードに変更完了
+- ✅ http://localhost:8082 で正常表示
 
 ---
 
@@ -204,7 +235,7 @@ response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC_JPY'
 - **2025年10月9日**: 時間足変更・talib依存関係削除
 - **2025年10月11日**: 完全トレンドフォロー戦略実装
 - **2025年10月12日**: BTC現物取引への完全移行 ✅
-- **2025年10月15日**: ダッシュボードBTC/JPY表示完全修正 ✅
+- **2025年10月15日**: 正しいシンボル修正（BTC_JPY→BTC）+ エンドポイント完全修正 ✅
 
 ## 🎯 トレンドフォロー戦略（2025年10月11日実装）
 ### トレンドフォロー統合マトリクス
@@ -227,13 +258,19 @@ response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC_JPY'
 **最終更新**: 2025年10月15日
 **ステータス**: 24時間完全稼働中 ✅ (BTC現物取引)
 **ボット**: btc-spot-bot (PM2監視下)
-**ダッシュボード**: http://localhost:8082/ ✅ **BTC/JPY正常表示中**
-**取引方式**: 現物取引（レバレッジなし）
-**シンボル**: 🪙 BTC/JPY
+**ダッシュボード**: http://localhost:8082/ ✅ **BTC現物取引正常表示中**
+**取引方式**: 現物取引（レバレッジなし・ポジションなし・証拠金なし）
+**シンボル**: 🪙 **BTC** (現物取引専用シンボル)
 **時間足**: ⏱️ 30分足（長期トレンド重視）
 **アルゴリズム**: 🎯 完全トレンドフォロー（落ちるナイフ回避・押し目買い・戻り売り）
 **インジケーター**: ✅ RSI, MACD, BB, EMA全て正常計算・シグナル発動
 **自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
+**APIエンドポイント**:
+- ✅ /v1/account/assets (残高取得)
+- ✅ /v1/order (注文)
+- ✅ /v1/ticker (価格情報)
 **GitHubコミット**:
 - c6040aa - BTC現物取引への完全移行
 - 11ab097 - ダッシュボードBTC/JPY表示完全対応
+- 2525585 - シンボル修正（BTC_JPY → BTC）
+- ed32d89 - エンドポイント修正（現物取引専用化）
