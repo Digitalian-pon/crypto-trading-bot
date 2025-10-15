@@ -54,19 +54,25 @@ class FinalDashboard:
                 # Get current price
                 self.get_current_price()
 
-                # Get API positions (修正: 直接リストを取得)
-                self.api_positions = api.get_positions('BTC')
-                if not isinstance(self.api_positions, list):
-                    self.api_positions = []
+                # 現物取引ではポジションはありません
+                self.api_positions = []
 
-                # Get balance information (修正: 直接データを取得)
+                # Get balance information (現物取引: /v1/account/assets)
                 try:
-                    self.balance_info = api.get_margin_account()
-                    if not isinstance(self.balance_info, dict) or not self.balance_info:
-                        self.balance_info = {}
+                    balance_response = api.get_account_balance()
+                    if balance_response and balance_response.get('status') == 0 and balance_response.get('data'):
+                        # BTCとJPYの残高を抽出
+                        self.balance_info = {'jpy': 0, 'btc': 0}
+                        for asset in balance_response['data']:
+                            if asset['symbol'] == 'JPY':
+                                self.balance_info['jpy'] = float(asset.get('available', 0))
+                            elif asset['symbol'] == 'BTC':
+                                self.balance_info['btc'] = float(asset.get('available', 0))
+                    else:
+                        self.balance_info = {'jpy': 0, 'btc': 0, 'error': 'Failed to fetch balance'}
                 except Exception as e:
                     logger.error(f"Balance fetch failed: {e}")
-                    self.balance_info = {}
+                    self.balance_info = {'jpy': 0, 'btc': 0, 'error': str(e)}
 
                 # Get trading signals
                 try:
@@ -262,37 +268,28 @@ class FinalDashboard:
         else:
             position_html = '<div style="color: #888; padding: 20px; text-align: center;">アクティブなポジションはありません</div>'
 
-        # Balance HTML
+        # Balance HTML (現物取引用)
         balance_html = ""
         if 'error' not in self.balance_info and self.balance_info:
-            if isinstance(self.balance_info, dict):
-                # Margin account format
-                available = self.balance_info.get('availableAmount',
-                           self.balance_info.get('available',
-                           self.balance_info.get('transferableAmount', 'N/A')))
-                actual_pnl = self.balance_info.get('actualProfitLoss', 'N/A')
-                margin = self.balance_info.get('margin', 'N/A')
-                profit_loss = self.balance_info.get('profitLoss', 'N/A')
+            jpy_balance = self.balance_info.get('jpy', 0)
+            btc_balance = self.balance_info.get('btc', 0)
 
-                # Format values safely
-                def format_value(value):
-                    if value == 'N/A' or value is None:
-                        return 'N/A'
-                    try:
-                        return f"{float(value):,.0f}"
-                    except (ValueError, TypeError):
-                        return str(value)
+            # BTC評価額（JPY換算）
+            btc_value_jpy = btc_balance * self.current_price if self.current_price > 0 else 0
+            total_value_jpy = jpy_balance + btc_value_jpy
 
-                balance_html = f'''
-                <div style="background: rgba(76, 175, 80, 0.15); padding: 20px; border-radius: 8px; margin: 5px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div style="color: #ffffff;"><strong>利用可能残高:</strong><br><span style="font-size: 1.3em; color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{format_value(available)}</span></div>
-                        <div style="color: #ffffff;"><strong>証拠金:</strong><br><span style="font-size: 1.3em; color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{format_value(margin)}</span></div>
-                        <div style="color: #ffffff;"><strong>実現損益:</strong><br><span style="font-size: 1.3em; color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{format_value(actual_pnl)}</span></div>
-                        <div style="color: #ffffff;"><strong>含み損益合計:</strong><br><span style="font-size: 1.3em; color: {'#00E676' if total_pnl >= 0 else '#FF1744'}; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{total_pnl:+,.0f}</span></div>
-                    </div>
+            balance_html = f'''
+            <div style="background: rgba(76, 175, 80, 0.15); padding: 20px; border-radius: 8px; margin: 5px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                    <div style="color: #ffffff;"><strong>JPY 残高:</strong><br><span style="font-size: 1.3em; color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{jpy_balance:,.0f}</span></div>
+                    <div style="color: #ffffff;"><strong>BTC 残高:</strong><br><span style="font-size: 1.3em; color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{btc_balance:.8f} BTC</span></div>
+                    <div style="color: #ffffff;"><strong>BTC評価額:</strong><br><span style="font-size: 1.3em; color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{btc_value_jpy:,.0f}</span></div>
                 </div>
-                '''
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); text-align: center;">
+                    <div style="color: #ffffff;"><strong>総資産（JPY換算）:</strong><br><span style="font-size: 1.5em; color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{total_value_jpy:,.0f}</span></div>
+                </div>
+            </div>
+            '''
         else:
             error_msg = self.balance_info.get("error", "Unknown error") if self.balance_info else "No balance data"
             balance_html = f'<div style="color: #ff6b6b; padding: 20px; text-align: center;">残高情報取得エラー: {error_msg}</div>'
@@ -377,20 +374,20 @@ class FinalDashboard:
 
         <div class="status-grid">
             <div class="status-card">
-                <div style="color: #ffffff;">アクティブポジション</div>
-                <div class="status-value" style="color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{len(self.api_positions)}個</div>
+                <div style="color: #ffffff;">取引タイプ</div>
+                <div class="status-value" style="color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">💎 現物</div>
             </div>
             <div class="status-card">
                 <div style="color: #ffffff;">24時間高値</div>
-                <div class="status-value" style="color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{self.high:.3f}</div>
+                <div class="status-value" style="color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{self.high:,.0f}</div>
             </div>
             <div class="status-card">
                 <div style="color: #ffffff;">24時間安値</div>
-                <div class="status-value" style="color: #FF1744; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{self.low:.3f}</div>
+                <div class="status-value" style="color: #FF1744; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{self.low:,.0f}</div>
             </div>
             <div class="status-card">
                 <div style="color: #ffffff;">24時間出来高</div>
-                <div class="status-value" style="color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{self.volume:,.0f}</div>
+                <div class="status-value" style="color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{self.volume:,.2f}</div>
             </div>
         </div>
 
@@ -404,14 +401,10 @@ class FinalDashboard:
             {balance_html}
         </div>
 
-        <div class="section">
-            <h2>📊 アクティブポジション ({len(self.api_positions)}個)</h2>
-            {position_html}
-        </div>
-
         <div class="section" style="text-align: center; color: #ccc; font-size: 0.9em;">
             <p>🔄 GMO Coin APIからリアルタイムデータを取得</p>
-            <p>📡 URL: http://localhost:8083</p>
+            <p>💎 現物取引（ポジション・証拠金なし）</p>
+            <p>📡 URL: http://localhost:8082</p>
         </div>
     </div>
 </body>
