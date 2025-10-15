@@ -67,20 +67,20 @@ class SimpleSpotTradingBot:
             max_jpy = jpy_balance * 0.95
             btc_amount = max_jpy / current_price
 
-            # BTCの最小注文単位は0.0001
-            btc_amount = round(btc_amount, 4)
+            # BTCの最小注文単位は0.00001（2024年以降）
+            btc_amount = round(btc_amount, 5)
 
-            if btc_amount < 0.0001:
+            if btc_amount < 0.00001:
                 logger.warning(f"Insufficient JPY for BUY: {jpy_balance:.0f} JPY")
                 return False
 
-            logger.info(f"🚀 Executing BUY: {btc_amount:.4f} BTC at {current_price:.0f} JPY")
+            logger.info(f"🚀 Executing BUY: {btc_amount:.5f} BTC at {current_price:.0f} JPY")
 
             result = self.api.place_order(
                 symbol=self.symbol,
                 side="BUY",
                 execution_type="MARKET",
-                size=f"{btc_amount:.4f}"
+                size=f"{btc_amount:.5f}"
             )
 
             if 'data' in result:
@@ -99,19 +99,19 @@ class SimpleSpotTradingBot:
         try:
             # BTC残高の95%を売却
             btc_amount = btc_balance * 0.95
-            btc_amount = round(btc_amount, 4)
+            btc_amount = round(btc_amount, 5)
 
-            if btc_amount < 0.0001:
+            if btc_amount < 0.00001:
                 logger.warning(f"Insufficient BTC for SELL: {btc_balance:.8f} BTC")
                 return False
 
-            logger.info(f"🚀 Executing SELL: {btc_amount:.4f} BTC")
+            logger.info(f"🚀 Executing SELL: {btc_amount:.5f} BTC")
 
             result = self.api.place_order(
                 symbol=self.symbol,
                 side="SELL",
                 execution_type="MARKET",
-                size=f"{btc_amount:.4f}"
+                size=f"{btc_amount:.5f}"
             )
 
             if 'data' in result:
@@ -180,7 +180,7 @@ class SimpleSpotTradingBot:
                         logger.info(f"⚠️  BUY signal but insufficient JPY: {jpy_balance:.0f}")
 
                 elif trade_type == 'SELL':
-                    if btc_balance > 0.0001:  # 最低0.0001 BTC必要
+                    if btc_balance > 0.00001:  # 最低0.00001 BTC必要（2024年以降）
                         logger.info(f"💰 SELL Signal detected - available BTC: {btc_balance:.8f}")
                         self.execute_sell(btc_balance)
                     else:
