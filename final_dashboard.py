@@ -55,7 +55,7 @@ class FinalDashboard:
                 self.get_current_price()
 
                 # Get API positions (修正: 直接リストを取得)
-                self.api_positions = api.get_positions('BTC_JPY')
+                self.api_positions = api.get_positions('BTC')
                 if not isinstance(self.api_positions, list):
                     self.api_positions = []
 
@@ -74,7 +74,7 @@ class FinalDashboard:
                         self.data_service = DataService()
 
                     # Get market data with indicators
-                    market_data_response = self.data_service.get_data_with_indicators('BTC_JPY', interval='30m')
+                    market_data_response = self.data_service.get_data_with_indicators('BTC', interval='30m')
                     if market_data_response is not None and not market_data_response.empty:
                         # Convert DataFrame to dictionary for the last row (most recent data)
                         self.market_data = market_data_response.iloc[-1].to_dict()
@@ -113,7 +113,7 @@ class FinalDashboard:
         """Get current BTC/JPY price"""
         try:
             import requests
-            response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC_JPY', timeout=5)
+            response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC', timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 if data['status'] == 0 and 'data' in data:
