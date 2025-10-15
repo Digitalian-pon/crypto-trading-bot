@@ -156,10 +156,42 @@ pm2 save                     # 保存
 
 ### 技術詳細：
 - **新規ファイル**: `simple_spot_bot.py` (209行)
-- **修正ファイル**: `setting.ini`, database
-- **GitHubコミット**: c6040aa - 🔄 Complete migration to BTC spot trading
+- **修正ファイル**: `setting.ini`, database, `final_dashboard.py`
+- **GitHubコミット**:
+  - c6040aa - 🔄 Complete migration to BTC spot trading
+  - 11ab097 - 🖥️ Update dashboard to display BTC/JPY spot trading
 - **PM2プロセス**: btc-spot-bot (online)
 - **ダッシュボード**: dashboard (online, port 8082)
+
+#### 5. **ダッシュボード完全対応** (2025年10月15日追加)
+**問題**: ダッシュボードが DOGE_JPY のまま表示されていた
+**原因**: `final_dashboard.py` 内に DOGE_JPY がハードコードされていた（5箇所）
+
+**修正内容**:
+```python
+# Line 58: ポジション取得
+self.api_positions = api.get_positions('BTC_JPY')  # DOGE_JPY → BTC_JPY
+
+# Line 77: マーケットデータ取得
+market_data_response = self.data_service.get_data_with_indicators('BTC_JPY', interval='30m')  # DOGE_JPY/5m → BTC_JPY/30m
+
+# Line 116: ティッカーAPI
+response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC_JPY', timeout=5)  # DOGE_JPY → BTC_JPY
+
+# Line 303: HTMLタイトル
+<title>BTC/JPY取引ダッシュボード</title>  # DOGE/JPY → BTC/JPY
+
+# Line 373-374: ヘッダーと価格表示
+<h1>🪙 BTC/JPY 現物取引ダッシュボード</h1>
+<div class="price">¥{self.current_price:,.0f}</div>  # 小数点3桁 → カンマ区切り整数
+```
+
+**動作確認結果**:
+- ✅ ダッシュボード正常起動 (port 8082)
+- ✅ BTC/JPY 価格正常表示 (~17,000,000円)
+- ✅ 30分足データ取得・表示
+- ✅ トレンドフォローシグナル正常表示
+- ✅ テクニカル指標 (RSI, MACD, BB) 正常表示
 
 ---
 
@@ -172,6 +204,7 @@ pm2 save                     # 保存
 - **2025年10月9日**: 時間足変更・talib依存関係削除
 - **2025年10月11日**: 完全トレンドフォロー戦略実装
 - **2025年10月12日**: BTC現物取引への完全移行 ✅
+- **2025年10月15日**: ダッシュボードBTC/JPY表示完全修正 ✅
 
 ## 🎯 トレンドフォロー戦略（2025年10月11日実装）
 ### トレンドフォロー統合マトリクス
@@ -191,14 +224,16 @@ pm2 save                     # 保存
 
 ---
 
-**最終更新**: 2025年10月12日
+**最終更新**: 2025年10月15日
 **ステータス**: 24時間完全稼働中 ✅ (BTC現物取引)
 **ボット**: btc-spot-bot (PM2監視下)
-**ダッシュボード**: http://localhost:8082/ (PM2監視下)
+**ダッシュボード**: http://localhost:8082/ ✅ **BTC/JPY正常表示中**
 **取引方式**: 現物取引（レバレッジなし）
 **シンボル**: 🪙 BTC/JPY
 **時間足**: ⏱️ 30分足（長期トレンド重視）
 **アルゴリズム**: 🎯 完全トレンドフォロー（落ちるナイフ回避・押し目買い・戻り売り）
 **インジケーター**: ✅ RSI, MACD, BB, EMA全て正常計算・シグナル発動
 **自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
-**GitHubコミット**: c6040aa - BTC現物取引への完全移行
+**GitHubコミット**:
+- c6040aa - BTC現物取引への完全移行
+- 11ab097 - ダッシュボードBTC/JPY表示完全対応
