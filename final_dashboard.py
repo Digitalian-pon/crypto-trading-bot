@@ -55,7 +55,7 @@ class FinalDashboard:
                 self.get_current_price()
 
                 # Get API positions (修正: 直接リストを取得)
-                self.api_positions = api.get_positions('DOGE_JPY')
+                self.api_positions = api.get_positions('BTC_JPY')
                 if not isinstance(self.api_positions, list):
                     self.api_positions = []
 
@@ -74,7 +74,7 @@ class FinalDashboard:
                         self.data_service = DataService()
 
                     # Get market data with indicators
-                    market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval='5m')
+                    market_data_response = self.data_service.get_data_with_indicators('BTC_JPY', interval='30m')
                     if market_data_response is not None and not market_data_response.empty:
                         # Convert DataFrame to dictionary for the last row (most recent data)
                         self.market_data = market_data_response.iloc[-1].to_dict()
@@ -110,10 +110,10 @@ class FinalDashboard:
             logger.error(f"Error updating dashboard data: {e}")
 
     def get_current_price(self):
-        """Get current DOGE/JPY price"""
+        """Get current BTC/JPY price"""
         try:
             import requests
-            response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=DOGE_JPY', timeout=5)
+            response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC_JPY', timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 if data['status'] == 0 and 'data' in data:
@@ -300,7 +300,7 @@ class FinalDashboard:
         return f'''<!DOCTYPE html>
 <html>
 <head>
-    <title>DOGE/JPY取引ダッシュボード</title>
+    <title>BTC/JPY取引ダッシュボード</title>
     <meta charset="utf-8">
     <meta http-equiv="refresh" content="10">
     <style>
@@ -370,8 +370,8 @@ class FinalDashboard:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 DOGE/JPY 取引ダッシュボード</h1>
-            <div class="price">¥{self.current_price:.3f}</div>
+            <h1>🪙 BTC/JPY 現物取引ダッシュボード</h1>
+            <div class="price">¥{self.current_price:,.0f}</div>
             <p>最終更新: {current_time} | 自動更新: 10秒間隔</p>
         </div>
 
