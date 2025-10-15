@@ -226,6 +226,47 @@ self.balance_info = {'jpy': JPY残高, 'btc': BTC残高}
 
 ---
 
+#### 7. **取引履歴表示修正** (2025年10月16日)
+**問題**: ダッシュボードに取引履歴が表示されない
+
+**原因**:
+1. `/v1/executions` エンドポイントは `orderId` または `executionId` パラメータが必須
+2. `symbol` だけでは使用できない → エラー: Invalid request parameter
+
+**修正内容**:
+```python
+# services/gmo_api.py
+def get_latest_executions(self, symbol=None, page=1, count=100):
+    """過去1日の約定履歴取得"""
+    endpoint = "/v1/latestExecutions"  # /v1/executions → /v1/latestExecutions
+    params = {"page": page, "count": count}
+    if symbol:
+        params["symbol"] = symbol
+    return self._private_request("GET", endpoint, params)
+```
+
+**レバレッジボット干渉問題の修正**:
+```python
+# app.py - 旧レバレッジボットの自動起動を無効化
+# Trading bot auto-start DISABLED - Using separate PM2 process (btc-spot-bot)
+# from fixed_trading_loop import FixedTradingBot as TradingBot  # コメントアウト
+```
+
+**ポート設定の柔軟化**:
+```python
+# final_dashboard.py
+PORT = int(os.environ.get('PORT', 8082))  # ハードコード → 環境変数対応
+HOST = os.environ.get('HOST', '0.0.0.0')
+```
+
+**動作確認結果**:
+- ✅ `/v1/latestExecutions?symbol=BTC&page=1&count=10` - HTTP 200成功
+- ✅ 取引履歴取得成功: SELL 0.00002 BTC @ ¥16,817,427（手数料¥1）
+- ✅ ダッシュボードに取引履歴が正常表示
+- ✅ レバレッジボットの干渉を完全排除
+
+---
+
 ## 📞 サポート対応履歴（抜粋）
 - **2025年8月22日**: 実取引機能修正
 - **2025年8月25日**: レバレッジ取引API完全対応
@@ -236,6 +277,7 @@ self.balance_info = {'jpy': JPY残高, 'btc': BTC残高}
 - **2025年10月11日**: 完全トレンドフォロー戦略実装
 - **2025年10月12日**: BTC現物取引への完全移行 ✅
 - **2025年10月15日**: 正しいシンボル修正（BTC_JPY→BTC）+ エンドポイント完全修正 ✅
+- **2025年10月16日**: 取引履歴表示修正 + レバレッジボット干渉排除 ✅
 
 ## 🎯 トレンドフォロー戦略（2025年10月11日実装）
 ### トレンドフォロー統合マトリクス
@@ -255,10 +297,10 @@ self.balance_info = {'jpy': JPY残高, 'btc': BTC残高}
 
 ---
 
-**最終更新**: 2025年10月15日
+**最終更新**: 2025年10月16日
 **ステータス**: 24時間完全稼働中 ✅ (BTC現物取引)
 **ボット**: btc-spot-bot (PM2監視下)
-**ダッシュボード**: http://localhost:8082/ ✅ **BTC現物取引正常表示中**
+**ダッシュボード**: http://localhost:8082/ ✅ **BTC現物取引 + 取引履歴正常表示中**
 **取引方式**: 現物取引（レバレッジなし・ポジションなし・証拠金なし）
 **シンボル**: 🪙 **BTC** (現物取引専用シンボル)
 **時間足**: ⏱️ 30分足（長期トレンド重視）
@@ -267,10 +309,13 @@ self.balance_info = {'jpy': JPY残高, 'btc': BTC残高}
 **自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
 **APIエンドポイント**:
 - ✅ /v1/account/assets (残高取得)
-- ✅ /v1/order (注文)
+- ✅ /v1/order (注文実行)
 - ✅ /v1/ticker (価格情報)
+- ✅ /v1/latestExecutions (取引履歴・過去1日) 🆕
 **GitHubコミット**:
 - c6040aa - BTC現物取引への完全移行
 - 11ab097 - ダッシュボードBTC/JPY表示完全対応
 - 2525585 - シンボル修正（BTC_JPY → BTC）
 - ed32d89 - エンドポイント修正（現物取引専用化）
+- f16cd9b - 最小取引単位修正（0.0001→0.00001 BTC）
+- a7c5715 - 取引履歴表示修正 + レバレッジボット干渉排除 🆕
