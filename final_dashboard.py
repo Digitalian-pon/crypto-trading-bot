@@ -32,6 +32,7 @@ class FinalDashboard:
         self.high = 0.0
         self.low = 0.0
         self.api_positions = []
+        self.execution_history = []
         self.balance_info = {}
         self.signal_info = {'should_trade': False, 'trade_type': None, 'reason': 'システム初期化中', 'confidence': 0.0}
         self.market_data = {}
@@ -56,6 +57,21 @@ class FinalDashboard:
 
                 # 現物取引ではポジションはありません
                 self.api_positions = []
+
+                # Get execution history (取引履歴)
+                try:
+                    executions_response = api.get_execution_history(symbol='BTC', page=1, count=10)
+                    if executions_response and executions_response.get('status') == 0:
+                        data = executions_response.get('data', {})
+                        if isinstance(data, dict) and 'list' in data:
+                            self.execution_history = data['list']
+                        else:
+                            self.execution_history = []
+                    else:
+                        self.execution_history = []
+                except Exception as e:
+                    logger.error(f"Execution history fetch failed: {e}")
+                    self.execution_history = []
 
                 # Get balance information (現物取引: /v1/account/assets)
                 try:
@@ -130,6 +146,58 @@ class FinalDashboard:
                     self.low = float(ticker['low'])
         except Exception as e:
             logger.error(f"Error getting current price: {e}")
+
+    def get_execution_history_html(self):
+        """Generate execution history HTML"""
+        try:
+            if not self.execution_history:
+                return '<div style="color: #888; padding: 20px; text-align: center;">取引履歴がありません</div>'
+
+            history_html = '<div style="overflow-x: auto;">'
+            history_html += '<table style="width: 100%; border-collapse: collapse; color: #ffffff;">'
+            history_html += '<thead><tr style="background: rgba(255,255,255,0.1); border-bottom: 2px solid rgba(255,255,255,0.2);">'
+            history_html += '<th style="padding: 12px; text-align: left;">日時</th>'
+            history_html += '<th style="padding: 12px; text-align: center;">売買</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">数量 (BTC)</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">価格 (JPY)</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">手数料 (JPY)</th>'
+            history_html += '<th style="padding: 12px; text-align: center;">注文ID</th>'
+            history_html += '</tr></thead><tbody>'
+
+            for execution in self.execution_history:
+                side = execution.get('side', 'N/A')
+                side_color = '#00E676' if side == 'BUY' else '#FF1744' if side == 'SELL' else '#FFEB3B'
+                side_text = '買い' if side == 'BUY' else '売り' if side == 'SELL' else side
+
+                timestamp = execution.get('timestamp', '')
+                # タイムスタンプをフォーマット
+                try:
+                    from datetime import datetime
+                    dt = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%fZ')
+                    timestamp_formatted = dt.strftime('%m/%d %H:%M:%S')
+                except:
+                    timestamp_formatted = timestamp[:16] if len(timestamp) > 16 else timestamp
+
+                size = float(execution.get('size', 0))
+                price = float(execution.get('price', 0))
+                fee = float(execution.get('fee', 0))
+                order_id = execution.get('orderId', 'N/A')
+
+                history_html += f'<tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">'
+                history_html += f'<td style="padding: 10px; color: #ffffff;">{timestamp_formatted}</td>'
+                history_html += f'<td style="padding: 10px; text-align: center;"><span style="color: {side_color}; font-weight: bold;">{side_text}</span></td>'
+                history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">{size:.5f}</td>'
+                history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">¥{price:,.0f}</td>'
+                history_html += f'<td style="padding: 10px; text-align: right; color: #FF9800;">¥{fee:,.0f}</td>'
+                history_html += f'<td style="padding: 10px; text-align: center; color: #888; font-size: 0.85em;">{order_id}</td>'
+                history_html += '</tr>'
+
+            history_html += '</tbody></table></div>'
+            return history_html
+
+        except Exception as e:
+            logger.error(f"Error generating execution history HTML: {e}")
+            return f'<div style="color: #ff6b6b; padding: 20px; text-align: center;">取引履歴表示エラー: {str(e)}</div>'
 
     def get_signal_html(self):
         """Generate trading signal HTML"""
@@ -401,6 +469,11 @@ class FinalDashboard:
             {balance_html}
         </div>
 
+        <div class="section">
+            <h2>📜 取引履歴 (最新10件)</h2>
+            {self.get_execution_history_html()}
+        </div>
+
         <div class="section" style="text-align: center; color: #ccc; font-size: 0.9em;">
             <p>🔄 GMO Coin APIからリアルタイムデータを取得</p>
             <p>💎 現物取引（ポジション・証拠金なし）</p>
@@ -437,8 +510,8 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(500, f"Internal Server Error: {str(e)}")
 
 if __name__ == "__main__":
-    PORT = 8082
-    HOST = "0.0.0.0"
+    PORT = int(os.environ.get('PORT', 8082))
+    HOST = os.environ.get('HOST', '0.0.0.0')
 
     logger.info(f"Starting Final Dashboard on {HOST}:{PORT}")
     logger.info("Features: Real positions, balance, P&L calculation")

@@ -297,22 +297,33 @@ class GMOCoinAPI:
             
         return self._private_request("GET", endpoint, params)
     
+    def get_latest_executions(self, symbol=None, page=1, count=100):
+        """
+        Get latest execution history (past 1 day)
+
+        :param symbol: Trading pair symbol (optional)
+        :param page: Page number
+        :param count: Number of executions per page
+        :return: Latest execution history data
+        """
+        endpoint = "/v1/latestExecutions"
+        params = {"page": page, "count": count}
+
+        if symbol:
+            params["symbol"] = symbol
+
+        return self._private_request("GET", endpoint, params)
+
     def get_execution_history(self, symbol=None, page=1, count=100):
         """
-        Get execution history
-        
+        Get execution history (alias for get_latest_executions)
+
         :param symbol: Trading pair symbol (optional)
         :param page: Page number
         :param count: Number of executions per page
         :return: Execution history data
         """
-        endpoint = "/v1/executions"
-        params = {"page": page, "count": count}
-        
-        if symbol:
-            params["symbol"] = symbol
-            
-        return self._private_request("GET", endpoint, params)
+        return self.get_latest_executions(symbol, page, count)
     
     # Leverage Trading Methods
     

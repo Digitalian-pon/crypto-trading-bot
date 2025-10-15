@@ -87,64 +87,69 @@ with app.app_context():
     # def load_user(user_id):
     #     return User.query.get(int(user_id))
     
-    # Trading bot auto-start enabled for real trading
-    logger.info("Trading bot auto-start enabled")
-    
-    # Start trading bot for the first user with trading enabled
-    def start_trading_bot():
-        try:
-            from fixed_trading_loop import FixedTradingBot as TradingBot
-            user = User.query.filter_by(username='trading_user').first()
-            
-            if user:
-                logger.info(f"Found user: {user.username}")
-                logger.info(f"User has settings: {bool(user.settings)}")
-                if user.settings:
-                    logger.info(f"Trading enabled: {user.settings.trading_enabled}")
-                    logger.info(f"Currency pair: {user.settings.currency_pair}")
-                logger.info(f"User has API key: {bool(user.api_key)}")
-                logger.info(f"User has API secret: {bool(user.api_secret)}")
-            
-            if user and user.settings and user.settings.trading_enabled and user.api_key and user.api_secret:
-                logger.info(f"Starting trading bot for user: {user.username}")
-                trading_bot = TradingBot(user=user, api_key=user.api_key, api_secret=user.api_secret, app=app)
-                
-                # Create a new session for the bot to avoid context issues
-                from sqlalchemy.orm import sessionmaker
-                Session = sessionmaker(bind=db.engine)
-                bot_session = Session()
-                trading_bot.set_db_session(bot_session)
-                
-                # Start the bot with 60 second intervals
-                if trading_bot.start(interval=60):
-                    logger.info("Trading bot started successfully with dedicated database session")
-                    return True
-                else:
-                    logger.error("Failed to start trading bot")
-                    return False
-            else:
-                reasons = []
-                if not user:
-                    reasons.append("user not found")
-                if user and not user.settings:
-                    reasons.append("no settings")
-                if user and user.settings and not user.settings.trading_enabled:
-                    reasons.append("trading not enabled")
-                if user and not user.api_key:
-                    reasons.append("no API key")
-                if user and not user.api_secret:
-                    reasons.append("no API secret")
-                
-                logger.warning(f"Cannot start trading bot: {', '.join(reasons)}")
-                return False
-        except Exception as e:
-            logger.error(f"Error starting trading bot: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
-    
-    # Try to start the trading bot
-    start_trading_bot()
+    # Trading bot auto-start DISABLED - Using separate simple_spot_bot.py instead
+    # Old leverage trading bot (fixed_trading_loop.py) is deprecated
+    logger.info("Trading bot auto-start DISABLED - Using separate PM2 process (btc-spot-bot)")
+
+    # NOTE: The trading bot is now run separately via PM2:
+    # pm2 start simple_spot_bot.py --name btc-spot-bot --interpreter python3
+    # This dashboard only displays information, does not execute trades
+
+    # # Start trading bot for the first user with trading enabled
+    # def start_trading_bot():
+    #     try:
+    #         from fixed_trading_loop import FixedTradingBot as TradingBot
+    #         user = User.query.filter_by(username='trading_user').first()
+    #
+    #         if user:
+    #             logger.info(f"Found user: {user.username}")
+    #             logger.info(f"User has settings: {bool(user.settings)}")
+    #             if user.settings:
+    #                 logger.info(f"Trading enabled: {user.settings.trading_enabled}")
+    #                 logger.info(f"Currency pair: {user.settings.currency_pair}")
+    #             logger.info(f"User has API key: {bool(user.api_key)}")
+    #             logger.info(f"User has API secret: {bool(user.api_secret)}")
+    #
+    #         if user and user.settings and user.settings.trading_enabled and user.api_key and user.api_secret:
+    #             logger.info(f"Starting trading bot for user: {user.username}")
+    #             trading_bot = TradingBot(user=user, api_key=user.api_key, api_secret=user.api_secret, app=app)
+    #
+    #             # Create a new session for the bot to avoid context issues
+    #             from sqlalchemy.orm import sessionmaker
+    #             Session = sessionmaker(bind=db.engine)
+    #             bot_session = Session()
+    #             trading_bot.set_db_session(bot_session)
+    #
+    #             # Start the bot with 60 second intervals
+    #             if trading_bot.start(interval=60):
+    #                 logger.info("Trading bot started successfully with dedicated database session")
+    #                 return True
+    #             else:
+    #                 logger.error("Failed to start trading bot")
+    #                 return False
+    #         else:
+    #             reasons = []
+    #             if not user:
+    #                 reasons.append("user not found")
+    #             if user and not user.settings:
+    #                 reasons.append("no settings")
+    #             if user and user.settings and not user.settings.trading_enabled:
+    #                 reasons.append("trading not enabled")
+    #             if user and not user.api_key:
+    #                 reasons.append("no API key")
+    #             if user and not user.api_secret:
+    #                 reasons.append("no API secret")
+    #
+    #             logger.warning(f"Cannot start trading bot: {', '.join(reasons)}")
+    #             return False
+    #     except Exception as e:
+    #         logger.error(f"Error starting trading bot: {e}")
+    #         import traceback
+    #         logger.error(f"Traceback: {traceback.format_exc()}")
+    #         return False
+    #
+    # # Try to start the trading bot
+    # start_trading_bot()
     
     # Register blueprints
     # from routes.status import status_bp
