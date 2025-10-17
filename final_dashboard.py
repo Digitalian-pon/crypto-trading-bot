@@ -44,93 +44,101 @@ class FinalDashboard:
     def update_all_data(self):
         """Update all dashboard data"""
         try:
-            with app.app_context():
-                user = User.query.filter_by(username='trading_user').first()
-                if not user:
-                    logger.error("User not found")
-                    return
+            # Try to get API credentials from environment variables first (for Railway)
+            api_key = os.environ.get('GMO_API_KEY')
+            api_secret = os.environ.get('GMO_API_SECRET')
 
-                api = GMOCoinAPI(user.api_key, user.api_secret)
+            # If not in environment, try database
+            if not api_key or not api_secret:
+                with app.app_context():
+                    user = User.query.filter_by(username='trading_user').first()
+                    if not user:
+                        logger.error("User not found and no environment variables set")
+                        return
+                    api_key = user.api_key
+                    api_secret = user.api_secret
 
-                # Get current price
-                self.get_current_price()
+            api = GMOCoinAPI(api_key, api_secret)
 
-                # レバレッジ取引: ポジション取得
-                try:
-                    self.api_positions = api.get_positions(symbol='DOGE_JPY')
-                except Exception as e:
-                    logger.error(f"Position fetch failed: {e}")
-                    self.api_positions = []
+            # Get current price
+            self.get_current_price()
 
-                # Get execution history (取引履歴)
-                try:
-                    executions_response = api.get_latest_executions(symbol='DOGE_JPY', page=1, count=10)
-                    if executions_response and executions_response.get('status') == 0:
-                        data = executions_response.get('data', {})
-                        if isinstance(data, dict) and 'list' in data:
-                            self.execution_history = data['list']
-                        else:
-                            self.execution_history = []
+            # レバレッジ取引: ポジション取得
+            try:
+                self.api_positions = api.get_positions(symbol='DOGE_JPY')
+            except Exception as e:
+                logger.error(f"Position fetch failed: {e}")
+                self.api_positions = []
+
+            # Get execution history (取引履歴)
+            try:
+                executions_response = api.get_latest_executions(symbol='DOGE_JPY', page=1, count=10)
+                if executions_response and executions_response.get('status') == 0:
+                    data = executions_response.get('data', {})
+                    if isinstance(data, dict) and 'list' in data:
+                        self.execution_history = data['list']
                     else:
                         self.execution_history = []
-                except Exception as e:
-                    logger.error(f"Execution history fetch failed: {e}")
+                else:
                     self.execution_history = []
+            except Exception as e:
+                logger.error(f"Execution history fetch failed: {e}")
+                self.execution_history = []
 
-                # Get balance information (レバレッジ取引: /v1/account/assets)
-                try:
-                    balance_response = api.get_account_balance()
-                    if balance_response and balance_response.get('status') == 0 and balance_response.get('data'):
-                        # JPYとDOGEの残高を抽出
-                        self.balance_info = {'jpy': 0, 'doge': 0}
-                        for asset in balance_response['data']:
-                            if asset['symbol'] == 'JPY':
-                                self.balance_info['jpy'] = float(asset.get('available', 0))
-                            elif asset['symbol'] == 'DOGE':
-                                self.balance_info['doge'] = float(asset.get('available', 0))
-                    else:
-                        self.balance_info = {'jpy': 0, 'doge': 0, 'error': 'Failed to fetch balance'}
-                except Exception as e:
-                    logger.error(f"Balance fetch failed: {e}")
-                    self.balance_info = {'jpy': 0, 'doge': 0, 'error': str(e)}
+            # Get balance information (レバレッジ取引: /v1/account/assets)
+            try:
+                balance_response = api.get_account_balance()
+                if balance_response and balance_response.get('status') == 0 and balance_response.get('data'):
+                    # JPYとDOGEの残高を抽出
+                    self.balance_info = {'jpy': 0, 'doge': 0}
+                    for asset in balance_response['data']:
+                        if asset['symbol'] == 'JPY':
+                            self.balance_info['jpy'] = float(asset.get('available', 0))
+                        elif asset['symbol'] == 'DOGE':
+                            self.balance_info['doge'] = float(asset.get('available', 0))
+                else:
+                    self.balance_info = {'jpy': 0, 'doge': 0, 'error': 'Failed to fetch balance'}
+            except Exception as e:
+                logger.error(f"Balance fetch failed: {e}")
+                self.balance_info = {'jpy': 0, 'doge': 0, 'error': str(e)}
 
-                # Get trading signals
-                try:
-                    if not self.data_service:
-                        self.data_service = DataService()
+            # Get trading signals
+            try:
+                if not self.data_service:
+                    self.data_service = DataService()
 
-                    # Get market data with indicators
-                    market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval='5m')
-                    if market_data_response is not None and not market_data_response.empty:
-                        # Convert DataFrame to dictionary for the last row (most recent data)
-                        self.market_data = market_data_response.iloc[-1].to_dict()
+                # Get market data with indicators
+                market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval='5m')
+                if market_data_response is not None and not market_data_response.empty:
+                    # Convert DataFrame to dictionary for the last row (most recent data)
+                    self.market_data = market_data_response.iloc[-1].to_dict()
 
-                        # Generate trading signal
-                        should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(self.market_data)
-                        self.signal_info = {
-                            'should_trade': should_trade,
-                            'trade_type': trade_type,
-                            'reason': reason,
-                            'confidence': confidence
-                        }
-                    else:
-                        self.signal_info = {
-                            'should_trade': False,
-                            'trade_type': None,
-                            'reason': 'マーケットデータ取得失敗',
-                            'confidence': 0.0
-                        }
-                except Exception as e:
-                    logger.error(f"Error getting signals: {e}")
+                    # Generate trading signal
+                    should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(self.market_data)
+                    self.signal_info = {
+                        'should_trade': should_trade,
+                        'trade_type': trade_type,
+                        'reason': reason,
+                        'confidence': confidence
+                    }
+                else:
                     self.signal_info = {
                         'should_trade': False,
                         'trade_type': None,
-                        'reason': f'シグナル取得エラー: {str(e)}',
+                        'reason': 'マーケットデータ取得失敗',
                         'confidence': 0.0
                     }
+            except Exception as e:
+                logger.error(f"Error getting signals: {e}")
+                self.signal_info = {
+                    'should_trade': False,
+                    'trade_type': None,
+                    'reason': f'シグナル取得エラー: {str(e)}',
+                    'confidence': 0.0
+                }
 
-                self.last_update = datetime.now()
-                logger.info(f"Dashboard updated - Positions: {len(self.api_positions)}, Price: ¥{self.current_price}, Signal: {self.signal_info.get('trade_type', 'なし')}")
+            self.last_update = datetime.now()
+            logger.info(f"Dashboard updated - Positions: {len(self.api_positions)}, Price: ¥{self.current_price}, Signal: {self.signal_info.get('trade_type', 'なし')}")
 
         except Exception as e:
             logger.error(f"Error updating dashboard data: {e}")
