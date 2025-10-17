@@ -55,12 +55,16 @@ class FinalDashboard:
                 # Get current price
                 self.get_current_price()
 
-                # 現物取引ではポジションはありません
-                self.api_positions = []
+                # レバレッジ取引: ポジション取得
+                try:
+                    self.api_positions = api.get_positions(symbol='DOGE_JPY')
+                except Exception as e:
+                    logger.error(f"Position fetch failed: {e}")
+                    self.api_positions = []
 
                 # Get execution history (取引履歴)
                 try:
-                    executions_response = api.get_execution_history(symbol='BTC', page=1, count=10)
+                    executions_response = api.get_latest_executions(symbol='DOGE_JPY', page=1, count=10)
                     if executions_response and executions_response.get('status') == 0:
                         data = executions_response.get('data', {})
                         if isinstance(data, dict) and 'list' in data:
@@ -73,22 +77,22 @@ class FinalDashboard:
                     logger.error(f"Execution history fetch failed: {e}")
                     self.execution_history = []
 
-                # Get balance information (現物取引: /v1/account/assets)
+                # Get balance information (レバレッジ取引: /v1/account/assets)
                 try:
                     balance_response = api.get_account_balance()
                     if balance_response and balance_response.get('status') == 0 and balance_response.get('data'):
-                        # BTCとJPYの残高を抽出
-                        self.balance_info = {'jpy': 0, 'btc': 0}
+                        # JPYとDOGEの残高を抽出
+                        self.balance_info = {'jpy': 0, 'doge': 0}
                         for asset in balance_response['data']:
                             if asset['symbol'] == 'JPY':
                                 self.balance_info['jpy'] = float(asset.get('available', 0))
-                            elif asset['symbol'] == 'BTC':
-                                self.balance_info['btc'] = float(asset.get('available', 0))
+                            elif asset['symbol'] == 'DOGE':
+                                self.balance_info['doge'] = float(asset.get('available', 0))
                     else:
-                        self.balance_info = {'jpy': 0, 'btc': 0, 'error': 'Failed to fetch balance'}
+                        self.balance_info = {'jpy': 0, 'doge': 0, 'error': 'Failed to fetch balance'}
                 except Exception as e:
                     logger.error(f"Balance fetch failed: {e}")
-                    self.balance_info = {'jpy': 0, 'btc': 0, 'error': str(e)}
+                    self.balance_info = {'jpy': 0, 'doge': 0, 'error': str(e)}
 
                 # Get trading signals
                 try:
@@ -96,7 +100,7 @@ class FinalDashboard:
                         self.data_service = DataService()
 
                     # Get market data with indicators
-                    market_data_response = self.data_service.get_data_with_indicators('BTC', interval='30m')
+                    market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval='5m')
                     if market_data_response is not None and not market_data_response.empty:
                         # Convert DataFrame to dictionary for the last row (most recent data)
                         self.market_data = market_data_response.iloc[-1].to_dict()
@@ -132,10 +136,10 @@ class FinalDashboard:
             logger.error(f"Error updating dashboard data: {e}")
 
     def get_current_price(self):
-        """Get current BTC/JPY price"""
+        """Get current DOGE/JPY price"""
         try:
             import requests
-            response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=BTC', timeout=5)
+            response = requests.get('https://api.coin.z.com/public/v1/ticker?symbol=DOGE_JPY', timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 if data['status'] == 0 and 'data' in data:
@@ -158,7 +162,7 @@ class FinalDashboard:
             history_html += '<thead><tr style="background: rgba(255,255,255,0.1); border-bottom: 2px solid rgba(255,255,255,0.2);">'
             history_html += '<th style="padding: 12px; text-align: left;">日時</th>'
             history_html += '<th style="padding: 12px; text-align: center;">売買</th>'
-            history_html += '<th style="padding: 12px; text-align: right;">数量 (BTC)</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">数量 (DOGE)</th>'
             history_html += '<th style="padding: 12px; text-align: right;">価格 (JPY)</th>'
             history_html += '<th style="padding: 12px; text-align: right;">手数料 (JPY)</th>'
             history_html += '<th style="padding: 12px; text-align: center;">注文ID</th>'
@@ -186,7 +190,7 @@ class FinalDashboard:
                 history_html += f'<tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">'
                 history_html += f'<td style="padding: 10px; color: #ffffff;">{timestamp_formatted}</td>'
                 history_html += f'<td style="padding: 10px; text-align: center;"><span style="color: {side_color}; font-weight: bold;">{side_text}</span></td>'
-                history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">{size:.5f}</td>'
+                history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">{size:.0f}</td>'
                 history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">¥{price:,.0f}</td>'
                 history_html += f'<td style="padding: 10px; text-align: right; color: #FF9800;">¥{fee:,.0f}</td>'
                 history_html += f'<td style="padding: 10px; text-align: center; color: #888; font-size: 0.85em;">{order_id}</td>'
@@ -336,25 +340,20 @@ class FinalDashboard:
         else:
             position_html = '<div style="color: #888; padding: 20px; text-align: center;">アクティブなポジションはありません</div>'
 
-        # Balance HTML (現物取引用)
+        # Balance HTML (レバレッジ取引用)
         balance_html = ""
         if 'error' not in self.balance_info and self.balance_info:
             jpy_balance = self.balance_info.get('jpy', 0)
-            btc_balance = self.balance_info.get('btc', 0)
+            doge_balance = self.balance_info.get('doge', 0)
 
-            # BTC評価額（JPY換算）
-            btc_value_jpy = btc_balance * self.current_price if self.current_price > 0 else 0
-            total_value_jpy = jpy_balance + btc_value_jpy
+            # DOGE評価額（JPY換算）
+            doge_value_jpy = doge_balance * self.current_price if self.current_price > 0 else 0
 
             balance_html = f'''
             <div style="background: rgba(76, 175, 80, 0.15); padding: 20px; border-radius: 8px; margin: 5px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
-                    <div style="color: #ffffff;"><strong>JPY 残高:</strong><br><span style="font-size: 1.3em; color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{jpy_balance:,.0f}</span></div>
-                    <div style="color: #ffffff;"><strong>BTC 残高:</strong><br><span style="font-size: 1.3em; color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{btc_balance:.8f} BTC</span></div>
-                    <div style="color: #ffffff;"><strong>BTC評価額:</strong><br><span style="font-size: 1.3em; color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{btc_value_jpy:,.0f}</span></div>
-                </div>
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); text-align: center;">
-                    <div style="color: #ffffff;"><strong>総資産（JPY換算）:</strong><br><span style="font-size: 1.5em; color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{total_value_jpy:,.0f}</span></div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="color: #ffffff;"><strong>JPY 残高（証拠金）:</strong><br><span style="font-size: 1.3em; color: #00E676; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">¥{jpy_balance:,.0f}</span></div>
+                    <div style="color: #ffffff;"><strong>DOGE 残高:</strong><br><span style="font-size: 1.3em; color: #FF9800; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{doge_balance:,.0f} DOGE</span></div>
                 </div>
             </div>
             '''
@@ -365,7 +364,7 @@ class FinalDashboard:
         return f'''<!DOCTYPE html>
 <html>
 <head>
-    <title>BTC/JPY取引ダッシュボード</title>
+    <title>DOGE/JPY レバレッジ取引ダッシュボード</title>
     <meta charset="utf-8">
     <meta http-equiv="refresh" content="10">
     <style>
@@ -435,15 +434,15 @@ class FinalDashboard:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🪙 BTC/JPY 現物取引ダッシュボード</h1>
-            <div class="price">¥{self.current_price:,.0f}</div>
+            <h1>🐕 DOGE/JPY レバレッジ取引ダッシュボード</h1>
+            <div class="price">¥{self.current_price:.2f}</div>
             <p>最終更新: {current_time} | 自動更新: 10秒間隔</p>
         </div>
 
         <div class="status-grid">
             <div class="status-card">
                 <div style="color: #ffffff;">取引タイプ</div>
-                <div class="status-value" style="color: #2196F3; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">💎 現物</div>
+                <div class="status-value" style="color: #FF5722; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">⚡ レバレッジ</div>
             </div>
             <div class="status-card">
                 <div style="color: #ffffff;">24時間高値</div>
@@ -465,6 +464,11 @@ class FinalDashboard:
         </div>
 
         <div class="section">
+            <h2>📊 ポジション情報</h2>
+            {position_html}
+        </div>
+
+        <div class="section">
             <h2>💰 残高情報</h2>
             {balance_html}
         </div>
@@ -476,8 +480,8 @@ class FinalDashboard:
 
         <div class="section" style="text-align: center; color: #ccc; font-size: 0.9em;">
             <p>🔄 GMO Coin APIからリアルタイムデータを取得</p>
-            <p>💎 現物取引（ポジション・証拠金なし）</p>
-            <p>📡 URL: http://localhost:8082</p>
+            <p>⚡ レバレッジ取引（空売り対応）</p>
+            <p>📡 アクティブポジション数: {len(self.api_positions)}</p>
         </div>
     </div>
 </body>
