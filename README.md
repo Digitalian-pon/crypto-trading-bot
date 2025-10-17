@@ -372,3 +372,4 @@ MIT License
 - 本システムは教育・学習目的で作成されています
 - 実際の取引は自己責任で行ってください
 - GMOコインの利用規約を遵守してください
+# Railway Deploy Trigger Fri Oct 17 23:56:35 JST 2025
