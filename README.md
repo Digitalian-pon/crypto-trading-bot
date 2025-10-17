@@ -372,6 +372,7 @@ MIT License
 - 本システムは教育・学習目的で作成されています
 - 実際の取引は自己責任で行ってください
 - GMOコインの利用規約を遵守してください
-# Railway Deploy Trigger Sat Oct 18 05:03:00 JST 2025
-# DOGE_JPY Leverage Trading System - Fully Operational
+# Railway Deploy Trigger Sat Oct 18 05:30:00 JST 2025
+# DOGE_JPY Leverage Trading System - Position Display Fixed
+# Latest: Environment variable logging + position API fix
 
