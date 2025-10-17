@@ -10,6 +10,11 @@ import threading
 import logging
 from datetime import datetime
 
+# Railway環境: 環境変数が未設定の場合はハードコード値を使用
+if not os.environ.get('GMO_API_KEY'):
+    os.environ['GMO_API_KEY'] = 'FXhblJAz9Ql0G3pCo5p/+S9zkFw6r2VC'
+    os.environ['GMO_API_SECRET'] = '/YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo'
+
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
