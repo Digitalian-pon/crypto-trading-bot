@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 def run_trading_bot():
     """取引ボットを実行"""
     try:
-        logger.info("Starting BTC Spot Trading Bot...")
-        from simple_spot_bot import SimpleSpotTradingBot
+        logger.info("Starting DOGE_JPY Leverage Trading Bot...")
+        from leverage_trading_bot import LeverageTradingBot
 
-        bot = SimpleSpotTradingBot()
+        bot = LeverageTradingBot()
         bot.run()
     except Exception as e:
         logger.error(f"Trading bot error: {e}", exc_info=True)
@@ -45,7 +45,7 @@ def run_dashboard():
 
 if __name__ == "__main__":
     logger.info("="*60)
-    logger.info("Railway Deployment - BTC Trading System")
+    logger.info("Railway Deployment - DOGE_JPY Leverage Trading System")
     logger.info(f"Started at: {datetime.now()}")
     logger.info("="*60)
 
