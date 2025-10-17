@@ -32,14 +32,19 @@ def run_trading_bot():
 def run_dashboard():
     """ダッシュボードを実行"""
     try:
-        logger.info("Starting Dashboard Server...")
-        from final_dashboard import app
+        logger.info("Starting DOGE_JPY Leverage Dashboard Server...")
+        import socketserver
+        import http.server
+        from final_dashboard import FinalDashboardHandler
 
         port = int(os.environ.get('PORT', 8080))
         host = os.environ.get('HOST', '0.0.0.0')
 
         logger.info(f"Dashboard starting on {host}:{port}")
-        app.run(host=host, port=port, debug=False, use_reloader=False)
+
+        with socketserver.TCPServer((host, port), FinalDashboardHandler) as httpd:
+            logger.info("DOGE_JPY Leverage dashboard server started successfully")
+            httpd.serve_forever()
     except Exception as e:
         logger.error(f"Dashboard error: {e}", exc_info=True)
 
