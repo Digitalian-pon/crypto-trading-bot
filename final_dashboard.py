@@ -48,8 +48,11 @@ class FinalDashboard:
             api_key = os.environ.get('GMO_API_KEY')
             api_secret = os.environ.get('GMO_API_SECRET')
 
+            logger.info(f"Environment check - API_KEY exists: {bool(api_key)}, API_SECRET exists: {bool(api_secret)}")
+
             # If not in environment, try database
             if not api_key or not api_secret:
+                logger.info("Attempting to load credentials from database...")
                 with app.app_context():
                     user = User.query.filter_by(username='trading_user').first()
                     if not user:
@@ -57,6 +60,9 @@ class FinalDashboard:
                         return
                     api_key = user.api_key
                     api_secret = user.api_secret
+                    logger.info("Credentials loaded from database successfully")
+            else:
+                logger.info("Using credentials from environment variables")
 
             api = GMOCoinAPI(api_key, api_secret)
 
