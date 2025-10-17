@@ -1,0 +1,58 @@
+"""
+Railway用統合アプリケーション
+- BTC現物取引ボットとダッシュボードを同時起動
+- 24時間稼働対応
+"""
+
+import os
+import sys
+import threading
+import logging
+from datetime import datetime
+
+# ロギング設定
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
+def run_trading_bot():
+    """取引ボットを実行"""
+    try:
+        logger.info("Starting BTC Spot Trading Bot...")
+        from simple_spot_bot import SimpleSpotTradingBot
+
+        bot = SimpleSpotTradingBot()
+        bot.run()
+    except Exception as e:
+        logger.error(f"Trading bot error: {e}", exc_info=True)
+
+def run_dashboard():
+    """ダッシュボードを実行"""
+    try:
+        logger.info("Starting Dashboard Server...")
+        from final_dashboard import app
+
+        port = int(os.environ.get('PORT', 8080))
+        host = os.environ.get('HOST', '0.0.0.0')
+
+        logger.info(f"Dashboard starting on {host}:{port}")
+        app.run(host=host, port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        logger.error(f"Dashboard error: {e}", exc_info=True)
+
+if __name__ == "__main__":
+    logger.info("="*60)
+    logger.info("Railway Deployment - BTC Trading System")
+    logger.info(f"Started at: {datetime.now()}")
+    logger.info("="*60)
+
+    # 取引ボットをバックグラウンドスレッドで起動
+    bot_thread = threading.Thread(target=run_trading_bot, daemon=True)
+    bot_thread.start()
+    logger.info("Trading bot thread started")
+
+    # ダッシュボードをメインスレッドで起動（Railwayのヘルスチェック用）
+    run_dashboard()
