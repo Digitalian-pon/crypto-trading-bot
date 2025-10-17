@@ -3,14 +3,14 @@
 ## 🎯 プロジェクト概要
 - **作成日**: 2025年8月7日
 - **ユーザー**: thuyo (thuyoshi1@gmail.com)
-- **目的**: GMO CoinでのBTC/JPY現物取引システム構築（旧: DOGE/JPYレバレッジ取引）
-- **状態**: ✅ 完全稼働中（BTC現物取引・トレンドフォロー戦略）
+- **目的**: GMO CoinでのDOGE/JPYレバレッジ取引システム構築
+- **状態**: ✅ 完全稼働中（DOGEレバレッジ取引・トレンドフォロー戦略）
 
 ## 🌐 稼働中システム情報
 - **ローカルダッシュボード**: http://localhost:8082 ✅ **正常稼働中**
 - **GitHub**: https://github.com/Digitalian-pon/crypto-trading-bot
-- **監視通貨**: **BTC/JPY** (現物取引)
-- **時間足**: 30分足（長期トレンド重視）
+- **監視通貨**: **DOGE/JPY** (レバレッジ取引)
+- **時間足**: 5分足（短期トレード）
 - **更新間隔**: 60秒間隔でシグナルチェック
 
 ## 💰 アカウント情報
@@ -20,11 +20,11 @@
 - **API Secret**: /YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo (64文字)
 
 ## 📊 技術仕様
-### 現物取引システム:
-- **取引タイプ**: 現物取引のみ（レバレッジなし）
-- **BUY取引**: JPY残高でBTC購入
-- **SELL取引**: BTC残高を全額売却
-- **ポジション管理**: なし（現物なので強制ロスカットなし）
+### レバレッジ取引システム:
+- **取引タイプ**: レバレッジ取引（空売り対応）
+- **BUY取引**: ロングポジション（価格上昇で利益）
+- **SELL取引**: ショートポジション（価格下降で利益=空売り）
+- **ポジション管理**: 自動損切り・利確・反転シグナル決済
 
 ### 売買判断ロジック（トレンドフォロー戦略）:
 - **RSI**: トレンド方向のみ - 下降中は戻り売り、上昇中は押し目買い
@@ -34,34 +34,38 @@
 
 ### リスク管理:
 - **投資額**: 残高の95%
-- **最小BTC取引単位**: 0.0001 BTC
-- **最小JPY残高**: 100円
+- **損切り**: -3%で自動決済
+- **利確**: +5%で自動決済
+- **最小DOGE取引単位**: 10 DOGE
 - **取引間隔**: 60秒
 
 ## 🛠️ システム構成
 ### ファイル構造:
 ```
 crypto-trading-bot/
-├── simple_spot_bot.py    # 現物取引専用ボット
-├── app.py                # Flaskメインアプリ
-├── config.py             # 設定管理
-├── models.py             # データベースモデル
+├── leverage_trading_bot.py  # DOGEレバレッジ取引ボット
+├── railway_app.py           # Railway用統合アプリ
+├── app.py                   # Flaskメインアプリ
+├── config.py                # 設定管理
+├── models.py                # データベースモデル
 ├── services/
 │   ├── gmo_api.py                 # GMO Coin API
 │   ├── technical_indicators.py    # テクニカル指標
 │   ├── enhanced_trading_logic.py  # トレンドフォロー売買ロジック
 │   └── data_service.py            # データ取得
-└── final_dashboard.py    # ダッシュボード
+└── final_dashboard.py       # ダッシュボード
 ```
 
 ### 主要機能:
-- ✅ BTC/JPY現物取引
-- ✅ 30分足長期トレンド分析
+- ✅ DOGE/JPYレバレッジ取引（BUY/SELL両方向）
+- ✅ 5分足短期トレンド分析
 - ✅ トレンドフォロー戦略（落ちるナイフ回避）
+- ✅ 自動損切り・利確システム
 - ✅ リアルタイム価格監視
 - ✅ 技術指標分析 (RSI, MACD, ボリンジャーバンド, EMA)
 - ✅ ウェブダッシュボード (PC/スマホ対応)
 - ✅ PM2自動復旧機能
+- ✅ Railway対応（ボット+ダッシュボード同時起動）
 
 ## 🚨 重要な設定
 ### 環境変数:
@@ -78,17 +82,17 @@ GMO_API_SECRET = /YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCB
 
 ### PM2管理:
 ```bash
-pm2 status                    # 状態確認
-pm2 logs btc-spot-bot        # ログ確認
-pm2 restart btc-spot-bot     # 再起動
-pm2 stop btc-spot-bot        # 停止
+pm2 status                      # 状態確認
+pm2 logs doge-leverage-bot     # ログ確認
+pm2 restart doge-leverage-bot  # 再起動
+pm2 stop doge-leverage-bot     # 停止
 ```
 
 ## 🔄 呼び出し方法
 次回このプロジェクトについて質問する際は以下のように呼び出してください:
 
 **"GMO Coinトレーディングボットの件"** または
-**"BTC/JPY現物取引システムの件"** または
+**"DOGE/JPYレバレッジ取引システムの件"** または
 **"crypto trading bot project"**
 
 ## 🔄 BTC現物取引への完全移行 (2025年10月12日)
@@ -297,25 +301,69 @@ HOST = os.environ.get('HOST', '0.0.0.0')
 
 ---
 
-**最終更新**: 2025年10月16日
-**ステータス**: 24時間完全稼働中 ✅ (BTC現物取引)
-**ボット**: btc-spot-bot (PM2監視下)
-**ダッシュボード**: http://localhost:8082/ ✅ **BTC現物取引 + 取引履歴正常表示中**
-**取引方式**: 現物取引（レバレッジなし・ポジションなし・証拠金なし）
-**シンボル**: 🪙 **BTC** (現物取引専用シンボル)
-**時間足**: ⏱️ 30分足（長期トレンド重視）
+#### 8. **DOGE_JPYレバレッジ取引への復帰** (2025年10月18日)
+**ユーザーリクエスト**: BTC現物取引からDOGE_JPYレバレッジ取引に戻す
+
+**実施内容**:
+```bash
+# BTC現物ボット停止・削除
+pm2 stop btc-spot-bot
+pm2 delete btc-spot-bot
+
+# DOGEレバレッジボット起動
+pm2 start leverage_trading_bot.py --name doge-leverage-bot --interpreter python3
+pm2 save
+```
+
+**Railway用アプリ更新**:
+```python
+# railway_app.py - DOGE_JPYレバレッジ取引用に更新
+def run_trading_bot():
+    """DOGE_JPYレバレッジ取引ボットを実行"""
+    from leverage_trading_bot import LeverageTradingBot
+    bot = LeverageTradingBot()
+    bot.run()
+```
+
+**動作確認**:
+- ✅ DOGEレバレッジボット正常起動
+- ✅ 現在のポジション: SELL 1件（エントリー¥27.41、含み損-1.18%）
+- ✅ DOGE_JPY価格: ¥27.73
+- ✅ テクニカル指標正常計算中
+- ✅ ダッシュボード表示正常（http://localhost:8082）
+
+**GitHubコミット**:
+- e54ab7c - 🔄 Revert to DOGE_JPY leverage trading for Railway
+
+---
+
+**最終更新**: 2025年10月18日
+**ステータス**: 24時間完全稼働中 ✅ (DOGE_JPYレバレッジ取引)
+**ボット**: doge-leverage-bot (PM2監視下)
+**ダッシュボード**: http://localhost:8082/ ✅ **DOGEレバレッジ取引 + ポジション・取引履歴表示中**
+**取引方式**: レバレッジ取引（BUY/SELL両方向対応・空売り可能）
+**シンボル**: 🐕 **DOGE_JPY** (レバレッジ取引専用シンボル)
+**時間足**: ⏱️ 5分足（短期トレード）
 **アルゴリズム**: 🎯 完全トレンドフォロー（落ちるナイフ回避・押し目買い・戻り売り）
 **インジケーター**: ✅ RSI, MACD, BB, EMA全て正常計算・シグナル発動
 **自動復旧**: 🛡️ PM2によるクラッシュ時自動再起動・Termux復活対応
+**ポジション管理**: ✅ 損切り-3%、利確+5%、反転シグナルで自動決済
 **APIエンドポイント**:
 - ✅ /v1/account/assets (残高取得)
+- ✅ /v1/openPositions (ポジション一覧)
 - ✅ /v1/order (注文実行)
+- ✅ /v1/closeOrder (ポジション決済)
 - ✅ /v1/ticker (価格情報)
-- ✅ /v1/latestExecutions (取引履歴・過去1日) 🆕
+- ✅ /v1/latestExecutions (取引履歴・過去1日)
+**Railway対応**:
+- ✅ railway_app.py でボット+ダッシュボード同時起動
+- ✅ 環境変数でAPIキー設定対応
+- ✅ エラー時自動再起動機能実装
 **GitHubコミット**:
 - c6040aa - BTC現物取引への完全移行
 - 11ab097 - ダッシュボードBTC/JPY表示完全対応
 - 2525585 - シンボル修正（BTC_JPY → BTC）
 - ed32d89 - エンドポイント修正（現物取引専用化）
 - f16cd9b - 最小取引単位修正（0.0001→0.00001 BTC）
-- a7c5715 - 取引履歴表示修正 + レバレッジボット干渉排除 🆕
+- a7c5715 - 取引履歴表示修正 + レバレッジボット干渉排除
+- e54ab7c - 🔄 DOGE_JPYレバレッジ取引への復帰 🆕
