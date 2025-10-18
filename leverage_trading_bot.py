@@ -81,14 +81,20 @@ class LeverageTradingBot:
         positions = self.api.get_positions(symbol=self.symbol)
         logger.info(f"📊 Active positions: {len(positions)}")
 
+        # 3. ポジションの決済チェック（全ポジションをチェック）
         if positions:
-            # ポジションがある場合は決済チェックのみ
+            logger.info(f"Checking {len(positions)} positions for closing...")
             self._check_positions_for_closing(positions, current_price, df.iloc[-1].to_dict())
-            return
+            # 決済後、ポジションを再取得して確認
+            positions = self.api.get_positions(symbol=self.symbol)
+            logger.info(f"📊 Positions after close check: {len(positions)}")
 
-        # 3. ポジションがない場合のみ新規取引チェック
-        logger.info("✅ No positions - checking for new trade opportunities...")
-        self._check_for_new_trade(df, current_price)
+        # 4. ポジションがない場合は新規取引シグナルをチェック
+        if not positions:
+            logger.info("✅ No positions - checking for new trade opportunities...")
+            self._check_for_new_trade(df, current_price)
+        else:
+            logger.info(f"⏸️ Still have {len(positions)} open positions - waiting...")
 
     def _check_positions_for_closing(self, positions, current_price, indicators):
         """ポジション決済チェック"""
@@ -125,19 +131,18 @@ class LeverageTradingBot:
         if pl_ratio >= 0.05:
             return True, f"Take profit: {pl_ratio*100:.2f}%"
 
-        # 反転シグナルチェック
-        rsi = indicators.get('rsi_14', 50)
-        macd_line = indicators.get('macd_line', 0)
-        macd_signal = indicators.get('macd_signal', 0)
+        # 新規取引シグナルをチェック（反転シグナル）
+        should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(indicators)
 
-        if side == 'BUY':
-            # BUYポジション → 強い売りシグナルで決済
-            if rsi > 75 and macd_line < macd_signal:
-                return True, "Strong bearish reversal (RSI overbought + MACD bearish)"
-        else:  # SELL
-            # SELLポジション（空売り） → 強い買いシグナルで決済
-            if rsi < 25 and macd_line > macd_signal:
-                return True, "Strong bullish reversal (RSI oversold + MACD bullish)"
+        logger.info(f"  → Close signal check: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
+
+        if should_trade and trade_type and confidence >= 0.8:
+            # BUYポジションを持っている時にSELLシグナル → 決済
+            if side == 'BUY' and trade_type.upper() == 'SELL':
+                return True, f"Reversal signal: {trade_type.upper()} (confidence={confidence:.2f}) - {reason}"
+            # SELLポジションを持っている時にBUYシグナル → 決済
+            elif side == 'SELL' and trade_type.upper() == 'BUY':
+                return True, f"Reversal signal: {trade_type.upper()} (confidence={confidence:.2f}) - {reason}"
 
         return False, "No close signal"
 
