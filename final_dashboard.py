@@ -501,15 +501,24 @@ class FinalDashboard:
 </body>
 </html>'''
 
-class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        self.dashboard = FinalDashboard()
-        super().__init__(*args, **kwargs)
+# Global dashboard instance (shared across all requests)
+_dashboard_instance = None
 
+def get_dashboard_instance():
+    """Get or create the global dashboard instance"""
+    global _dashboard_instance
+    if _dashboard_instance is None:
+        _dashboard_instance = FinalDashboard()
+    return _dashboard_instance
+
+class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         try:
+            # Use shared dashboard instance
+            dashboard = get_dashboard_instance()
+
             # Update data on each request
-            self.dashboard.update_all_data()
+            dashboard.update_all_data()
 
             # Send response
             self.send_response(200)
@@ -520,7 +529,7 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
             # Generate and send HTML
-            html_content = self.dashboard.generate_html()
+            html_content = dashboard.generate_html()
             self.wfile.write(html_content.encode('utf-8'))
 
         except Exception as e:
