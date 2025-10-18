@@ -48,7 +48,9 @@ class FinalDashboard:
             api_key = os.environ.get('GMO_API_KEY')
             api_secret = os.environ.get('GMO_API_SECRET')
 
-            logger.info(f"Environment check - API_KEY exists: {bool(api_key)}, API_SECRET exists: {bool(api_secret)}")
+            logger.info(f"[DASHBOARD] Environment check - API_KEY exists: {bool(api_key)} (len={len(api_key) if api_key else 0}), API_SECRET exists: {bool(api_secret)} (len={len(api_secret) if api_secret else 0})")
+            if api_key:
+                logger.info(f"[DASHBOARD] API_KEY first 10 chars: {api_key[:10]}...")
 
             # If not in environment, try database
             if not api_key or not api_secret:
@@ -71,9 +73,13 @@ class FinalDashboard:
 
             # レバレッジ取引: ポジション取得
             try:
+                logger.info("[DASHBOARD] Fetching positions from /v1/openPositions...")
                 self.api_positions = api.get_positions(symbol='DOGE_JPY')
+                logger.info(f"[DASHBOARD] Positions fetched: {len(self.api_positions)} positions")
+                if self.api_positions:
+                    logger.info(f"[DASHBOARD] First position: {self.api_positions[0]}")
             except Exception as e:
-                logger.error(f"Position fetch failed: {e}")
+                logger.error(f"[DASHBOARD] Position fetch failed: {e}")
                 self.api_positions = []
 
             # Get execution history (取引履歴)
@@ -93,7 +99,9 @@ class FinalDashboard:
 
             # Get balance information (レバレッジ取引: /v1/account/assets)
             try:
+                logger.info("[DASHBOARD] Fetching balance from /v1/account/assets...")
                 balance_response = api.get_account_balance()
+                logger.info(f"[DASHBOARD] Balance response status: {balance_response.get('status') if balance_response else 'None'}")
                 if balance_response and balance_response.get('status') == 0 and balance_response.get('data'):
                     # JPYとDOGEの残高を抽出
                     self.balance_info = {'jpy': 0, 'doge': 0}
@@ -102,10 +110,13 @@ class FinalDashboard:
                             self.balance_info['jpy'] = float(asset.get('available', 0))
                         elif asset['symbol'] == 'DOGE':
                             self.balance_info['doge'] = float(asset.get('available', 0))
+                    logger.info(f"[DASHBOARD] Balance parsed: JPY={self.balance_info['jpy']}, DOGE={self.balance_info['doge']}")
                 else:
+                    error_detail = balance_response if balance_response else "No response"
+                    logger.error(f"[DASHBOARD] Balance fetch failed: {error_detail}")
                     self.balance_info = {'jpy': 0, 'doge': 0, 'error': 'Failed to fetch balance'}
             except Exception as e:
-                logger.error(f"Balance fetch failed: {e}")
+                logger.error(f"[DASHBOARD] Balance fetch exception: {e}", exc_info=True)
                 self.balance_info = {'jpy': 0, 'doge': 0, 'error': str(e)}
 
             # Get trading signals

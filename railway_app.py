@@ -15,6 +15,13 @@ from datetime import datetime
 if not os.environ.get('GMO_API_KEY'):
     os.environ['GMO_API_KEY'] = 'FXhblJAz9Ql0G3pCo5p/+S9zkFw6r2VC'
     os.environ['GMO_API_SECRET'] = '/YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo'
+    print(f"[RAILWAY] Set hardcoded API credentials")
+else:
+    print(f"[RAILWAY] Using existing environment variable API credentials")
+
+# Verify credentials are set
+print(f"[RAILWAY] GMO_API_KEY length: {len(os.environ.get('GMO_API_KEY', ''))}")
+print(f"[RAILWAY] GMO_API_SECRET length: {len(os.environ.get('GMO_API_SECRET', ''))}")
 
 # ロギング設定
 logging.basicConfig(
