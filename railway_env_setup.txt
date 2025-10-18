@@ -1,0 +1,21 @@
+========================================
+Railway環境変数設定手順
+========================================
+
+1. https://railway.app/dashboard を開く
+
+2. プロジェクト "web-production-1f4ce" を選択
+
+3. "Variables" タブをクリック
+
+4. 以下の環境変数を追加:
+
+   変数名: GMO_API_KEY
+   値: FXhblJAz9Ql0G3pCo5p/+S9zkFw6r2VC
+
+   変数名: GMO_API_SECRET
+   値: /YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo
+
+5. 保存後、自動的に再デプロイされます
+
+========================================

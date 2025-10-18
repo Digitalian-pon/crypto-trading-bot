@@ -11,17 +11,17 @@ import threading
 import logging
 from datetime import datetime
 
-# Railway環境: 環境変数が未設定の場合はハードコード値を使用
-if not os.environ.get('GMO_API_KEY'):
-    os.environ['GMO_API_KEY'] = 'FXhblJAz9Ql0G3pCo5p/+S9zkFw6r2VC'
-    os.environ['GMO_API_SECRET'] = '/YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo'
-    print(f"[RAILWAY] Set hardcoded API credentials")
-else:
-    print(f"[RAILWAY] Using existing environment variable API credentials")
+# Railway環境: 環境変数を強制的にハードコード値で設定
+# これによりRailway環境でも確実にAPI認証が動作する
+os.environ['GMO_API_KEY'] = 'FXhblJAz9Ql0G3pCo5p/+S9zkFw6r2VC'
+os.environ['GMO_API_SECRET'] = '/YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo'
 
-# Verify credentials are set
-print(f"[RAILWAY] GMO_API_KEY length: {len(os.environ.get('GMO_API_KEY', ''))}")
-print(f"[RAILWAY] GMO_API_SECRET length: {len(os.environ.get('GMO_API_SECRET', ''))}")
+print("[RAILWAY] ========================================")
+print("[RAILWAY] API Credentials Configuration")
+print("[RAILWAY] ========================================")
+print(f"[RAILWAY] GMO_API_KEY: {os.environ.get('GMO_API_KEY', 'NOT SET')[:10]}... (length: {len(os.environ.get('GMO_API_KEY', ''))})")
+print(f"[RAILWAY] GMO_API_SECRET: {os.environ.get('GMO_API_SECRET', 'NOT SET')[:10]}... (length: {len(os.environ.get('GMO_API_SECRET', ''))})")
+print("[RAILWAY] ========================================")
 
 # ロギング設定
 logging.basicConfig(

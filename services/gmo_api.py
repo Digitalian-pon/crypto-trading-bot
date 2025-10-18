@@ -62,7 +62,7 @@ class GMOCoinAPI:
     def _private_request(self, method, endpoint, params=None):
         """
         Make an authenticated request to the private API
-        
+
         :param method: HTTP method (GET, POST, PUT, DELETE)
         :param endpoint: API endpoint path
         :param params: Parameters to send with the request
@@ -71,23 +71,28 @@ class GMOCoinAPI:
         if not self.api_key or not self.api_secret:
             logger.error("API credentials not available for private request")
             raise ValueError("API key and secret required for private API access")
-        
+
         timestamp = str(int(time.time() * 1000))
         url = f"{self.PRIVATE_URL}{endpoint}"
-        
+
         headers = {
             "API-KEY": self.api_key,
             "API-TIMESTAMP": timestamp,
             "Content-Type": "application/json"
         }
-        
+
         request_body = ""
         if params and method in ["POST", "PUT"]:
             request_body = json.dumps(params)
-        
+
+        # 署名生成 - GMO Coin APIの仕様: GETの場合クエリパラメータは署名に含めない
         signature = self._generate_signature(timestamp, method, endpoint, request_body)
         headers["API-SIGN"] = signature
-        
+
+        # デバッグ用ログ
+        logger.info(f"[API] {method} {endpoint} - Key length: {len(self.api_key)}, Secret length: {len(self.api_secret)}")
+        logger.info(f"[API] Timestamp: {timestamp}, Signature: {signature[:20]}...")
+
         try:
             if method == "GET":
                 response = requests.get(url, headers=headers, params=params)
@@ -99,12 +104,13 @@ class GMOCoinAPI:
                 response = requests.delete(url, headers=headers, params=params)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
-            
+
+            logger.info(f"[API] Response status: {response.status_code}")
             response.raise_for_status()
             return response.json()
-        
+
         except requests.exceptions.RequestException as e:
-            logger.error(f"API request error: {e}")
+            logger.error(f"[API] Request error: {e}")
             return {"status": -1, "error": str(e)}
     
     def _public_request(self, method, endpoint, params=None):
