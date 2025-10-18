@@ -415,7 +415,89 @@ logger.info(f"[DASHBOARD] Balance parsed: JPY={self.balance_info['jpy']}, DOGE={
 
 ---
 
-**最終更新**: 2025年10月18日 21:45
+#### 10. **複数ポジション決済ロジック修正** (2025年10月19日)
+**問題**: BUYとSELLの両方のポジションがある時、決済シグナルが出ても決済されない
+
+**原因分析**:
+1. **早期リターン問題**: ポジションチェック後に`return`で終了 → 2つ目のポジションがチェックされない
+2. **反転シグナルが厳しすぎる**: RSI 75/25 + MACD条件 → ほとんど発動しない
+3. **新規取引シグナル未活用**: トレーディングロジックの判定を使っていない
+
+**修正内容**:
+
+1. **全ポジションチェック実装** (`leverage_trading_bot.py`):
+```python
+# Before - 問題のあるコード
+if positions:
+    self._check_positions_for_closing(positions, current_price, df.iloc[-1].to_dict())
+    return  # ← ここで終了！
+
+# After - 修正後
+if positions:
+    logger.info(f"Checking {len(positions)} positions for closing...")
+    self._check_positions_for_closing(positions, current_price, df.iloc[-1].to_dict())
+    # 決済後、ポジションを再取得して確認
+    positions = self.api.get_positions(symbol=self.symbol)
+    logger.info(f"📊 Positions after close check: {len(positions)}")
+
+# ポジションがない場合のみ新規取引
+if not positions:
+    self._check_for_new_trade(df, current_price)
+else:
+    logger.info(f"⏸️ Still have {len(positions)} open positions - waiting...")
+```
+
+2. **反転シグナルロジック改善**:
+```python
+# Before - 厳しすぎる条件
+if side == 'BUY':
+    if rsi > 75 and macd_line < macd_signal:
+        return True, "Strong bearish reversal"
+
+# After - トレーディングロジック活用
+should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(indicators)
+
+if should_trade and trade_type and confidence >= 0.8:
+    # BUYポジション保有中にSELLシグナル → 決済
+    if side == 'BUY' and trade_type.upper() == 'SELL':
+        return True, f"Reversal signal: {trade_type.upper()} (confidence={confidence:.2f})"
+    # SELLポジション保有中にBUYシグナル → 決済
+    elif side == 'SELL' and trade_type.upper() == 'BUY':
+        return True, f"Reversal signal: {trade_type.upper()} (confidence={confidence:.2f})"
+```
+
+3. **詳細ログ追加**:
+```python
+logger.info(f"  → Close signal check: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
+```
+
+**テスト結果**:
+```bash
+2025-10-19 00:21:11 - Checking 2 positions for closing...
+2025-10-19 00:21:11 - Position 269500549 (BUY): Entry=¥28.21, P/L=0.09%
+2025-10-19 00:21:11 -   → Close signal check: should_trade=True, type=BUY, confidence=1.50
+2025-10-19 00:21:11 - Position 269468544 (SELL): Entry=¥28.01, P/L=-0.81%
+2025-10-19 00:21:11 -   → Close signal check: should_trade=True, type=BUY, confidence=1.50
+2025-10-19 00:21:11 - 🔄 Closing position: Reversal signal: BUY (confidence=1.50)
+2025-10-19 00:21:11 - Closing SELL position: 40 DOGE_JPY at ¥28.24
+2025-10-19 00:21:11 - ✅ Position closed successfully
+2025-10-19 00:21:11 - 📊 Positions after close check: 1
+```
+
+**動作確認**:
+- ✅ **SELLポジション** (269468544) → BUYシグナルで決済成功 ✅
+- ✅ **BUYポジション** (269500549) → BUYシグナル継続中のため保持（正常動作）
+- ✅ 複数ポジションの個別チェックが正常動作
+- ✅ 反転シグナルの感度が適切に調整された
+
+**GitHubコミット**:
+- bd1d6e2 - 🔧 Fix position closing logic for multiple positions
+
+**解決**: 複数ポジション決済ロジック完全修正 ✅
+
+---
+
+**最終更新**: 2025年10月19日 00:25
 **ステータス**: 24時間完全稼働中 ✅ (DOGE_JPYレバレッジ取引)
 **ボット**: doge-leverage-bot (PM2監視下)
 **ダッシュボード**:
@@ -448,4 +530,5 @@ logger.info(f"[DASHBOARD] Balance parsed: JPY={self.balance_info['jpy']}, DOGE={
 - f16cd9b - 最小取引単位修正（0.0001→0.00001 BTC）
 - a7c5715 - 取引履歴表示修正 + レバレッジボット干渉排除
 - e54ab7c - 🔄 DOGE_JPYレバレッジ取引への復帰
-- e0c6688 - 🔧 GMO Coin API署名エラー修正（Railway対応完了） ✅ **最新**
+- e0c6688 - 🔧 GMO Coin API署名エラー修正（Railway対応完了）
+- bd1d6e2 - 🔧 複数ポジション決済ロジック修正 ✅ **最新**
