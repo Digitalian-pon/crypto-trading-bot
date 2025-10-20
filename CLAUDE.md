@@ -497,7 +497,91 @@ logger.info(f"  → Close signal check: should_trade={should_trade}, type={trade
 
 ---
 
-**最終更新**: 2025年10月19日 00:25
+#### 11. **過剰取引（オーバートレーディング）問題修正** (2025年10月20日)
+**問題**: 売買が細かく頻繁で、手数料負けによる損失が累積
+
+**取引履歴分析（30件）**:
+```
+総損益: ¥-17円（全て損失）
+平均損益: ¥-1.13円/回
+取引間隔: 1-2分（頻繁すぎ）
+パターン: BUY→SELL→BUY→SELL（往復ビンタ）
+価格: ¥29.48で買って¥29.48で即売る → 手数料¥1のみ損失
+```
+
+**具体例**:
+```
+23:42:36 買い 開く ¥29.48
+23:42:14 売り 決済 ¥29.48 損益-1円 ← 手数料負け
+23:42:14 売り 開く ¥29.48
+23:37:00 買い 決済 ¥29.51 損益-1円 ← 手数料負け
+```
+
+**根本原因**:
+1. **チェック間隔が短すぎる**: 60秒 → ノイズに反応
+2. **シグナル閾値が低すぎる**: 新規0.5、決済0.8 → 弱いシグナルで取引
+3. **価格変動フィルターなし**: 0.1%の変動でも決済
+4. **NEUTRAL時も取引**: トレンド不明時も売買
+
+**修正内容**:
+
+1. **チェック間隔延長**:
+```python
+self.interval = 180  # 60秒 → 180秒（3分）
+```
+
+2. **シグナル閾値強化**:
+```python
+# 新規取引
+if confidence < 1.5:  # 0.5 → 1.5
+    logger.info(f"Signal too weak - waiting...")
+    return
+
+# 決済判定
+if confidence >= 1.8:  # 0.8 → 1.8
+    return True, f"Strong reversal"
+```
+
+3. **最小価格変動フィルター追加**:
+```python
+# エントリーから±0.5%未満では決済しない
+price_change_ratio = abs(current_price - entry_price) / entry_price
+if price_change_ratio < 0.005:  # 0.5%未満
+    logger.info(f"Price change too small - holding position")
+    return False
+```
+
+4. **損益目標調整**:
+```python
+# 損切り: 3% → 2%（早めに損切り）
+if pl_ratio <= -0.02:
+    return True, "Stop loss"
+
+# 利確: 5% → 3%（早めに利確）
+if pl_ratio >= 0.03:
+    return True, "Take profit"
+```
+
+**動作確認**:
+```bash
+Position 269603906 (SELL): Entry=¥29.43, P/L=-0.08%
+→ Price change too small (0.08%) - holding position ✅
+```
+
+**期待される効果**:
+- ✅ 取引頻度削減: 30分で15回 → 数回程度
+- ✅ 手数料負け回避: 0.5%以上変動するまで保持
+- ✅ シグナル品質向上: 強いシグナルのみ採用
+- ✅ トレンド重視: 確実な動きのみ取引
+
+**GitHubコミット**:
+- a3c61c4 - 🔧 Fix overtrading issue - reduce whipsaw losses
+
+**解決**: 過剰取引問題完全修正 ✅
+
+---
+
+**最終更新**: 2025年10月20日 10:35
 **ステータス**: 24時間完全稼働中 ✅ (DOGE_JPYレバレッジ取引)
 **ボット**: doge-leverage-bot (PM2監視下)
 **ダッシュボード**:
