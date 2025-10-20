@@ -39,7 +39,7 @@ class LeverageTradingBot:
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
         self.timeframe = config.get('trading', 'default_timeframe', fallback='5m')
-        self.interval = 60  # チェック間隔（秒）
+        self.interval = 180  # チェック間隔（秒）- 3分に延長してノイズ削減
 
     def run(self):
         """メインループ"""
@@ -122,27 +122,35 @@ class LeverageTradingBot:
     def _should_close_position(self, position, current_price, indicators, pl_ratio):
         """ポジション決済判定"""
         side = position.get('side')
+        entry_price = float(position.get('price', 0))
 
-        # 損切り: 3%損失
-        if pl_ratio <= -0.03:
+        # 損切り: 2%損失（早めに損切り）
+        if pl_ratio <= -0.02:
             return True, f"Stop loss: {pl_ratio*100:.2f}%"
 
-        # 利確: 5%利益
-        if pl_ratio >= 0.05:
+        # 利確: 3%利益（早めに利確）
+        if pl_ratio >= 0.03:
             return True, f"Take profit: {pl_ratio*100:.2f}%"
+
+        # 最小価格変動チェック - エントリーから±0.5%未満の変動では決済しない（手数料負け防止）
+        price_change_ratio = abs(current_price - entry_price) / entry_price
+        if price_change_ratio < 0.005:  # 0.5%未満
+            logger.info(f"  → Price change too small ({price_change_ratio*100:.2f}%) - holding position")
+            return False, f"Price change too small ({price_change_ratio*100:.2f}%)"
 
         # 新規取引シグナルをチェック（反転シグナル）
         should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(indicators)
 
         logger.info(f"  → Close signal check: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
 
-        if should_trade and trade_type and confidence >= 0.8:
+        # より強いシグナルのみで決済（confidence >= 1.8）
+        if should_trade and trade_type and confidence >= 1.8:
             # BUYポジションを持っている時にSELLシグナル → 決済
             if side == 'BUY' and trade_type.upper() == 'SELL':
-                return True, f"Reversal signal: {trade_type.upper()} (confidence={confidence:.2f}) - {reason}"
+                return True, f"Strong reversal: {trade_type.upper()} (confidence={confidence:.2f}) - {reason}"
             # SELLポジションを持っている時にBUYシグナル → 決済
             elif side == 'SELL' and trade_type.upper() == 'BUY':
-                return True, f"Reversal signal: {trade_type.upper()} (confidence={confidence:.2f}) - {reason}"
+                return True, f"Strong reversal: {trade_type.upper()} (confidence={confidence:.2f}) - {reason}"
 
         return False, "No close signal"
 
@@ -183,8 +191,9 @@ class LeverageTradingBot:
 
         logger.info(f"Signal: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
 
-        if not should_trade or not trade_type or confidence < 0.5:
-            logger.info("No strong signal - waiting...")
+        # より強いシグナルのみで新規取引（confidence >= 1.5）
+        if not should_trade or not trade_type or confidence < 1.5:
+            logger.info(f"Signal too weak (confidence={confidence:.2f}, required >= 1.5) - waiting...")
             return
 
         # 残高確認
