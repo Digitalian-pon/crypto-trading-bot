@@ -8,10 +8,12 @@
 
 ## 🌐 稼働中システム情報
 - **ローカルダッシュボード**: http://localhost:8082 ✅ **正常稼働中**
+- **Railwayダッシュボード**: https://web-production-1f4ce.up.railway.app/ ✅ **24時間稼働中**
 - **GitHub**: https://github.com/Digitalian-pon/crypto-trading-bot
 - **監視通貨**: **DOGE/JPY** (レバレッジ取引)
 - **時間足**: 5分足（短期トレード）
-- **更新間隔**: 60秒間隔でシグナルチェック
+- **更新間隔**: 180秒間隔でシグナルチェック（最適化版）
+- **トレーディングロジック**: OptimizedTradingLogic（市場レジーム検出・動的SL/TP）
 
 ## 💰 アカウント情報
 - **残高**: 1,050 JPY + 0.00002090 BTC
@@ -26,46 +28,60 @@
 - **SELL取引**: ショートポジション（価格下降で利益=空売り）
 - **ポジション管理**: 自動損切り・利確・反転シグナル決済
 
-### 売買判断ロジック（トレンドフォロー戦略）:
+### 売買判断ロジック（最適化トレンドフォロー戦略）:
+- **市場レジーム検出**: TRENDING/RANGING/VOLATILE自動判定
 - **RSI**: トレンド方向のみ - 下降中は戻り売り、上昇中は押し目買い
 - **MACD**: トレンドフィルター付き - トレンド方向のシグナルのみ採用
 - **ボリンジャーバンド**: トレンド方向のみ - 逆張り禁止
 - **EMA**: 20/50期間でトレンド判定
+- **R²トレンド品質**: 線形回帰で信頼性測定
+- **プライスアクション**: Engulfingパターン検出
 
-### リスク管理:
+### リスク管理（最適化版）:
 - **投資額**: 残高の95%
-- **損切り**: -3%で自動決済
-- **利確**: +5%で自動決済
+- **損切り**: ATRベース動的設定（市場レジーム別）
+- **利確**: ATRベース動的設定（市場レジーム別）
+- **最小価格変動**: 0.5%未満では決済しない（手数料負け防止）
 - **最小DOGE取引単位**: 10 DOGE
-- **取引間隔**: 60秒
+- **取引間隔**: 180秒（過剰取引防止）
 
 ## 🛠️ システム構成
 ### ファイル構造:
 ```
 crypto-trading-bot/
-├── leverage_trading_bot.py  # DOGEレバレッジ取引ボット
-├── railway_app.py           # Railway用統合アプリ
-├── app.py                   # Flaskメインアプリ
-├── config.py                # 設定管理
-├── models.py                # データベースモデル
+├── optimized_leverage_bot.py      # 最適化DOGEレバレッジ取引ボット ⭐NEW
+├── leverage_trading_bot.py        # 旧DOGEレバレッジ取引ボット
+├── railway_app.py                 # Railway用統合アプリ（最適化版使用）
+├── app.py                         # Flaskメインアプリ
+├── config.py                      # 設定管理
+├── models.py                      # データベースモデル
+├── backtest_engine.py             # バックテストフレームワーク ⭐NEW
+├── quick_backtest.py              # クイック比較テスト ⭐NEW
+├── OPTIMIZED_LOGIC.md             # 最適化ロジック技術文書 ⭐NEW
 ├── services/
 │   ├── gmo_api.py                 # GMO Coin API
 │   ├── technical_indicators.py    # テクニカル指標
-│   ├── enhanced_trading_logic.py  # トレンドフォロー売買ロジック
+│   ├── optimized_trading_logic.py # 最適化トレンドフォロー売買ロジック ⭐NEW
+│   ├── enhanced_trading_logic.py  # 旧トレンドフォロー売買ロジック
 │   └── data_service.py            # データ取得
-└── final_dashboard.py       # ダッシュボード
+└── final_dashboard.py             # ダッシュボード
 ```
 
 ### 主要機能:
 - ✅ DOGE/JPYレバレッジ取引（BUY/SELL両方向）
 - ✅ 5分足短期トレンド分析
-- ✅ トレンドフォロー戦略（落ちるナイフ回避）
-- ✅ 自動損切り・利確システム
+- ✅ 最適化トレンドフォロー戦略（落ちるナイフ回避）
+- ✅ 市場レジーム自動検出（TRENDING/RANGING/VOLATILE） ⭐NEW
+- ✅ ATRベース動的損切り・利確システム ⭐NEW
+- ✅ R²トレンド品質測定 ⭐NEW
+- ✅ プライスアクションパターン認識 ⭐NEW
+- ✅ パフォーマンス追跡（勝率・損益統計） ⭐NEW
 - ✅ リアルタイム価格監視
 - ✅ 技術指標分析 (RSI, MACD, ボリンジャーバンド, EMA)
 - ✅ ウェブダッシュボード (PC/スマホ対応)
 - ✅ PM2自動復旧機能
 - ✅ Railway対応（ボット+ダッシュボード同時起動）
+- ✅ バックテストフレームワーク ⭐NEW
 
 ## 🚨 重要な設定
 ### 環境変数:
@@ -581,9 +597,184 @@ Position 269603906 (SELL): Entry=¥29.43, P/L=-0.08%
 
 ---
 
-**最終更新**: 2025年10月20日 10:35
-**ステータス**: 24時間完全稼働中 ✅ (DOGE_JPYレバレッジ取引)
-**ボット**: doge-leverage-bot (PM2監視下)
+#### 12. **最適化トレーディングロジック実装** (2025年10月21日)
+**目的**: 損失を削減し、勝率を向上させるための高度なロジック実装
+
+**問題分析（旧EnhancedTradingLogic）**:
+1. **固定パラメータ**: 市場状況に関わらず同じ閾値を使用
+2. **市場レジーム未検出**: トレンド/レンジ/高ボラティリティの区別なし
+3. **単純なトレンド分析**: EMAの差のみで判断、品質測定なし
+4. **固定SL/TP**: -2%/+3%の固定値、市場のボラティリティ無視
+5. **パフォーマンス追跡なし**: 勝率や損益の統計なし
+6. **価格変動フィルターなし**: 手数料負けのリスク
+
+**実装した最適化機能**:
+
+**1. 市場レジーム自動検出**
+```python
+def _detect_market_regime(self, market_data, historical_df):
+    """
+    TRENDING: ATR<4% かつ slope大 かつ EMA差>1%
+    VOLATILE: ATR>4%
+    RANGING: 上記以外
+    """
+    atr_pct = (atr / current_price * 100)
+    slope = 線形回帰の傾き
+
+    if atr_pct > 4.0:
+        return 'VOLATILE'
+    elif abs(normalized_slope) > 0.01 and ema_diff_pct > 1.0:
+        return 'TRENDING'
+    else:
+        return 'RANGING'
+```
+
+**2. レジーム別適応的パラメータ**
+```python
+REGIME_PARAMS = {
+    'TRENDING': {
+        'min_confidence': 1.2,    # 中程度の閾値
+        'stop_loss_atr_mult': 2.0,
+        'take_profit_atr_mult': 3.0
+    },
+    'RANGING': {
+        'min_confidence': 1.8,    # 高い閾値（慎重に）
+        'stop_loss_atr_mult': 1.5,
+        'take_profit_atr_mult': 2.0
+    },
+    'VOLATILE': {
+        'min_confidence': 2.5,    # 非常に高い閾値
+        'stop_loss_atr_mult': 3.0,
+        'take_profit_atr_mult': 4.0
+    }
+}
+```
+
+**3. R²によるトレンド品質測定**
+```python
+# 線形回帰でトレンドの信頼性を測定
+slope, intercept = np.polyfit(x, recent_closes, 1)
+predicted = slope * x + intercept
+r_squared = 1 - (ss_res / ss_tot)  # 0-1の範囲
+
+# R²が高い = トレンドが明確
+if r_squared > 0.7:
+    trend_quality_bonus = 0.3
+```
+
+**4. ATRベース動的ストップロス/テイクプロフィット**
+```python
+atr = self._calculate_atr_from_data(historical_df)
+regime_params = self.REGIME_PARAMS[market_regime]
+
+if trade_type == 'BUY':
+    stop_loss_price = current_price - (atr * regime_params['stop_loss_atr_mult'])
+    take_profit_price = current_price + (atr * regime_params['take_profit_atr_mult'])
+else:  # SELL
+    stop_loss_price = current_price + (atr * regime_params['stop_loss_atr_mult'])
+    take_profit_price = current_price - (atr * regime_params['take_profit_atr_mult'])
+```
+
+**5. プライスアクションパターン認識**
+```python
+def _detect_price_action_patterns(self, historical_df):
+    """Bullish/Bearish Engulfing Pattern検出"""
+    prev_candle = historical_df.iloc[-2]
+    curr_candle = historical_df.iloc[-1]
+
+    # Bullish Engulfing: 前足陰線 → 当足陽線が包み込む
+    if (prev_open > prev_close and  # 前足陰線
+        curr_close > curr_open and  # 当足陽線
+        curr_open < prev_close and  # 下から開始
+        curr_close > prev_open):    # 上で終了
+        return 'bullish_engulfing', 0.3
+```
+
+**6. パフォーマンス追跡システム**
+```python
+def record_trade(self, side, entry_price, pl_ratio=None):
+    """取引結果を記録"""
+    self.trade_history.append({
+        'timestamp': datetime.now(),
+        'side': side,
+        'entry_price': entry_price,
+        'pl_ratio': pl_ratio
+    })
+
+def get_performance_stats(self):
+    """統計取得: 勝率, 総損益, 平均損益"""
+    wins = sum(1 for t in closed_trades if t['pl_ratio'] > 0)
+    win_rate = wins / total_trades
+    total_pnl = sum(t['pl_ratio'] for t in closed_trades)
+    return {'win_rate': win_rate, 'total_pnl': total_pnl, ...}
+```
+
+**作成ファイル**:
+1. `services/optimized_trading_logic.py` (753行) - 最適化ロジック本体
+2. `optimized_leverage_bot.py` (329行) - 最適化ボット
+3. `backtest_engine.py` (421行) - バックテストフレームワーク
+4. `quick_backtest.py` (126行) - クイック比較テスト
+5. `OPTIMIZED_LOGIC.md` (520行) - 技術ドキュメント
+
+**比較テスト結果（quick_backtest.py）**:
+```
+DOGE_JPY価格: ¥29.34
+
+Enhanced Logic (旧):
+- Signal: SELL
+- Confidence: 1.70
+- Dynamic SL/TP: No
+
+Optimized Logic (新):
+- Signal: BUY
+- Confidence: 1.50
+- Stop Loss: ¥29.26
+- Take Profit: ¥29.45
+- Risk/Reward: 1:1.38
+- Market Regime: TRENDING
+```
+
+**ボット移行実施**:
+```bash
+# ローカル環境
+pm2 stop doge-leverage-bot
+pm2 delete doge-leverage-bot
+pm2 start optimized_leverage_bot.py --name optimized-bot --interpreter python3
+pm2 save
+
+# Railway環境
+railway_app.py を optimized_leverage_bot 使用に更新
+git push → 自動デプロイ
+```
+
+**動作確認**:
+```
+2025-10-21 15:03:46 - 💹 Current DOGE_JPY price: ¥29.34
+2025-10-21 15:03:46 - 🎯 Market Regime: trending
+2025-10-21 15:03:46 - 📊 Active positions: 1
+2025-10-21 15:03:46 - Position 269700145 (SELL): Entry=¥29.41, P/L=0.23%
+2025-10-21 15:03:46 -    Dynamic SL=¥29.48, TP=¥29.33
+2025-10-21 15:03:46 - ⏸️  Still have 1 open positions - waiting...
+```
+
+**期待される効果**:
+- ✅ 市場状況に応じた適応的取引
+- ✅ ボラティリティに応じたリスク管理
+- ✅ トレンド品質による信頼性向上
+- ✅ 手数料負け削減（価格変動0.5%未満は保持）
+- ✅ パフォーマンス可視化
+
+**GitHubコミット**:
+- 8cbfd80 - 🚀 Add optimized trading logic with advanced features
+- 4474676 - 🚀 Update Railway app to use optimized trading bot
+
+**解決**: 最適化トレーディングロジック完全実装 ✅
+
+---
+
+**最終更新**: 2025年10月21日 15:30
+**ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
+**ボット**: optimized-bot (PM2監視下)
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
