@@ -45,7 +45,7 @@ class OptimizedLeverageTradingBot:
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
         self.timeframe = config.get('trading', 'default_timeframe', fallback='5m')
-        self.interval = 180  # チェック間隔（秒）- 3分
+        self.interval = 600  # チェック間隔（秒）- 10分（過剰取引防止のため3分→10分に延長）
 
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
@@ -173,20 +173,20 @@ class OptimizedLeverageTradingBot:
             if current_price <= take_profit:
                 return True, f"Take Profit Hit: ¥{current_price:.2f} <= ¥{take_profit:.2f}"
 
-        # 最小価格変動チェック（手数料負け防止）
+        # 最小価格変動チェック（手数料負け防止）- 強化版
         entry_price = float(position.get('price', 0))
         price_change_ratio = abs(current_price - entry_price) / entry_price
 
-        if price_change_ratio < 0.005:  # 0.5%未満
-            logger.info(f"   → Price change too small ({price_change_ratio*100:.2f}%) - holding")
+        if price_change_ratio < 0.01:  # 0.5% → 1.0%に引き上げ（より厳格に）
+            logger.info(f"   → Price change too small ({price_change_ratio*100:.2f}% < 1.0%) - holding")
             return False, "Price change too small"
 
-        # 反転シグナルチェック（高信頼度のみ）
+        # 反転シグナルチェック（極めて高信頼度のみ）
         should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(indicators, None)
 
         logger.info(f"   → Reversal check: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
 
-        if should_trade and trade_type and confidence >= 2.0:  # 非常に高い閾値
+        if should_trade and trade_type and confidence >= 3.0:  # 2.0 → 3.0 に引き上げ（極めて強いシグナルのみ）
             if side == 'BUY' and trade_type.upper() == 'SELL':
                 return True, f"Strong Reversal: SELL (confidence={confidence:.2f})"
             elif side == 'SELL' and trade_type.upper() == 'BUY':

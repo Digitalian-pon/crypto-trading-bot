@@ -27,34 +27,35 @@ class OptimizedTradingLogic:
         """初期化"""
         self.config = config or {}
         self.last_trade_time = None
-        self.min_trade_interval = 300  # 5分（300秒）- 過剰取引防止
+        self.last_trade_price = None  # 最後の取引価格を記録
+        self.min_trade_interval = 600  # 10分（600秒）- 過剰取引防止（5分→10分に延長）
 
         # 取引履歴トラッキング（パフォーマンス分析用）
         self.trade_history = []
         self.recent_trades_limit = 20  # 直近20取引を追跡
 
-        # 市場レジーム別パラメータ
+        # 市場レジーム別パラメータ（改善版 - 過剰取引防止）
         self.regime_params = {
             'TRENDING': {
                 'rsi_oversold': 40,      # トレンド中は逆張り禁止
                 'rsi_overbought': 60,
-                'signal_threshold': 1.2,  # 比較的低い閾値（トレンドフォロー）
-                'stop_loss_atr_mult': 2.0,
-                'take_profit_atr_mult': 4.0,
+                'signal_threshold': 2.5,  # 1.2 → 2.5 に大幅引き上げ（強いシグナルのみ）
+                'stop_loss_atr_mult': 3.0,  # 2.0 → 3.0（広めのSL）
+                'take_profit_atr_mult': 6.0,  # 4.0 → 6.0（大きめのTP）
             },
             'RANGING': {
                 'rsi_oversold': 30,      # レンジ相場は逆張り
                 'rsi_overbought': 70,
-                'signal_threshold': 1.5,  # 高い閾値（慎重に）
-                'stop_loss_atr_mult': 1.5,
-                'take_profit_atr_mult': 2.5,
+                'signal_threshold': 3.0,  # 1.5 → 3.0（より慎重に）
+                'stop_loss_atr_mult': 2.0,  # 1.5 → 2.0
+                'take_profit_atr_mult': 4.0,  # 2.5 → 4.0
             },
             'VOLATILE': {
                 'rsi_oversold': 35,
                 'rsi_overbought': 65,
-                'signal_threshold': 2.0,  # 非常に高い閾値（極めて慎重）
-                'stop_loss_atr_mult': 3.0,  # 広めのストップ
-                'take_profit_atr_mult': 5.0,
+                'signal_threshold': 4.0,  # 2.0 → 4.0（極めて慎重）
+                'stop_loss_atr_mult': 4.0,  # 3.0 → 4.0（非常に広めのストップ）
+                'take_profit_atr_mult': 8.0,  # 5.0 → 8.0
             }
         }
 
@@ -166,6 +167,14 @@ class OptimizedTradingLogic:
             if not self._check_trade_timing():
                 logger.info(f"⏸️ Trade interval too short - waiting...")
                 return False, None, "Trade interval too short", 0.0, None, None
+
+            # 最小価格変動チェック（手数料負け防止）
+            if self.last_trade_price is not None:
+                price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
+                if price_change_ratio < 0.015:  # 1.5%未満の変動では取引しない
+                    logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 1.5%) - waiting...")
+                    logger.info(f"   Last trade price: ¥{self.last_trade_price:.2f}, Current: ¥{current_price:.2f}")
+                    return False, None, f"Price change too small ({price_change_ratio*100:.2f}%)", 0.0, None, None
 
             # 動的ストップロス/テイクプロフィット計算
             stop_loss_atr_mult = regime_config['stop_loss_atr_mult']
@@ -478,6 +487,7 @@ class OptimizedTradingLogic:
     def record_trade(self, trade_type, price, result=None):
         """取引記録（パフォーマンス追跡用）"""
         self.last_trade_time = datetime.now()
+        self.last_trade_price = price  # 最後の取引価格を記録
 
         trade_record = {
             'timestamp': self.last_trade_time,
