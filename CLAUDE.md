@@ -806,4 +806,83 @@ git push → 自動デプロイ
 - a7c5715 - 取引履歴表示修正 + レバレッジボット干渉排除
 - e54ab7c - 🔄 DOGE_JPYレバレッジ取引への復帰
 - e0c6688 - 🔧 GMO Coin API署名エラー修正（Railway対応完了）
-- bd1d6e2 - 🔧 複数ポジション決済ロジック修正 ✅ **最新**
+- bd1d6e2 - 🔧 複数ポジション決済ロジック修正
+- 19a9810 - 🔧 過剰取引・手数料負け問題の完全修正
+- 73aee3c - 🔧 シグナル閾値問題修正（現実的な値に調整） ✅ **最新**
+
+---
+
+#### 13. **シグナル閾値問題修正** (2025年11月5日)
+**問題**: ダッシュボードにシグナルが出ているのにポジションが作成されない
+
+**原因分析**:
+1. **ダッシュボード**: `EnhancedTradingLogic`を使用（閾値: 0.5-0.8）
+2. **ボット（Railway）**: `OptimizedTradingLogic`を使用（閾値: 2.5-4.0）
+3. ダッシュボードには信頼度1.20のシグナルが表示されるが、ボットの閾値が高すぎて取引が実行されない
+
+**修正内容**:
+
+1. **信頼度閾値の調整** (`services/optimized_trading_logic.py`):
+```python
+# Before - 非現実的な高い閾値
+'TRENDING': {'signal_threshold': 2.5}
+'RANGING': {'signal_threshold': 3.0}
+'VOLATILE': {'signal_threshold': 4.0}
+
+# After - 現実的な閾値
+'TRENDING': {'signal_threshold': 0.8}
+'RANGING': {'signal_threshold': 1.0}
+'VOLATILE': {'signal_threshold': 1.5}
+```
+
+2. **価格変動フィルターの緩和**:
+```python
+# Before
+if price_change_ratio < 0.015:  # 1.5%未満
+if price_change_ratio < 0.01:   # 1.0%未満
+
+# After
+if price_change_ratio < 0.005:  # 0.5%未満
+```
+
+3. **反転シグナル閾値の調整** (`optimized_leverage_bot.py`):
+```python
+# Before
+if confidence >= 3.0:  # 極めて高信頼度のみ
+
+# After
+if confidence >= 1.2:  # 現実的な閾値
+```
+
+4. **チェック間隔の最適化**:
+```python
+# Before
+self.interval = 600  # 10分（長すぎる）
+self.min_trade_interval = 600  # 10分
+
+# After
+self.interval = 180  # 3分（適切）
+self.min_trade_interval = 180  # 3分
+```
+
+**動作確認**:
+- ✅ 信頼度1.20のシグナルでも取引が実行される
+- ✅ ダッシュボードとボットの動作が一致
+- ✅ 過剰取引防止機能は維持（最小0.5%変動）
+
+**期待される効果**:
+- ✅ シグナルが出たときに確実にポジションが作成される
+- ✅ ダッシュボード表示と実際の取引動作が一致
+- ✅ 適切な取引頻度を維持（3分間隔）
+- ✅ 手数料負けリスクは依然として低い（0.5%フィルター）
+
+**GitHubコミット**:
+- 73aee3c - 🔧 Fix signal threshold issue - adjust to realistic values
+
+**解決**: シグナル閾値問題完全修正 ✅
+
+---
+
+**最終更新**: 2025年11月5日 00:50
+**ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
+**現在の残高**: JPY 730円
