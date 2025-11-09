@@ -885,11 +885,120 @@ self.min_trade_interval = 180  # 3分
 
 ---
 
-**最終更新**: 2025年11月5日 01:00
+---
+
+#### 14. **トレンド転換時の反対ポジション自動作成機能追加** (2025年11月9日)
+**問題**: トレンド転換時にポジションは決済されるが、反対の新規注文が出ない → 損失拡大
+
+**ユーザーからの重要な指摘**:
+「トレンド転換の時にポジションは決済されてますが、反対の新規注文が出ていないのでは？」
+
+**原因分析**:
+1. **ポジション決済ロジック**: BUYポジション保有中にSELLシグナル検出 → 正常に決済 ✅
+2. **新規取引チェック**: `if not positions:` のみ → ポジションがない場合のみ実行 ❌
+3. **問題の流れ**:
+   - 例：BUYポジション保有中（¥29.00エントリー）
+   - 市場が下降トレンドに転換 → SELLシグナル検出（confidence 1.5）
+   - BUYポジションを決済（正しい）
+   - しかし、同じサイクル内でSELLポジションは**開かない**
+   - 次のサイクル（3分後）まで待つ
+   - 3分後には価格が¥28.50に下落済み → **機会損失 ¥0.50/DOGE**
+   - または、3分後にはシグナルが弱まり、取引されない
+4. **損失の原因**: トレンド転換の初動を逃す → 利益機会の喪失 + 損失拡大
+
+**修正内容**:
+
+1. **`_check_positions_for_closing`メソッド改善**:
+```python
+def _check_positions_for_closing(self, positions, current_price, df):
+    """
+    ポジション決済チェック（動的SL/TP使用）
+
+    Returns:
+        (any_closed: bool, reversal_signal: bool)  # ← 返り値追加
+    """
+    any_closed = False
+    reversal_signal = False  # ← 反転シグナルフラグ
+
+    for position in positions:
+        # ... 既存のロジック ...
+
+        if should_close:
+            self._close_position(position, current_price, reason)
+            any_closed = True
+
+            # 反転シグナルで決済された場合
+            if "Reversal" in reason or "reversal" in reason:
+                reversal_signal = True
+                logger.info(f"🔄 REVERSAL DETECTED - Will check for opposite position immediately")
+
+    return any_closed, reversal_signal
+```
+
+2. **`_trading_cycle`メソッド改善**:
+```python
+# 3. ポジションの決済チェック
+any_closed = False
+reversal_signal = False
+
+if positions:
+    any_closed, reversal_signal = self._check_positions_for_closing(positions, current_price, df)
+    positions = self.api.get_positions(symbol=self.symbol)
+
+# 5. 新規取引シグナルをチェック
+should_check_new_trade = (
+    reversal_signal or                    # 反転シグナル決済 ← 最重要！
+    (any_closed and not positions) or     # 全ポジション決済
+    not positions                         # ポジションなし
+)
+
+if should_check_new_trade:
+    if reversal_signal:
+        logger.info("🔄 Position closed by reversal signal - checking for opposite position immediately...")
+    self._check_for_new_trade(df, current_price)
+```
+
+**動作フロー（修正後）**:
+1. BUYポジション保有中（¥29.00エントリー）
+2. 市場が下降トレンドに転換 → SELLシグナル検出（confidence 1.5）
+3. `_should_close_position`が反転シグナル検出 → `reason = "Strong Reversal: SELL (confidence=1.50)"`
+4. BUYポジションを決済 → `reversal_signal = True`
+5. **同じサイクル内**で`_check_for_new_trade`を実行
+6. SELLシグナル再評価 → confidence 1.5 ≥ 閾値 0.8 → **SELLポジション即座に作成** ✅
+7. 価格¥29.00でSELLエントリー → トレンド転換の初動を捉える
+
+**期待される効果**:
+- ✅ **機会損失削減**: トレンド転換時の初動を捉える（3分の遅延なし）
+- ✅ **損失削減**: 反対方向のトレンドに即座に乗る
+- ✅ **勝率向上**: BUY→SELLまたはSELL→BUYの完全なトレンドフォロー
+- ✅ **収益性向上**: 転換点での利益最大化
+
+**テストシナリオ**:
+```
+初期状態: BUY 40 DOGE @ ¥29.00 (上昇トレンド)
+↓
+市場転換: 下降トレンド開始
+↓
+シグナル: SELL confidence 1.5
+↓
+旧動作: BUY決済 → 3分待ち → 価格¥28.50 → 機会損失 ¥20（40 DOGE × ¥0.50）
+新動作: BUY決済 → 即座にSELL 40 DOGE @ ¥29.00 ✅
+↓
+結果: 下降トレンドで利益（¥29.00 → ¥28.50 = +¥20利益）
+```
+
+**GitHubコミット**:
+- e9abef6 - 🔧 Fix critical issue: Add opposite position on trend reversal
+
+**解決**: トレンド転換時の反対ポジション自動作成機能完全実装 ✅
+
+---
+
+**最終更新**: 2025年11月9日 21:00
 **ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
 **現在の残高**: JPY 730円
 **ボット**: optimized-bot (PM2監視下) ※Railway環境で自動稼働中
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
-**最新修正**: シグナル閾値を現実的な値に調整（0.8/1.0/1.5）→ ポジション作成問題解決 ✅
+**最新修正**: トレンド転換時の反対ポジション自動作成機能追加 → 機会損失削減 ✅ **NEW**
