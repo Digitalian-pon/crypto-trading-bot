@@ -96,9 +96,12 @@ class OptimizedLeverageTradingBot:
         logger.info(f"📊 Active positions: {len(positions)}")
 
         # 3. ポジションの決済チェック（動的SL/TP使用）
+        any_closed = False
+        reversal_signal = False
+
         if positions:
             logger.info(f"Checking {len(positions)} positions for closing...")
-            self._check_positions_for_closing(positions, current_price, df)
+            any_closed, reversal_signal = self._check_positions_for_closing(positions, current_price, df)
             # 決済後、ポジションを再取得
             positions = self.api.get_positions(symbol=self.symbol)
             logger.info(f"📊 Positions after close check: {len(positions)}")
@@ -106,15 +109,36 @@ class OptimizedLeverageTradingBot:
         # 4. パフォーマンス統計表示
         self._display_performance_stats()
 
-        # 5. ポジションがない場合は新規取引シグナルをチェック
-        if not positions:
-            logger.info("✅ No positions - checking for new trade opportunities...")
+        # 5. 新規取引シグナルをチェック
+        # - 反転シグナルで決済された場合は即座にチェック（機会損失防止）
+        # - 全ポジション決済された場合もチェック
+        # - ポジションがない場合もチェック
+        should_check_new_trade = (
+            reversal_signal or                    # 反転シグナル決済
+            (any_closed and not positions) or     # 全ポジション決済
+            not positions                         # ポジションなし
+        )
+
+        if should_check_new_trade:
+            if reversal_signal:
+                logger.info("🔄 Position closed by reversal signal - checking for opposite position immediately...")
+            elif not positions:
+                logger.info("✅ No positions - checking for new trade opportunities...")
+
             self._check_for_new_trade(df, current_price)
         else:
             logger.info(f"⏸️  Still have {len(positions)} open positions - waiting...")
 
     def _check_positions_for_closing(self, positions, current_price, df):
-        """ポジション決済チェック（動的SL/TP使用）"""
+        """
+        ポジション決済チェック（動的SL/TP使用）
+
+        Returns:
+            (any_closed: bool, reversal_signal: bool)
+        """
+        any_closed = False
+        reversal_signal = False
+
         for position in positions:
             side = position.get('side')
             size = position.get('size')
@@ -148,6 +172,12 @@ class OptimizedLeverageTradingBot:
             if should_close:
                 logger.info(f"🔄 Closing position: {reason}")
                 self._close_position(position, current_price, reason)
+                any_closed = True
+
+                # 反転シグナルで決済された場合
+                if "Reversal" in reason or "reversal" in reason:
+                    reversal_signal = True
+                    logger.info(f"🔄 REVERSAL DETECTED - Will check for opposite position immediately")
 
                 # 決済後、SL/TP記録を削除
                 if position_id in self.active_positions_stops:
@@ -155,6 +185,8 @@ class OptimizedLeverageTradingBot:
 
                 # 取引結果を記録
                 self.trading_logic.record_trade(side, entry_price, pl_ratio)
+
+        return any_closed, reversal_signal
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
         """ポジション決済判定（動的SL/TP使用）"""
