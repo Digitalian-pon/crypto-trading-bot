@@ -59,13 +59,14 @@ class OptimizedTradingLogic:
             }
         }
 
-    def should_trade(self, market_data, historical_df=None):
+    def should_trade(self, market_data, historical_df=None, skip_price_filter=False):
         """
         取引判定 - 最適化版
 
         Args:
             market_data: 最新の市場データ（辞書形式）
             historical_df: 過去データのDataFrame（マルチタイムフレーム分析用）
+            skip_price_filter: 反転シグナル時など、価格変動フィルターをスキップする場合True
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -163,18 +164,22 @@ class OptimizedTradingLogic:
             # 6. 最終判定（レジーム別閾値）
             required_threshold = regime_config['signal_threshold']
 
-            # 取引タイミングチェック（過剰取引防止）
-            if not self._check_trade_timing():
-                logger.info(f"⏸️ Trade interval too short - waiting...")
-                return False, None, "Trade interval too short", 0.0, None, None
+            # 反転シグナル時以外は価格変動フィルターを適用
+            if not skip_price_filter:
+                # 取引タイミングチェック（過剰取引防止）
+                if not self._check_trade_timing():
+                    logger.info(f"⏸️ Trade interval too short - waiting...")
+                    return False, None, "Trade interval too short", 0.0, None, None
 
-            # 最小価格変動チェック（手数料負け防止）
-            if self.last_trade_price is not None:
-                price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
-                if price_change_ratio < 0.005:  # 0.5%未満の変動では取引しない
-                    logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 0.5%) - waiting...")
-                    logger.info(f"   Last trade price: ¥{self.last_trade_price:.2f}, Current: ¥{current_price:.2f}")
-                    return False, None, f"Price change too small ({price_change_ratio*100:.2f}%)", 0.0, None, None
+                # 最小価格変動チェック（手数料負け防止）
+                if self.last_trade_price is not None:
+                    price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
+                    if price_change_ratio < 0.005:  # 0.5%未満の変動では取引しない
+                        logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 0.5%) - waiting...")
+                        logger.info(f"   Last trade price: ¥{self.last_trade_price:.2f}, Current: ¥{current_price:.2f}")
+                        return False, None, f"Price change too small ({price_change_ratio*100:.2f}%)", 0.0, None, None
+            else:
+                logger.info(f"🔄 Price filter SKIPPED (reversal signal mode)")
 
             # 動的ストップロス/テイクプロフィット計算
             stop_loss_atr_mult = regime_config['stop_loss_atr_mult']

@@ -122,10 +122,11 @@ class OptimizedLeverageTradingBot:
         if should_check_new_trade:
             if reversal_signal:
                 logger.info("🔄 Position closed by reversal signal - checking for opposite position immediately...")
+                # 反転シグナル時は価格変動フィルターをスキップ
+                self._check_for_new_trade(df, current_price, is_reversal=True)
             elif not positions:
                 logger.info("✅ No positions - checking for new trade opportunities...")
-
-            self._check_for_new_trade(df, current_price)
+                self._check_for_new_trade(df, current_price, is_reversal=False)
         else:
             logger.info(f"⏸️  Still have {len(positions)} open positions - waiting...")
 
@@ -254,16 +255,25 @@ class OptimizedLeverageTradingBot:
         except Exception as e:
             logger.error(f"Error closing position: {e}", exc_info=True)
 
-    def _check_for_new_trade(self, df, current_price):
-        """新規取引チェック（動的SL/TP付き）"""
+    def _check_for_new_trade(self, df, current_price, is_reversal=False):
+        """
+        新規取引チェック（動的SL/TP付き）
+
+        Args:
+            df: 市場データのDataFrame
+            current_price: 現在価格
+            is_reversal: 反転シグナル直後かどうか（Trueの場合は価格変動フィルターをスキップ）
+        """
         last_row = df.iloc[-1].to_dict()
 
         # シグナル取得（DataFrameも渡す）
         should_trade, trade_type, reason, confidence, stop_loss, take_profit = self.trading_logic.should_trade(
-            last_row, df
+            last_row, df, skip_price_filter=is_reversal
         )
 
         logger.info(f"🔍 Signal: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
+        if is_reversal:
+            logger.info(f"   🔄 Reversal mode: price filter SKIPPED")
 
         # 閾値チェック（レジーム別の閾値は trading_logic 内で処理済み）
         if not should_trade or not trade_type:
