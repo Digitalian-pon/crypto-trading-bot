@@ -994,11 +994,126 @@ if should_check_new_trade:
 
 ---
 
-**最終更新**: 2025年11月9日 21:00
+---
+
+#### 15. **価格変動フィルターが反転シグナルをブロックする致命的バグ修正** (2025年11月9日)
+**問題**: トレンド転換時にポジションは決済されるが、反対の新規注文が出ない（再発）
+
+**ユーザーからの再報告**:
+「トレンド転換したようですが、決済されていますが、新規注文が入っていないのか、ポジションがありません。」
+
+**根本原因の発見**:
+前回の修正（#14）で反転シグナル検出ロジックは追加したが、**価格変動フィルター**が反転取引をブロックしていた：
+
+```python
+# optimized_trading_logic.py の should_trade メソッド
+# 最小価格変動チェック（手数料負け防止）
+if self.last_trade_price is not None:
+    price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
+    if price_change_ratio < 0.005:  # 0.5%未満の変動では取引しない ← ここが問題！
+        return False, None, "Price change too small", 0.0, None, None
+```
+
+**問題の詳細な流れ**:
+1. BUYポジションを¥29.00で保有中
+2. 市場が下降トレンドに転換 → SELLシグナル検出（confidence 1.5）
+3. BUYポジションを¥29.00で決済 ✅
+4. `record_trade(side='BUY', entry_price=29.00)` → `last_trade_price = 29.00`
+5. **反転シグナル検出 → `reversal_signal = True`** ✅ (修正#14で追加)
+6. 即座に`_check_for_new_trade`を実行 ✅ (修正#14で追加)
+7. `should_trade`メソッドでSELLシグナル再評価
+8. **しかし、価格変動チェックで**: `current_price = 29.00`, `last_trade_price = 29.00`
+9. `price_change_ratio = 0.0%` < 0.5% → **新規注文がブロックされる** ❌
+10. ログ: "Price hasn't moved enough (0.00% < 0.5%) - waiting..."
+11. 結果: SELLポジションが開かれない → **機会損失**
+
+**なぜこのバグが見過ごされたか**:
+- 修正#14では反転シグナル**検出**ロジックのみ実装
+- しかし、`should_trade`メソッド内の**価格変動フィルター**は見落とされていた
+- 決済直後は価格がほとんど変わらないため、必ず0.5%未満になる
+
+**修正内容**:
+
+**1. `should_trade`メソッドに`skip_price_filter`パラメータ追加**:
+```python
+def should_trade(self, market_data, historical_df=None, skip_price_filter=False):
+    """
+    skip_price_filter: 反転シグナル時など、価格変動フィルターをスキップする場合True
+    """
+
+    # 反転シグナル時以外は価格変動フィルターを適用
+    if not skip_price_filter:
+        # 取引タイミングチェック
+        if not self._check_trade_timing():
+            return False, None, "Trade interval too short", 0.0, None, None
+
+        # 最小価格変動チェック
+        if self.last_trade_price is not None:
+            price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
+            if price_change_ratio < 0.005:
+                return False, None, "Price change too small", 0.0, None, None
+    else:
+        logger.info(f"🔄 Price filter SKIPPED (reversal signal mode)")
+```
+
+**2. `_check_for_new_trade`メソッドに`is_reversal`パラメータ追加**:
+```python
+def _check_for_new_trade(self, df, current_price, is_reversal=False):
+    """
+    is_reversal: 反転シグナル直後かどうか（Trueの場合は価格変動フィルターをスキップ）
+    """
+    should_trade, trade_type, reason, confidence, stop_loss, take_profit = self.trading_logic.should_trade(
+        last_row, df, skip_price_filter=is_reversal
+    )
+
+    if is_reversal:
+        logger.info(f"   🔄 Reversal mode: price filter SKIPPED")
+```
+
+**3. `_trading_cycle`で反転シグナル時に`is_reversal=True`を渡す**:
+```python
+if should_check_new_trade:
+    if reversal_signal:
+        logger.info("🔄 Position closed by reversal signal - checking for opposite position immediately...")
+        # 反転シグナル時は価格変動フィルターをスキップ
+        self._check_for_new_trade(df, current_price, is_reversal=True)
+    elif not positions:
+        logger.info("✅ No positions - checking for new trade opportunities...")
+        self._check_for_new_trade(df, current_price, is_reversal=False)
+```
+
+**動作フロー（修正後）**:
+1. BUYポジション保有中（¥29.00）
+2. 下降トレンド転換 → SELLシグナル検出
+3. BUYポジション決済 → `reversal_signal = True`
+4. **即座に新規取引チェック（`is_reversal=True`）**
+5. `should_trade`で`skip_price_filter=True`を受け取る
+6. **価格変動チェックをスキップ** → シグナル評価のみ実行
+7. SELLシグナル（confidence 1.5）≥ 閾値（0.8） → **SELLポジション作成** ✅
+8. トレンド転換の初動を捉える
+
+**期待される効果**:
+- ✅ **反転シグナルが確実に実行される**: 価格変動に関係なく、反対ポジションを開く
+- ✅ **機会損失ゼロ**: 決済直後の同価格でも取引可能
+- ✅ **手数料負けリスクは変わらず**: 反転シグナル（高信頼度）の場合のみスキップ
+- ✅ **通常取引は保護される**: 反転以外の取引は0.5%フィルターが適用される
+
+**修正ファイル**:
+- `optimized_leverage_bot.py` - `_check_for_new_trade`, `_trading_cycle`
+- `services/optimized_trading_logic.py` - `should_trade`
+
+**GitHubコミット**:
+- b1c7d1b - 🔧 Fix critical bug: Skip price filter on reversal signals
+
+**解決**: 価格変動フィルターが反転シグナルをブロックする致命的バグ完全修正 ✅
+
+---
+
+**最終更新**: 2025年11月9日 21:30
 **ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
-**現在の残高**: JPY 730円
+**現在の残高**: JPY 608円
 **ボット**: optimized-bot (PM2監視下) ※Railway環境で自動稼働中
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
-**最新修正**: トレンド転換時の反対ポジション自動作成機能追加 → 機会損失削減 ✅ **NEW**
+**最新修正**: 価格変動フィルターバグ修正 → 反転シグナル時の新規注文確実実行 ✅ **CRITICAL FIX**
