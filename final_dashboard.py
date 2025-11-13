@@ -19,7 +19,7 @@ from app import app
 from models import User
 from services.gmo_api import GMOCoinAPI
 from services.data_service import DataService
-from services.enhanced_trading_logic import EnhancedTradingLogic as SimpleTradingLogic
+from services.optimized_trading_logic import OptimizedTradingLogic as SimpleTradingLogic
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -130,13 +130,17 @@ class FinalDashboard:
                     # Convert DataFrame to dictionary for the last row (most recent data)
                     self.market_data = market_data_response.iloc[-1].to_dict()
 
-                    # Generate trading signal
-                    should_trade, trade_type, reason, confidence = self.trading_logic.should_trade(self.market_data)
+                    # Generate trading signal (OptimizedTradingLogic returns 6 values)
+                    should_trade, trade_type, reason, confidence, stop_loss, take_profit = self.trading_logic.should_trade(
+                        self.market_data, market_data_response
+                    )
                     self.signal_info = {
                         'should_trade': should_trade,
                         'trade_type': trade_type,
                         'reason': reason,
-                        'confidence': confidence
+                        'confidence': confidence,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit
                     }
                 else:
                     self.signal_info = {

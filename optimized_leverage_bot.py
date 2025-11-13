@@ -45,7 +45,7 @@ class OptimizedLeverageTradingBot:
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
         self.timeframe = config.get('trading', 'default_timeframe', fallback='5m')
-        self.interval = 180  # チェック間隔（秒）- 3分（現実的な間隔に変更）
+        self.interval = 300  # チェック間隔（秒）- 5分（手数料負け防止のため延長）
 
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
@@ -210,8 +210,8 @@ class OptimizedLeverageTradingBot:
         entry_price = float(position.get('price', 0))
         price_change_ratio = abs(current_price - entry_price) / entry_price
 
-        if price_change_ratio < 0.005:  # 0.5%未満では決済しない
-            logger.info(f"   → Price change too small ({price_change_ratio*100:.2f}% < 0.5%) - holding")
+        if price_change_ratio < 0.01:  # 1.0%未満では決済しない（0.5% → 1.0%に引き上げ）
+            logger.info(f"   → Price change too small ({price_change_ratio*100:.2f}% < 1.0%) - holding")
             return False, "Price change too small"
 
         # 反転シグナルチェック（高信頼度のみ）
