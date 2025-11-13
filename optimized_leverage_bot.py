@@ -214,12 +214,16 @@ class OptimizedLeverageTradingBot:
             logger.info(f"   → Price change too small ({price_change_ratio*100:.2f}% < 1.0%) - holding")
             return False, "Price change too small"
 
-        # 反転シグナルチェック（高信頼度のみ）
-        should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(indicators, None)
+        # 反転シグナルチェック（決済判定用 - 緩い閾値とフィルタースキップ）
+        # skip_price_filter=True により、価格フィルター＋閾値の両方が緩和される
+        should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(
+            indicators, None, skip_price_filter=True
+        )
 
         logger.info(f"   → Reversal check: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
 
-        if should_trade and trade_type and confidence >= 1.2:  # 3.0 → 1.2 に引き下げ（現実的な閾値）
+        # 決済判定の閾値: 0.8（新規取引より緩い）- トレンド転換を確実に捉える
+        if should_trade and trade_type and confidence >= 0.8:
             if side == 'BUY' and trade_type.upper() == 'SELL':
                 return True, f"Strong Reversal: SELL (confidence={confidence:.2f})"
             elif side == 'SELL' and trade_type.upper() == 'BUY':

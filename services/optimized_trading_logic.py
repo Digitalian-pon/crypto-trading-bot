@@ -162,7 +162,19 @@ class OptimizedTradingLogic:
             logger.info(f"   Sell Signals ({len(sell_signals)}): {[f'{s[1]}({s[2]:.1f})' for s in sell_signals]}")
 
             # 6. 最終判定（レジーム別閾値）
-            required_threshold = regime_config['signal_threshold']
+            # 反転シグナル時は元の閾値（緩和）を使用、通常時は厳格な閾値を使用
+            if skip_price_filter:
+                # 反転シグナル時: 元の閾値（手数料負け防止前の値）
+                reversal_thresholds = {
+                    'TRENDING': 0.8,
+                    'RANGING': 1.0,
+                    'VOLATILE': 1.5
+                }
+                required_threshold = reversal_thresholds.get(regime, 1.0)
+                logger.info(f"🔄 Reversal mode: Using relaxed threshold {required_threshold:.2f}")
+            else:
+                # 通常の新規取引: 厳格な閾値（手数料負け防止）
+                required_threshold = regime_config['signal_threshold']
 
             # 反転シグナル時以外は価格変動フィルターを適用
             if not skip_price_filter:
