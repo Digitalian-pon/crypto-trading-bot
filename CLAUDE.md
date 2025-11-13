@@ -1222,11 +1222,116 @@ After（質重視）:
 
 ---
 
-**最終更新**: 2025年11月13日 04:00
+---
+
+#### 17. **二重閾値システム実装 - 反転シグナルと手数料負け防止の両立** (2025年11月13日)
+**問題**: 修正#16で閾値を引き上げたため、反転シグナルが検出されにくくなった
+
+**ユーザーからの質問**:
+「トレンド転換が起こった時、ポジションの決済が行われ、その後反対新規注文が約定されていないのは、解消されますか？」
+
+**問題分析**:
+```
+修正#16後の動作:
+BUYポジション → SELLシグナル（confidence 1.5、VOLATILE市場）
+→ 決済判定: 1.5 < 2.0（新しい厳格な閾値）→ 決済されない可能性 ❌
+→ または決済されても、新規SELL: 1.5 < 2.0 → 注文出ない ❌
+
+矛盾:
+- 手数料負け防止には高い閾値が必要（1.0/1.2/2.0）
+- トレンド転換捕捉には低い閾値が必要（0.8/1.0/1.5）
+```
+
+**解決策: 二重閾値システム**
+
+**コンセプト**:
+- **通常の新規取引**: 厳格な閾値（1.0/1.2/2.0）→ 手数料負け防止
+- **反転シグナル時**: 緩い閾値（0.8/1.0/1.5）→ トレンド転換を優先
+
+**実装内容**:
+
+**1. トレーディングロジックの閾値分岐**:
+```python
+# services/optimized_trading_logic.py
+if skip_price_filter:
+    # 反転シグナル時: 元の閾値（緩和）
+    reversal_thresholds = {
+        'TRENDING': 0.8,
+        'RANGING': 1.0,
+        'VOLATILE': 1.5
+    }
+    required_threshold = reversal_thresholds.get(regime, 1.0)
+else:
+    # 通常の新規取引: 厳格な閾値（手数料負け防止）
+    required_threshold = regime_config['signal_threshold']  # 1.0/1.2/2.0
+```
+
+**2. 決済判定の閾値緩和**:
+```python
+# optimized_leverage_bot.py
+# 決済判定時も緩い閾値を使用
+should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(
+    indicators, None, skip_price_filter=True  # ← 反転シグナルモード
+)
+
+# 最小閾値を 1.2 → 0.8 に下げる
+if should_trade and trade_type and confidence >= 0.8:  # より多くの反転を捉える
+```
+
+**動作フロー（修正後）**:
+```
+シナリオ: VOLATILE市場でのトレンド転換
+
+1. BUYポジション保有中（¥29.00）
+2. SELLシグナル検出（confidence 1.5）
+
+【決済判定】
+3. should_trade 呼び出し（skip_price_filter=True）
+4. 緩い閾値適用: VOLATILE 1.5（2.0ではない）
+5. 判定: 1.5 ≥ 1.5 → should_trade=True ✅
+6. confidence 1.5 ≥ 0.8 → 決済実行 ✅
+7. reversal_signal = True
+
+【反対ポジション作成】
+8. _check_for_new_trade(is_reversal=True)
+9. should_trade 呼び出し（skip_price_filter=True）
+10. 緩い閾値適用: VOLATILE 1.5
+11. 判定: 1.5 ≥ 1.5 → should_trade=True ✅
+12. 価格フィルターもスキップ ✅
+13. SELL注文実行 ✅
+
+結果: トレンド転換を完璧に捉えて反対ポジション作成成功！
+```
+
+**閾値の使い分け**:
+
+| 取引タイプ | TRENDING | RANGING | VOLATILE | 用途 |
+|-----------|----------|---------|----------|------|
+| **通常取引** | 1.0 | 1.2 | 2.0 | 手数料負け防止 |
+| **反転取引** | 0.8 | 1.0 | 1.5 | トレンド転換捕捉 |
+
+**期待される効果**:
+- ✅ **トレンド転換の確実な捕捉**: 反転シグナルが見逃されない
+- ✅ **反対ポジションの即座作成**: 決済と同時に新規注文
+- ✅ **手数料負けは依然防止**: 通常取引は厳格な閾値で保護
+- ✅ **最適なバランス**: 質重視戦略とトレンドフォローの両立
+
+**修正ファイル**:
+- `optimized_leverage_bot.py` - 決済判定の閾値緩和（1.2 → 0.8）、skip_price_filter追加
+- `services/optimized_trading_logic.py` - 二重閾値システム実装
+
+**GitHubコミット**:
+- 9f00bbd - 🔄 Fix reversal signal threshold for trend changes
+
+**解決**: 二重閾値システムにより、反転シグナルと手数料負け防止を完璧に両立 ✅
+
+---
+
+**最終更新**: 2025年11月13日 04:30
 **ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
 **現在の残高**: JPY 593円
 **ボット**: optimized-bot (PM2監視下) ※Railway環境で自動稼働中
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
-**最新修正**: 手数料負け防止 - 取引ルール厳格化（質重視戦略） ✅ **CRITICAL FIX**
+**最新修正**: 二重閾値システム実装 → トレンド転換完全捕捉 ✅ **CRITICAL FIX**
