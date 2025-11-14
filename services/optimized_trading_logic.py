@@ -59,7 +59,7 @@ class OptimizedTradingLogic:
             }
         }
 
-    def should_trade(self, market_data, historical_df=None, skip_price_filter=False):
+    def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
         取引判定 - 最適化版
 
@@ -67,6 +67,7 @@ class OptimizedTradingLogic:
             market_data: 最新の市場データ（辞書形式）
             historical_df: 過去データのDataFrame（マルチタイムフレーム分析用）
             skip_price_filter: 反転シグナル時など、価格変動フィルターをスキップする場合True
+            is_tpsl_continuation: TP/SL決済後の継続機会チェックの場合True（中程度の閾値を使用）
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -161,10 +162,12 @@ class OptimizedTradingLogic:
             logger.info(f"   Buy Signals ({len(buy_signals)}): {[f'{s[1]}({s[2]:.1f})' for s in buy_signals]}")
             logger.info(f"   Sell Signals ({len(sell_signals)}): {[f'{s[1]}({s[2]:.1f})' for s in sell_signals]}")
 
-            # 6. 最終判定（レジーム別閾値）
-            # 反転シグナル時は元の閾値（緩和）を使用、通常時は厳格な閾値を使用
+            # 6. 最終判定（3段階閾値システム）
+            # - 反転シグナル時: 緩い閾値（トレンド転換を確実に捉える）
+            # - TP/SL決済後: 中程度の閾値（継続機会を与えるが慎重に）
+            # - 通常取引時: 厳格な閾値（手数料負け防止）
             if skip_price_filter:
-                # 反転シグナル時: 元の閾値（手数料負け防止前の値）
+                # 反転シグナル時: 緩い閾値
                 reversal_thresholds = {
                     'TRENDING': 0.8,
                     'RANGING': 1.0,
@@ -172,6 +175,15 @@ class OptimizedTradingLogic:
                 }
                 required_threshold = reversal_thresholds.get(regime, 1.0)
                 logger.info(f"🔄 Reversal mode: Using relaxed threshold {required_threshold:.2f}")
+            elif is_tpsl_continuation:
+                # TP/SL決済後の継続チェック: 中程度の閾値
+                tpsl_thresholds = {
+                    'TRENDING': 1.0,  # TRENDINGは通常と同じ（トレンド継続を期待）
+                    'RANGING': 1.1,   # RANGINGは少し緩め（逆張りチャンスあり）
+                    'VOLATILE': 1.7   # VOLATILEは慎重に（リスク高い）
+                }
+                required_threshold = tpsl_thresholds.get(regime, 1.1)
+                logger.info(f"💰 TP/SL continuation mode: Using moderate threshold {required_threshold:.2f}")
             else:
                 # 通常の新規取引: 厳格な閾値（手数料負け防止）
                 required_threshold = regime_config['signal_threshold']

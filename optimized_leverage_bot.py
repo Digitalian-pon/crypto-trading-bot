@@ -98,10 +98,11 @@ class OptimizedLeverageTradingBot:
         # 3. ポジションの決済チェック（動的SL/TP使用）
         any_closed = False
         reversal_signal = False
+        tp_sl_closed = False
 
         if positions:
             logger.info(f"Checking {len(positions)} positions for closing...")
-            any_closed, reversal_signal = self._check_positions_for_closing(positions, current_price, df)
+            any_closed, reversal_signal, tp_sl_closed = self._check_positions_for_closing(positions, current_price, df)
             # 決済後、ポジションを再取得
             positions = self.api.get_positions(symbol=self.symbol)
             logger.info(f"📊 Positions after close check: {len(positions)}")
@@ -110,11 +111,13 @@ class OptimizedLeverageTradingBot:
         self._display_performance_stats()
 
         # 5. 新規取引シグナルをチェック
-        # - 反転シグナルで決済された場合は即座にチェック（機会損失防止）
+        # - 反転シグナルで決済された場合は即座にチェック（機会損失防止、逆注文）
+        # - TP/SL決済の場合は継続チェック（中程度の閾値）
         # - 全ポジション決済された場合もチェック
         # - ポジションがない場合もチェック
         should_check_new_trade = (
             reversal_signal or                    # 反転シグナル決済
+            tp_sl_closed or                       # TP/SL決済（継続機会）
             (any_closed and not positions) or     # 全ポジション決済
             not positions                         # ポジションなし
         )
@@ -122,8 +125,12 @@ class OptimizedLeverageTradingBot:
         if should_check_new_trade:
             if reversal_signal:
                 logger.info("🔄 Position closed by reversal signal - checking for opposite position immediately...")
-                # 反転シグナル時は価格変動フィルターをスキップ
+                # 反転シグナル時は価格変動フィルターをスキップ、緩い閾値
                 self._check_for_new_trade(df, current_price, is_reversal=True)
+            elif tp_sl_closed:
+                logger.info("💰 Position closed by TP/SL - checking for continuation opportunity with moderate threshold...")
+                # TP/SL決済時は中程度の閾値で継続機会を検討
+                self._check_for_new_trade(df, current_price, is_tpsl_continuation=True)
             elif not positions:
                 logger.info("✅ No positions - checking for new trade opportunities...")
                 self._check_for_new_trade(df, current_price, is_reversal=False)
@@ -135,10 +142,11 @@ class OptimizedLeverageTradingBot:
         ポジション決済チェック（動的SL/TP使用）
 
         Returns:
-            (any_closed: bool, reversal_signal: bool)
+            (any_closed: bool, reversal_signal: bool, tp_sl_closed: bool)
         """
         any_closed = False
         reversal_signal = False
+        tp_sl_closed = False
 
         for position in positions:
             side = position.get('side')
@@ -175,10 +183,15 @@ class OptimizedLeverageTradingBot:
                 self._close_position(position, current_price, reason)
                 any_closed = True
 
-                # 反転シグナルで決済された場合
+                # 決済理由を判定
                 if "Reversal" in reason or "reversal" in reason:
+                    # 反転シグナルで決済された場合
                     reversal_signal = True
                     logger.info(f"🔄 REVERSAL DETECTED - Will check for opposite position immediately")
+                elif "Take Profit" in reason or "Stop Loss" in reason:
+                    # TP/SLで決済された場合
+                    tp_sl_closed = True
+                    logger.info(f"💰 TP/SL CLOSE - Will check for continuation with moderate threshold")
 
                 # 決済後、SL/TP記録を削除
                 if position_id in self.active_positions_stops:
@@ -187,7 +200,7 @@ class OptimizedLeverageTradingBot:
                 # 取引結果を記録
                 self.trading_logic.record_trade(side, entry_price, pl_ratio)
 
-        return any_closed, reversal_signal
+        return any_closed, reversal_signal, tp_sl_closed
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
         """ポジション決済判定（動的SL/TP使用）"""
@@ -259,25 +272,28 @@ class OptimizedLeverageTradingBot:
         except Exception as e:
             logger.error(f"Error closing position: {e}", exc_info=True)
 
-    def _check_for_new_trade(self, df, current_price, is_reversal=False):
+    def _check_for_new_trade(self, df, current_price, is_reversal=False, is_tpsl_continuation=False):
         """
         新規取引チェック（動的SL/TP付き）
 
         Args:
             df: 市場データのDataFrame
             current_price: 現在価格
-            is_reversal: 反転シグナル直後かどうか（Trueの場合は価格変動フィルターをスキップ）
+            is_reversal: 反転シグナル直後かどうか（Trueの場合は価格変動フィルターをスキップ、緩い閾値）
+            is_tpsl_continuation: TP/SL決済直後かどうか（Trueの場合は中程度の閾値）
         """
         last_row = df.iloc[-1].to_dict()
 
         # シグナル取得（DataFrameも渡す）
         should_trade, trade_type, reason, confidence, stop_loss, take_profit = self.trading_logic.should_trade(
-            last_row, df, skip_price_filter=is_reversal
+            last_row, df, skip_price_filter=is_reversal, is_tpsl_continuation=is_tpsl_continuation
         )
 
         logger.info(f"🔍 Signal: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
         if is_reversal:
-            logger.info(f"   🔄 Reversal mode: price filter SKIPPED")
+            logger.info(f"   🔄 Reversal mode: price filter SKIPPED, relaxed threshold")
+        elif is_tpsl_continuation:
+            logger.info(f"   💰 TP/SL continuation mode: moderate threshold")
 
         # 閾値チェック（レジーム別の閾値は trading_logic 内で処理済み）
         if not should_trade or not trade_type:
