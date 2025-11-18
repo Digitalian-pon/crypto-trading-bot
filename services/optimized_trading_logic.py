@@ -6,7 +6,7 @@
 import logging
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -510,12 +510,12 @@ class OptimizedTradingLogic:
         if not self.last_trade_time:
             return True
 
-        elapsed = (datetime.now() - self.last_trade_time).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - self.last_trade_time).total_seconds()
         return elapsed >= self.min_trade_interval
 
     def record_trade(self, trade_type, price, result=None):
         """取引記録（パフォーマンス追跡用）"""
-        self.last_trade_time = datetime.now()
+        self.last_trade_time = datetime.now(timezone.utc)
         self.last_trade_price = price  # 最後の取引価格を記録
 
         trade_record = {
