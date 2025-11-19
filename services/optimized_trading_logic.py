@@ -34,26 +34,26 @@ class OptimizedTradingLogic:
         self.trade_history = []
         self.recent_trades_limit = 20  # 直近20取引を追跡
 
-        # 市場レジーム別パラメータ（手数料負け防止のため閾値を引き上げ）
+        # 市場レジーム別パラメータ（機会損失削減のため閾値を適正化）
         self.regime_params = {
             'TRENDING': {
                 'rsi_oversold': 40,      # トレンド中は逆張り禁止
                 'rsi_overbought': 60,
-                'signal_threshold': 1.0,  # 0.8 → 1.0（手数料負け防止）
+                'signal_threshold': 0.9,  # 1.0 → 0.9（機会損失削減）
                 'stop_loss_atr_mult': 3.0,  # 広めのSL
                 'take_profit_atr_mult': 6.0,  # 大きめのTP
             },
             'RANGING': {
                 'rsi_oversold': 30,      # レンジ相場は逆張り
                 'rsi_overbought': 70,
-                'signal_threshold': 1.2,  # 1.0 → 1.2（手数料負け防止）
+                'signal_threshold': 1.1,  # 1.2 → 1.1（機会損失削減）
                 'stop_loss_atr_mult': 2.0,
                 'take_profit_atr_mult': 4.0,
             },
             'VOLATILE': {
                 'rsi_oversold': 35,
                 'rsi_overbought': 65,
-                'signal_threshold': 2.0,  # 1.5 → 2.0（高ボラ時はより慎重に）
+                'signal_threshold': 1.7,  # 2.0 → 1.7（高ボラ時も機会を逃さない）
                 'stop_loss_atr_mult': 4.0,  # 非常に広めのストップ
                 'take_profit_atr_mult': 8.0,
             }
@@ -195,11 +195,11 @@ class OptimizedTradingLogic:
                     logger.info(f"⏸️ Trade interval too short - waiting...")
                     return False, None, "Trade interval too short", 0.0, None, None
 
-                # 最小価格変動チェック（手数料負け防止）
+                # 最小価格変動チェック（手数料負け防止 - 5分足トレードに最適化）
                 if self.last_trade_price is not None:
                     price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
-                    if price_change_ratio < 0.01:  # 1.0%未満の変動では取引しない（0.5% → 1.0%に引き上げ）
-                        logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 1.0%) - waiting...")
+                    if price_change_ratio < 0.005:  # 0.5%未満の変動では取引しない（1.0% → 0.5%に緩和）
+                        logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 0.5%) - waiting...")
                         logger.info(f"   Last trade price: ¥{self.last_trade_price:.2f}, Current: ¥{current_price:.2f}")
                         return False, None, f"Price change too small ({price_change_ratio*100:.2f}%)", 0.0, None, None
             else:
