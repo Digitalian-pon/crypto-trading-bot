@@ -1327,11 +1327,93 @@ if should_trade and trade_type and confidence >= 0.8:  # より多くの反転�
 
 ---
 
-**最終更新**: 2025年11月13日 04:30
+---
+
+#### 18. **タイムゾーンバグ修正 - 3時間以上取引が停止していた致命的バグ** (2025年11月19日)
+**問題**: Railwayボットが3時間以上取引を実行しない
+
+**ユーザーからの報告**:
+「ポジションが無いのは正しいですか？Railwayのlogを確認してください」
+
+**問題分析**:
+```
+エラーメッセージ:
+TypeError: can't subtract offset-naive and offset-aware datetimes
+
+発生場所: optimized_trading_logic.py:513
+elapsed = (datetime.now() - self.last_trade_time).total_seconds()
+```
+
+**根本原因**:
+1. **datetime.now()**: タイムゾーン情報**なし**（naive datetime）
+2. **self.last_trade_time**: GMO APIから取得したUTC時刻、タイムゾーン情報**あり**（aware datetime）
+3. **結果**: 減算演算が`TypeError`で失敗 → 全ての取引判定がエラーで終了
+4. **影響期間**: 最後の取引（11/19 09:56）から発見まで**約3時間**、全ての取引がブロックされていた
+
+**修正内容**:
+
+**1. タイムゾーン対応修正** (`services/optimized_trading_logic.py`):
+```python
+# Before
+from datetime import datetime, timedelta
+...
+elapsed = (datetime.now() - self.last_trade_time).total_seconds()
+
+# After
+from datetime import datetime, timedelta, timezone
+...
+elapsed = (datetime.now(timezone.utc) - self.last_trade_time).total_seconds()
+```
+
+**2. record_trade()メソッドも修正**:
+```python
+# Before
+self.last_trade_time = datetime.now()
+
+# After
+self.last_trade_time = datetime.now(timezone.utc)
+```
+
+**動作確認**:
+```bash
+# 修正前
+❌ TypeError: can't subtract offset-naive and offset-aware datetimes
+   → 全ての取引判定が失敗
+
+# 修正後
+✅ エラーなし（バグ修正成功）
+✅ 取引判定が正常に動作
+   取引可能: NO
+   理由: Price change too small (0.43%)
+```
+
+**期待される効果**:
+- ✅ **取引判定の完全復旧**: 全ての取引ロジックが正常動作
+- ✅ **タイムゾーン整合性**: UTC時刻で統一、今後同様のエラーなし
+- ✅ **即時デプロイ**: Railwayで自動デプロイ完了
+
+**修正ファイル**:
+- `services/optimized_trading_logic.py` - タイムゾーン対応（3箇所）
+
+**GitHubコミット**:
+- 9d05485 - 🐛 Fix critical datetime timezone bug blocking all trades
+
+**解決**: タイムゾーンバグ完全修正、ボット正常稼働復旧 ✅ **CRITICAL BUG FIX**
+
+**直近の取引実績（修正前の最後の取引）**:
+```
+11/19 09:21 - BUY 20 DOGE @ ¥24.886 (OPEN)
+11/19 09:56 - SELL 20 DOGE @ ¥25.050 (CLOSE)
+→ 利益: +¥3 ✅
+```
+
+---
+
+**最終更新**: 2025年11月19日 21:32
 **ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
-**現在の残高**: JPY 593円
+**現在の残高**: JPY 565円
 **ボット**: optimized-bot (PM2監視下) ※Railway環境で自動稼働中
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
-**最新修正**: 二重閾値システム実装 → トレンド転換完全捕捉 ✅ **CRITICAL FIX**
+**最新修正**: タイムゾーンバグ修正 → 取引判定完全復旧 ✅ **CRITICAL BUG FIX**
