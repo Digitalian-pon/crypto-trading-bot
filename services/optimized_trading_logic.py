@@ -34,28 +34,28 @@ class OptimizedTradingLogic:
         self.trade_history = []
         self.recent_trades_limit = 20  # 直近20取引を追跡
 
-        # 市場レジーム別パラメータ（機会損失削減のため閾値を適正化）
+        # 市場レジーム別パラメータ（完全トレンドフォロー戦略）
         self.regime_params = {
             'TRENDING': {
-                'rsi_oversold': 40,      # トレンド中は逆張り禁止
-                'rsi_overbought': 60,
-                'signal_threshold': 0.9,  # 1.0 → 0.9（機会損失削減）
-                'stop_loss_atr_mult': 3.0,  # 広めのSL
-                'take_profit_atr_mult': 6.0,  # 大きめのTP
+                'rsi_oversold': 40,      # 押し目買い
+                'rsi_overbought': 60,    # 戻り売り
+                'signal_threshold': 0.8,  # トレンドフォロー専用で安全
+                'stop_loss_atr_mult': 2.5,  # 早めの損切り
+                'take_profit_atr_mult': 5.0,  # 早めの利確
             },
             'RANGING': {
-                'rsi_oversold': 30,      # レンジ相場は逆張り
-                'rsi_overbought': 70,
-                'signal_threshold': 1.1,  # 1.2 → 1.1（機会損失削減）
+                'rsi_oversold': 30,      # 押し目買い（逆張り禁止）
+                'rsi_overbought': 70,    # 戻り売り（逆張り禁止）
+                'signal_threshold': 1.0,  # やや慎重に
                 'stop_loss_atr_mult': 2.0,
                 'take_profit_atr_mult': 4.0,
             },
             'VOLATILE': {
                 'rsi_oversold': 35,
                 'rsi_overbought': 65,
-                'signal_threshold': 1.7,  # 2.0 → 1.7（高ボラ時も機会を逃さない）
-                'stop_loss_atr_mult': 4.0,  # 非常に広めのストップ
-                'take_profit_atr_mult': 8.0,
+                'signal_threshold': 1.5,  # 高ボラ時は慎重に
+                'stop_loss_atr_mult': 3.0,
+                'take_profit_atr_mult': 6.0,
             }
         }
 
@@ -269,10 +269,10 @@ class OptimizedTradingLogic:
 
             logger.info(f"Regime Detection: ATR%={atr_pct:.3f}, Slope={normalized_slope:.6f}, EMA Diff%={ema_diff_pct:.3f}")
 
-            # レジーム判定
+            # レジーム判定（TRENDING判定を緩和してトレンドフォロー機会を増やす）
             if atr_pct > 4.0:  # 4%以上のボラティリティ
                 return 'VOLATILE'
-            elif abs(normalized_slope) > 0.01 and ema_diff_pct > 1.0:  # 強いトレンド
+            elif abs(normalized_slope) > 0.01 and ema_diff_pct > 0.3:  # 1.0% → 0.3%に大幅緩和
                 return 'TRENDING'
             else:
                 return 'RANGING'
@@ -346,31 +346,19 @@ class OptimizedTradingLogic:
             return {'direction': 'NEUTRAL', 'strength': 0.0, 'quality': 0.0}
 
     def _analyze_rsi(self, rsi, trend_direction, regime, oversold_level, overbought_level):
-        """RSI分析（レジーム適応型）"""
+        """RSI分析（完全トレンドフォロー戦略）"""
         signals = []
 
-        if regime == 'TRENDING':
-            # トレンド相場：トレンドフォロー重視
-            if trend_direction in ['STRONG_DOWN', 'DOWN']:
-                if rsi > overbought_level:
-                    signals.append(('SELL', 'RSI Pullback Downtrend', 0.8))
-            elif trend_direction in ['STRONG_UP', 'UP']:
-                if rsi < oversold_level:
-                    signals.append(('BUY', 'RSI Dip Uptrend', 0.8))
-
-        elif regime == 'RANGING':
-            # レンジ相場：逆張り戦略
+        # 全てのレジームでトレンドフォローのみ採用（逆張り完全禁止）
+        if trend_direction in ['STRONG_DOWN', 'DOWN']:
+            # 下降トレンド：戻り売りのみ
+            if rsi > overbought_level:
+                signals.append(('SELL', 'RSI Pullback Downtrend', 0.8))
+        elif trend_direction in ['STRONG_UP', 'UP']:
+            # 上昇トレンド：押し目買いのみ
             if rsi < oversold_level:
-                signals.append(('BUY', 'RSI Oversold Range', 0.7))
-            elif rsi > overbought_level:
-                signals.append(('SELL', 'RSI Overbought Range', 0.7))
-
-        elif regime == 'VOLATILE':
-            # 高ボラティリティ：極端な値のみ
-            if rsi < 25:
-                signals.append(('BUY', 'RSI Extreme Oversold', 0.6))
-            elif rsi > 75:
-                signals.append(('SELL', 'RSI Extreme Overbought', 0.6))
+                signals.append(('BUY', 'RSI Dip Uptrend', 0.8))
+        # NEUTRAL時は取引しない（明確なトレンドがない）
 
         return signals
 
@@ -404,7 +392,7 @@ class OptimizedTradingLogic:
         return signals
 
     def _analyze_bollinger_bands(self, price, bb_upper, bb_lower, bb_middle, trend_direction, regime):
-        """ボリンジャーバンド分析"""
+        """ボリンジャーバンド分析（完全トレンドフォロー戦略）"""
         signals = []
 
         # バンド位置計算
@@ -414,19 +402,14 @@ class OptimizedTradingLogic:
 
         bb_position = (price - bb_lower) / bb_width
 
-        if regime == 'TRENDING':
-            # トレンド相場：トレンド方向のみ
-            if trend_direction in ['UP', 'STRONG_UP'] and bb_position < 0.2:
-                signals.append(('BUY', 'BB Lower Uptrend', 0.7))
-            elif trend_direction in ['DOWN', 'STRONG_DOWN'] and bb_position > 0.8:
-                signals.append(('SELL', 'BB Upper Downtrend', 0.7))
-
-        elif regime == 'RANGING':
-            # レンジ相場：バンドタッチで逆張り
-            if bb_position < 0.1:
-                signals.append(('BUY', 'BB Bounce Range', 0.8))
-            elif bb_position > 0.9:
-                signals.append(('SELL', 'BB Rejection Range', 0.8))
+        # 全てのレジームでトレンドフォローのみ採用（逆張り完全禁止）
+        if trend_direction in ['UP', 'STRONG_UP'] and bb_position < 0.2:
+            # 上昇トレンド：下限付近で押し目買い
+            signals.append(('BUY', 'BB Lower Uptrend', 0.7))
+        elif trend_direction in ['DOWN', 'STRONG_DOWN'] and bb_position > 0.8:
+            # 下降トレンド：上限付近で戻り売り
+            signals.append(('SELL', 'BB Upper Downtrend', 0.7))
+        # NEUTRAL時やレンジ時は取引しない
 
         return signals
 
