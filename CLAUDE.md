@@ -1515,11 +1515,190 @@ reversal_thresholds = {
 
 ---
 
-**最終更新**: 2025年11月19日 16:30
+#### 20. **致命的バグ修正：逆張りロジック完全削除 - 純粋トレンドフォロー戦略へ** (2025年11月20日)
+**問題**: 勝率20%の壊滅的な成績、残高-32.1%の大損失
+
+**ユーザーからの重要な指摘**:
+「今のままでは、逆のロジックにした方が利益が出るようになってます。基本、トレンドに素直に付いて行く方針で、逆張りは、いらないです。」
+
+**詳細分析結果**:
+```
+取引成績（最新10件）:
+- 勝率: 20.0%（2勝7敗1引き分け）← 極端に低い
+- 純損益: -¥22
+- 残高: ¥730 → ¥496（-¥234、-32.1%の大損失）
+- 最大連敗: 6回連続
+
+取引パターン分析:
+【11/20の4連続損失】
+05:03 SELL開始 ¥24.88 → 04:59 決済 ¥24.94 = 損失¥-4
+02:09 SELL開始 ¥24.70 → 02:07 決済 ¥24.80 = 損失¥-4
+01:57 SELL開始 ¥24.55 → 01:54 決済 ¥24.58 = 損失¥-4
+00:38 SELL開始 ¥24.33 → 00:37 決済 ¥24.34 = 損失¥-6
+
+→ 市場は上昇中（¥24.13 → ¥24.88、+3.1%）なのにSELLシグナル連発
+→ 全て損失
+
+【11/19の成功例】
+21:11 BUY開始 ¥23.64 → 21:07 決済 ¥23.72 = 利益¥+2
+21:23 BUY開始 ¥24.08 → 21:21 決済 ¥23.98 = 利益¥+5
+
+→ 上昇トレンドでBUYシグナル = 正しい ✅
+```
+
+**シグナル逆転シミュレーション**:
+```
+現在のシグナル:
+- 勝率: 22.2%
+- 総損益: -¥18
+
+シグナルを逆にした場合:
+- 勝率: 55.6%（2.5倍改善）
+- 総損益: +¥3（黒字転換）
+
+→ ユーザーの指摘通り、シグナルを逆にした方が確実に利益が出る！
+```
+
+**根本原因の特定**:
+
+**1. RANGING判定時の逆張りが大損失を生んでいた**:
+```python
+# 問題のコード（optimized_trading_logic.py:361-366）
+elif regime == 'RANGING':
+    # レンジ相場：逆張り戦略
+    if rsi > overbought_level:
+        signals.append(('SELL', 'RSI Overbought Range', 0.7))  # ← 損失の主因
+```
+
+**発生メカニズム**:
+1. 市場：上昇中（¥24.13 → ¥24.88）
+2. TRENDING判定条件が厳しすぎる（EMA差 > 1.0%）
+3. RANGING判定される
+4. RSI > 70（買われすぎ）→ 逆張りSELL発動 ❌
+5. 価格が上昇 → 損失 ❌
+6. 連続6回 → 残高-32.1% ❌
+
+**2. ボリンジャーバンドの逆張りも同様の問題**:
+```python
+elif regime == 'RANGING':
+    if bb_position > 0.9:
+        signals.append(('SELL', 'BB Rejection Range', 0.8))  # ← 危険
+```
+
+---
+
+**実装した抜本的修正**:
+
+**修正1: RSI - 逆張り完全削除**
+```python
+# Before（3つのレジーム別ロジック）
+if regime == 'TRENDING':
+    # トレンドフォロー ✅
+elif regime == 'RANGING':
+    # 逆張り ❌ ← 削除
+elif regime == 'VOLATILE':
+    # 逆張り ❌ ← 削除
+
+# After（完全トレンドフォロー）
+def _analyze_rsi(self, rsi, trend_direction, regime, oversold_level, overbought_level):
+    """RSI分析（完全トレンドフォロー戦略）"""
+    signals = []
+
+    # 全てのレジームでトレンドフォローのみ採用（逆張り完全禁止）
+    if trend_direction in ['STRONG_DOWN', 'DOWN']:
+        # 下降トレンド：戻り売りのみ
+        if rsi > overbought_level:
+            signals.append(('SELL', 'RSI Pullback Downtrend', 0.8))
+    elif trend_direction in ['STRONG_UP', 'UP']:
+        # 上昇トレンド：押し目買いのみ
+        if rsi < oversold_level:
+            signals.append(('BUY', 'RSI Dip Uptrend', 0.8))
+    # NEUTRAL時は取引しない
+```
+
+**修正2: ボリンジャーバンド - 逆張り完全削除**
+```python
+# Before（レジーム別の逆張りあり）
+elif regime == 'RANGING':
+    if bb_position < 0.1:
+        signals.append(('BUY', 'BB Bounce Range', 0.8))  # ← 削除
+
+# After（完全トレンドフォロー）
+def _analyze_bollinger_bands(...):
+    """ボリンジャーバンド分析（完全トレンドフォロー戦略）"""
+
+    # 全てのレジームでトレンドフォローのみ採用
+    if trend_direction in ['UP', 'STRONG_UP'] and bb_position < 0.2:
+        signals.append(('BUY', 'BB Lower Uptrend', 0.7))
+    elif trend_direction in ['DOWN', 'STRONG_DOWN'] and bb_position > 0.8:
+        signals.append(('SELL', 'BB Upper Downtrend', 0.7))
+```
+
+**修正3: TRENDING判定条件を大幅緩和**
+```python
+# Before（厳しすぎる）
+elif abs(normalized_slope) > 0.01 and ema_diff_pct > 1.0:  # 両方必要
+    return 'TRENDING'
+
+# After（大幅緩和）
+elif abs(normalized_slope) > 0.01 and ema_diff_pct > 0.3:  # 1.0% → 0.3%
+    return 'TRENDING'
+```
+
+**修正4: 閾値の最適化**
+```python
+# Before
+'TRENDING': {'signal_threshold': 0.9}
+'RANGING': {'signal_threshold': 1.1}
+'VOLATILE': {'signal_threshold': 1.7}
+
+# After（トレンドフォロー専用で安全に緩和）
+'TRENDING': {'signal_threshold': 0.8}  # トレンドフォローは安全
+'RANGING': {'signal_threshold': 1.0}   # やや慎重
+'VOLATILE': {'signal_threshold': 1.5}  # 慎重
+```
+
+**修正5: リスク管理の改善**
+```python
+# ストップロス/テイクプロフィット
+'TRENDING': {
+    'stop_loss_atr_mult': 2.5,   # 3.0 → 2.5（早めの損切り）
+    'take_profit_atr_mult': 5.0  # 6.0 → 5.0（早めの利確）
+}
+```
+
+---
+
+**期待される効果**:
+
+✅ **勝率の大幅改善**: 20% → 50-60%を期待
+✅ **連続損失の防止**: 上昇トレンド中の逆張りSELL完全排除
+✅ **トレンドフォローに徹する**: 安全な順張り戦略のみ
+✅ **残高の回復**: ¥496 → ¥600以上を目指す
+✅ **シグナルの信頼性向上**: 市場と同じ方向にのみ取引
+
+**戦略の明確化**:
+- ❌ **禁止**: RSI overbought/oversold での逆張り
+- ❌ **禁止**: ボリンジャーバンド上限/下限での逆張り
+- ❌ **禁止**: RANGING判定時の逆張り
+- ✅ **許可**: 上昇トレンド中の押し目買いのみ
+- ✅ **許可**: 下降トレンド中の戻り売りのみ
+
+**修正ファイル**:
+- `services/optimized_trading_logic.py` - 全ての逆張りロジック削除、トレンドフォロー専用化
+
+**GitHubコミット**:
+- bb781d8 - 🔧 CRITICAL FIX: Eliminate counter-trend trading - Pure trend following only
+
+**解決**: 逆張りロジック完全削除、純粋トレンドフォロー戦略へ移行完了 ✅ **CRITICAL FIX**
+
+---
+
+**最終更新**: 2025年11月20日 01:58
 **ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
-**現在の残高**: JPY 551円
+**現在の残高**: JPY 496円（修正前）
 **ボット**: optimized-bot (PM2監視下) ※Railway環境で自動稼働中
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
-**最新修正**: 機会損失削減のための閾値最適化 ✅
+**最新修正**: 逆張りロジック完全削除 → 純粋トレンドフォロー戦略 ✅ **CRITICAL FIX**
