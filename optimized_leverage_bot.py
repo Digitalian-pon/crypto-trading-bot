@@ -99,10 +99,11 @@ class OptimizedLeverageTradingBot:
         any_closed = False
         reversal_signal = False
         tp_sl_closed = False
+        reversal_trade_type = None
 
         if positions:
             logger.info(f"Checking {len(positions)} positions for closing...")
-            any_closed, reversal_signal, tp_sl_closed = self._check_positions_for_closing(positions, current_price, df)
+            any_closed, reversal_signal, tp_sl_closed, reversal_trade_type = self._check_positions_for_closing(positions, current_price, df)
             # 決済後、ポジションを再取得
             positions = self.api.get_positions(symbol=self.symbol)
             logger.info(f"📊 Positions after close check: {len(positions)}")
@@ -111,7 +112,7 @@ class OptimizedLeverageTradingBot:
         self._display_performance_stats()
 
         # 5. 新規取引シグナルをチェック
-        # - 反転シグナルで決済された場合は即座にチェック（機会損失防止、逆注文）
+        # - 反転シグナルで決済された場合は即座にチェック（機会損失防止、逆注文を強制実行）
         # - TP/SL決済の場合は継続チェック（中程度の閾値）
         # - 全ポジション決済された場合もチェック
         # - ポジションがない場合もチェック
@@ -123,10 +124,10 @@ class OptimizedLeverageTradingBot:
         )
 
         if should_check_new_trade:
-            if reversal_signal:
-                logger.info("🔄 Position closed by reversal signal - checking for opposite position immediately...")
-                # 反転シグナル時は価格変動フィルターをスキップ、緩い閾値
-                self._check_for_new_trade(df, current_price, is_reversal=True)
+            if reversal_signal and reversal_trade_type:
+                logger.info(f"🔄 Position closed by reversal signal - FORCING {reversal_trade_type} order immediately...")
+                # 反転シグナル時は、シグナル再評価なしで強制的に反対注文を出す
+                self._place_forced_reversal_order(reversal_trade_type, current_price, df)
             elif tp_sl_closed:
                 logger.info("💰 Position closed by TP/SL - checking for continuation opportunity with moderate threshold...")
                 # TP/SL決済時は中程度の閾値で継続機会を検討
@@ -142,11 +143,12 @@ class OptimizedLeverageTradingBot:
         ポジション決済チェック（動的SL/TP使用）
 
         Returns:
-            (any_closed: bool, reversal_signal: bool, tp_sl_closed: bool)
+            (any_closed: bool, reversal_signal: bool, tp_sl_closed: bool, reversal_trade_type: str or None)
         """
         any_closed = False
         reversal_signal = False
         tp_sl_closed = False
+        reversal_trade_type = None  # 反転シグナルのタイプ（BUY/SELL）
 
         for position in positions:
             side = position.get('side')
@@ -174,7 +176,7 @@ class OptimizedLeverageTradingBot:
                 logger.warning(f"   No recorded SL/TP, using defaults: SL=¥{stop_loss:.2f}, TP=¥{take_profit:.2f}")
 
             # 決済条件チェック
-            should_close, reason = self._should_close_position(
+            should_close, reason, close_trade_type = self._should_close_position(
                 position, current_price, df.iloc[-1].to_dict(), pl_ratio, stop_loss, take_profit
             )
 
@@ -187,7 +189,8 @@ class OptimizedLeverageTradingBot:
                 if "Reversal" in reason or "reversal" in reason:
                     # 反転シグナルで決済された場合
                     reversal_signal = True
-                    logger.info(f"🔄 REVERSAL DETECTED - Will check for opposite position immediately")
+                    reversal_trade_type = close_trade_type  # 反転シグナルのタイプを記録
+                    logger.info(f"🔄 REVERSAL DETECTED - Will place {close_trade_type} order immediately")
                 elif "Take Profit" in reason or "Stop Loss" in reason:
                     # TP/SLで決済された場合
                     tp_sl_closed = True
@@ -200,24 +203,29 @@ class OptimizedLeverageTradingBot:
                 # 取引結果を記録
                 self.trading_logic.record_trade(side, entry_price, pl_ratio)
 
-        return any_closed, reversal_signal, tp_sl_closed
+        return any_closed, reversal_signal, tp_sl_closed, reversal_trade_type
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
-        """ポジション決済判定（動的SL/TP使用）"""
+        """
+        ポジション決済判定（動的SL/TP使用）
+
+        Returns:
+            (should_close: bool, reason: str, trade_type: str or None)
+        """
         side = position.get('side')
 
         # 動的ストップロス/テイクプロフィットチェック
         if side == 'BUY':
             if current_price <= stop_loss:
-                return True, f"Stop Loss Hit: ¥{current_price:.2f} <= ¥{stop_loss:.2f}"
+                return True, f"Stop Loss Hit: ¥{current_price:.2f} <= ¥{stop_loss:.2f}", None
             if current_price >= take_profit:
-                return True, f"Take Profit Hit: ¥{current_price:.2f} >= ¥{take_profit:.2f}"
+                return True, f"Take Profit Hit: ¥{current_price:.2f} >= ¥{take_profit:.2f}", None
 
         else:  # SELL
             if current_price >= stop_loss:
-                return True, f"Stop Loss Hit: ¥{current_price:.2f} >= ¥{stop_loss:.2f}"
+                return True, f"Stop Loss Hit: ¥{current_price:.2f} >= ¥{stop_loss:.2f}", None
             if current_price <= take_profit:
-                return True, f"Take Profit Hit: ¥{current_price:.2f} <= ¥{take_profit:.2f}"
+                return True, f"Take Profit Hit: ¥{current_price:.2f} <= ¥{take_profit:.2f}", None
 
         # 最小価格変動チェック（手数料負け防止）
         entry_price = float(position.get('price', 0))
@@ -225,7 +233,7 @@ class OptimizedLeverageTradingBot:
 
         if price_change_ratio < 0.01:  # 1.0%未満では決済しない（0.5% → 1.0%に引き上げ）
             logger.info(f"   → Price change too small ({price_change_ratio*100:.2f}% < 1.0%) - holding")
-            return False, "Price change too small"
+            return False, "Price change too small", None
 
         # 反転シグナルチェック（決済判定用 - 緩い閾値とフィルタースキップ）
         # skip_price_filter=True により、価格フィルター＋閾値の両方が緩和される
@@ -238,11 +246,11 @@ class OptimizedLeverageTradingBot:
         # 決済判定の閾値: 0.8（新規取引より緩い）- トレンド転換を確実に捉える
         if should_trade and trade_type and confidence >= 0.8:
             if side == 'BUY' and trade_type.upper() == 'SELL':
-                return True, f"Strong Reversal: SELL (confidence={confidence:.2f})"
+                return True, f"Strong Reversal: SELL (confidence={confidence:.2f})", 'SELL'
             elif side == 'SELL' and trade_type.upper() == 'BUY':
-                return True, f"Strong Reversal: BUY (confidence={confidence:.2f})"
+                return True, f"Strong Reversal: BUY (confidence={confidence:.2f})", 'BUY'
 
-        return False, "No close signal"
+        return False, "No close signal", None
 
     def _close_position(self, position, current_price, reason):
         """ポジション決済"""
@@ -271,6 +279,69 @@ class OptimizedLeverageTradingBot:
 
         except Exception as e:
             logger.error(f"Error closing position: {e}", exc_info=True)
+
+    def _place_forced_reversal_order(self, trade_type, current_price, df):
+        """
+        トレンド転換時の強制反対注文
+
+        Args:
+            trade_type: 注文タイプ（BUY/SELL）- 反転シグナルで決済された時のシグナルタイプ
+            current_price: 現在価格
+            df: 市場データのDataFrame
+        """
+        logger.info(f"💥 FORCING {trade_type} ORDER - No signal re-evaluation")
+
+        # 残高確認
+        balance = self.api.get_account_balance()
+        available_jpy = 0
+
+        if 'data' in balance:
+            for asset in balance['data']:
+                if asset['symbol'] == 'JPY':
+                    available_jpy = float(asset['available'])
+
+        logger.info(f"💰 Available JPY: ¥{available_jpy:.2f}")
+
+        if available_jpy < 100:
+            logger.warning("⚠️  Insufficient JPY balance for reversal order")
+            return
+
+        # ポジションサイズ計算（残高の95%）
+        max_jpy = available_jpy * 0.95
+        max_doge_quantity = int(max_jpy / current_price)
+        trade_size = max(10, (max_doge_quantity // 10) * 10)  # 10DOGE単位
+
+        # 動的SL/TP計算（ATRベース）
+        last_row = df.iloc[-1].to_dict()
+
+        # ATR取得
+        atr = self.trading_logic._calculate_atr_from_data(df)
+
+        # 市場レジーム取得
+        regime = self.trading_logic._detect_market_regime(last_row, df)
+        regime_config = self.trading_logic.regime_params.get(regime, self.trading_logic.regime_params['RANGING'])
+
+        # SL/TP計算
+        if trade_type.upper() == 'BUY':
+            stop_loss = current_price - (atr * regime_config['stop_loss_atr_mult'])
+            take_profit = current_price + (atr * regime_config['take_profit_atr_mult'])
+        else:  # SELL
+            stop_loss = current_price + (atr * regime_config['stop_loss_atr_mult'])
+            take_profit = current_price - (atr * regime_config['take_profit_atr_mult'])
+
+        logger.info(f"🎯 FORCED {trade_type.upper()} order: {trade_size} DOGE")
+        logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")
+        logger.info(f"   Reason: Trend Reversal - Forced Opposite Position")
+
+        # 注文実行
+        success = self._place_order(trade_type, trade_size, current_price,
+                                    f"Forced {trade_type.upper()} on trend reversal",
+                                    stop_loss, take_profit)
+
+        if success:
+            # 取引記録
+            self.trading_logic.record_trade(trade_type, current_price)
+            logger.info(f"✅ Forced reversal order completed successfully")
 
     def _check_for_new_trade(self, df, current_price, is_reversal=False, is_tpsl_continuation=False):
         """

@@ -346,7 +346,7 @@ class OptimizedTradingLogic:
             return {'direction': 'NEUTRAL', 'strength': 0.0, 'quality': 0.0}
 
     def _analyze_rsi(self, rsi, trend_direction, regime, oversold_level, overbought_level):
-        """RSI分析（完全トレンドフォロー戦略）"""
+        """RSI分析（完全トレンドフォロー戦略 + NEUTRAL時の慎重な取引許可）"""
         signals = []
 
         # 全てのレジームでトレンドフォローのみ採用（逆張り完全禁止）
@@ -358,7 +358,14 @@ class OptimizedTradingLogic:
             # 上昇トレンド：押し目買いのみ
             if rsi < oversold_level:
                 signals.append(('BUY', 'RSI Dip Uptrend', 0.8))
-        # NEUTRAL時は取引しない（明確なトレンドがない）
+        elif trend_direction == 'NEUTRAL':
+            # NEUTRAL時: 極端な値のみ慎重に取引（閾値が高いため複数インジケーター一致が必要）
+            if rsi < 25:
+                # 極端な売られすぎ
+                signals.append(('BUY', 'RSI Extreme Oversold', 0.5))
+            elif rsi > 75:
+                # 極端な買われすぎ
+                signals.append(('SELL', 'RSI Extreme Overbought', 0.5))
 
         return signals
 
