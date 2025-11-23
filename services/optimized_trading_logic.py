@@ -359,13 +359,13 @@ class OptimizedTradingLogic:
             if rsi < oversold_level:
                 signals.append(('BUY', 'RSI Dip Uptrend', 0.8))
         elif trend_direction == 'NEUTRAL':
-            # NEUTRAL時: 極端な値のみ慎重に取引（閾値が高いため複数インジケーター一致が必要）
+            # NEUTRAL時: 極端な値で取引（単独でも閾値を超える強いシグナル）
             if rsi < 25:
-                # 極端な売られすぎ
-                signals.append(('BUY', 'RSI Extreme Oversold', 0.5))
+                # 極端な売られすぎ → 強いBUYシグナル
+                signals.append(('BUY', 'RSI Extreme Oversold', 1.2))
             elif rsi > 75:
-                # 極端な買われすぎ
-                signals.append(('SELL', 'RSI Extreme Overbought', 0.5))
+                # 極端な買われすぎ → 強いSELLシグナル
+                signals.append(('SELL', 'RSI Extreme Overbought', 1.2))
 
         return signals
 
@@ -383,18 +383,18 @@ class OptimizedTradingLogic:
         if is_bullish_cross:
             # 上昇トレンドまたは中立時のみ採用
             if trend_direction in ['UP', 'STRONG_UP', 'NEUTRAL']:
-                if histogram_strength > 1.0:
-                    signals.append(('BUY', 'MACD Strong Bullish', 1.5))
-                elif histogram_strength > 0.3:
-                    signals.append(('BUY', 'MACD Bullish', 1.0))
+                if histogram_strength > 0.05:  # 1.0 → 0.05（DOGE_JPY向けに調整）
+                    signals.append(('BUY', 'MACD Strong Bullish', 1.0))
+                elif histogram_strength > 0.01:  # 0.3 → 0.01（DOGE_JPY向けに調整）
+                    signals.append(('BUY', 'MACD Bullish', 0.7))
 
         elif is_bearish_cross:
             # 下降トレンドまたは中立時のみ採用
             if trend_direction in ['DOWN', 'STRONG_DOWN', 'NEUTRAL']:
-                if histogram_strength > 1.0:
-                    signals.append(('SELL', 'MACD Strong Bearish', 1.5))
-                elif histogram_strength > 0.3:
-                    signals.append(('SELL', 'MACD Bearish', 1.0))
+                if histogram_strength > 0.05:  # 1.0 → 0.05（DOGE_JPY向けに調整）
+                    signals.append(('SELL', 'MACD Strong Bearish', 1.0))
+                elif histogram_strength > 0.01:  # 0.3 → 0.01（DOGE_JPY向けに調整）
+                    signals.append(('SELL', 'MACD Bearish', 0.7))
 
         return signals
 
