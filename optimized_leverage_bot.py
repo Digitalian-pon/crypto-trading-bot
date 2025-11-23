@@ -213,6 +213,22 @@ class OptimizedLeverageTradingBot:
             (should_close: bool, reason: str, trade_type: str or None)
         """
         side = position.get('side')
+        size = position.get('size')
+        entry_price = float(position.get('price', 0))
+
+        # 【最優先】最小利益確保チェック（手数料負け防止）
+        # 往復手数料¥2を考慮し、純利益¥3以上で即座に利確
+        if side == 'BUY':
+            profit_jpy = size * (current_price - entry_price)
+        else:  # SELL
+            profit_jpy = size * (entry_price - current_price)
+
+        # 往復手数料を引いた純利益
+        net_profit = profit_jpy - 2.0  # 往復手数料¥2
+
+        if net_profit >= 3.0:
+            logger.info(f"   💰 Minimum profit target reached: ¥{net_profit:.2f} (≥¥3)")
+            return True, f"Minimum Profit Target: ¥{net_profit:.2f}", None
 
         # 動的ストップロス/テイクプロフィットチェック
         if side == 'BUY':
@@ -228,7 +244,6 @@ class OptimizedLeverageTradingBot:
                 return True, f"Take Profit Hit: ¥{current_price:.2f} <= ¥{take_profit:.2f}", None
 
         # 最小価格変動チェック（手数料負け防止）
-        entry_price = float(position.get('price', 0))
         price_change_ratio = abs(current_price - entry_price) / entry_price
 
         if price_change_ratio < 0.01:  # 1.0%未満では決済しない（0.5% → 1.0%に引き上げ）
