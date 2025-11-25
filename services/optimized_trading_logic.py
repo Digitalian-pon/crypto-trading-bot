@@ -346,31 +346,36 @@ class OptimizedTradingLogic:
             return {'direction': 'NEUTRAL', 'strength': 0.0, 'quality': 0.0}
 
     def _analyze_rsi(self, rsi, trend_direction, regime, oversold_level, overbought_level):
-        """RSI分析（完全トレンドフォロー戦略 + NEUTRAL時の慎重な取引許可）"""
+        """RSI分析（補助インジケーター - 低重み付け）"""
         signals = []
+
+        # RSI計算エラー時はスキップ
+        if rsi is None or rsi == 0 or not isinstance(rsi, (int, float)):
+            logger.warning(f"⚠️ RSI calculation error or missing - skipping RSI analysis")
+            return signals
 
         # 全てのレジームでトレンドフォローのみ採用（逆張り完全禁止）
         if trend_direction in ['STRONG_DOWN', 'DOWN']:
             # 下降トレンド：戻り売りのみ
             if rsi > overbought_level:
-                signals.append(('SELL', 'RSI Pullback Downtrend', 0.8))
+                signals.append(('SELL', 'RSI Pullback Downtrend', 0.4))  # 0.8 → 0.4（補助指標化）
         elif trend_direction in ['STRONG_UP', 'UP']:
             # 上昇トレンド：押し目買いのみ
             if rsi < oversold_level:
-                signals.append(('BUY', 'RSI Dip Uptrend', 0.8))
+                signals.append(('BUY', 'RSI Dip Uptrend', 0.4))  # 0.8 → 0.4（補助指標化）
         elif trend_direction == 'NEUTRAL':
-            # NEUTRAL時: 極端な値で取引（単独でも閾値を超える強いシグナル）
+            # NEUTRAL時: 極端な値で取引（補助シグナル）
             if rsi < 25:
-                # 極端な売られすぎ → 強いBUYシグナル
-                signals.append(('BUY', 'RSI Extreme Oversold', 1.2))
+                # 極端な売られすぎ → 補助BUYシグナル
+                signals.append(('BUY', 'RSI Extreme Oversold', 0.6))  # 1.2 → 0.6（補助指標化）
             elif rsi > 75:
-                # 極端な買われすぎ → 強いSELLシグナル
-                signals.append(('SELL', 'RSI Extreme Overbought', 1.2))
+                # 極端な買われすぎ → 補助SELLシグナル
+                signals.append(('SELL', 'RSI Extreme Overbought', 0.6))  # 1.2 → 0.6（補助指標化）
 
         return signals
 
     def _analyze_macd(self, macd_line, macd_signal, macd_histogram, trend_direction, regime):
-        """MACD分析（ヒストグラム重視）"""
+        """MACD分析（主要インジケーター - 最高重み付け）"""
         signals = []
 
         # MACDクロス検出
@@ -383,23 +388,29 @@ class OptimizedTradingLogic:
         if is_bullish_cross:
             # 上昇トレンドまたは中立時のみ採用
             if trend_direction in ['UP', 'STRONG_UP', 'NEUTRAL']:
-                if histogram_strength > 0.05:  # 1.0 → 0.05（DOGE_JPY向けに調整）
-                    signals.append(('BUY', 'MACD Strong Bullish', 1.0))
-                elif histogram_strength > 0.01:  # 0.3 → 0.01（DOGE_JPY向けに調整）
-                    signals.append(('BUY', 'MACD Bullish', 0.7))
+                if histogram_strength > 0.03:  # 強いシグナル
+                    signals.append(('BUY', 'MACD Strong Bullish', 2.5))  # 1.0 → 2.5（主要指標化）
+                elif histogram_strength > 0.005:  # 通常シグナル（閾値を0.01→0.005に下げて感度向上）
+                    signals.append(('BUY', 'MACD Bullish', 1.8))  # 0.7 → 1.8（主要指標化）
+                else:
+                    # 弱いクロスでも記録
+                    signals.append(('BUY', 'MACD Weak Cross', 1.2))  # 新規追加
 
         elif is_bearish_cross:
             # 下降トレンドまたは中立時のみ採用
             if trend_direction in ['DOWN', 'STRONG_DOWN', 'NEUTRAL']:
-                if histogram_strength > 0.05:  # 1.0 → 0.05（DOGE_JPY向けに調整）
-                    signals.append(('SELL', 'MACD Strong Bearish', 1.0))
-                elif histogram_strength > 0.01:  # 0.3 → 0.01（DOGE_JPY向けに調整）
-                    signals.append(('SELL', 'MACD Bearish', 0.7))
+                if histogram_strength > 0.03:  # 強いシグナル
+                    signals.append(('SELL', 'MACD Strong Bearish', 2.5))  # 1.0 → 2.5（主要指標化）
+                elif histogram_strength > 0.005:  # 通常シグナル（閾値を0.01→0.005に下げて感度向上）
+                    signals.append(('SELL', 'MACD Bearish', 1.8))  # 0.7 → 1.8（主要指標化）
+                else:
+                    # 弱いクロスでも記録
+                    signals.append(('SELL', 'MACD Weak Cross', 1.2))  # 新規追加
 
         return signals
 
     def _analyze_bollinger_bands(self, price, bb_upper, bb_lower, bb_middle, trend_direction, regime):
-        """ボリンジャーバンド分析（完全トレンドフォロー戦略）"""
+        """ボリンジャーバンド分析（補助インジケーター）"""
         signals = []
 
         # バンド位置計算
@@ -412,27 +423,27 @@ class OptimizedTradingLogic:
         # 全てのレジームでトレンドフォローのみ採用（逆張り完全禁止）
         if trend_direction in ['UP', 'STRONG_UP'] and bb_position < 0.2:
             # 上昇トレンド：下限付近で押し目買い
-            signals.append(('BUY', 'BB Lower Uptrend', 0.7))
+            signals.append(('BUY', 'BB Lower Uptrend', 0.5))  # 0.7 → 0.5（補助指標化）
         elif trend_direction in ['DOWN', 'STRONG_DOWN'] and bb_position > 0.8:
             # 下降トレンド：上限付近で戻り売り
-            signals.append(('SELL', 'BB Upper Downtrend', 0.7))
+            signals.append(('SELL', 'BB Upper Downtrend', 0.5))  # 0.7 → 0.5（補助指標化）
         # NEUTRAL時やレンジ時は取引しない
 
         return signals
 
     def _analyze_ema(self, price, ema_20, ema_50, trend_strength):
-        """EMA分析"""
+        """EMA分析（補助インジケーター）"""
         signals = []
 
         # EMA配置確認
         if ema_20 > ema_50 * 1.01:  # 明確な上昇配置
             if price > ema_20 * 1.005:
-                weight = 0.5 + min(0.5, abs(trend_strength) * 10)
+                weight = 0.3 + min(0.3, abs(trend_strength) * 10)  # 0.5-1.0 → 0.3-0.6（補助指標化）
                 signals.append(('BUY', 'EMA Bullish Align', weight))
 
         elif ema_20 < ema_50 * 0.99:  # 明確な下降配置
             if price < ema_20 * 0.995:
-                weight = 0.5 + min(0.5, abs(trend_strength) * 10)
+                weight = 0.3 + min(0.3, abs(trend_strength) * 10)  # 0.5-1.0 → 0.3-0.6（補助指標化）
                 signals.append(('SELL', 'EMA Bearish Align', weight))
 
         return signals
