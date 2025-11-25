@@ -210,23 +210,31 @@ class FixedTradingBot:
             # Use exchange positions instead of DB for trade management
             active_trades = []
 
-        # 【根本修正】ポジション状態機械による厳格制御
+        # 【修正版】シグナルベース決済を優先し、ポジション状態を確認
         logger.info("🔄 Starting position state machine control...")
 
-        # ポジション存在時は新規注文を完全禁止し、決済のみ実行
+        # ポジション存在時も、まずシグナルベースの決済チェックを実行
         if has_exchange_position:
-            logger.info(f"🚨 POSITION STATE: {len(exchange_positions)} positions exist - BLOCKING all new orders")
+            logger.info(f"🚨 POSITION STATE: {len(exchange_positions)} positions exist")
 
-            # 既存ポジションの決済チェックのみ実行
-            self._check_existing_positions_for_closure_only(exchange_positions, current_price, latest_indicators)
+            # シグナルベースの逆シグナル決済チェック（_check_for_new_trade内で実行）
+            logger.info("🔍 Checking for opposite signal closure...")
+            self._check_for_new_trade(df, symbol, current_price)
 
-            # 強制的に新規注文をブロック
-            logger.info("🛑 NEW ORDER BLOCKED: Cannot place new orders while positions exist")
-            return
+            # 決済後のポジション状態を再確認
+            exchange_positions = self._get_exchange_positions(symbol)
+            has_exchange_position = len(exchange_positions) > 0
 
-        # ポジション0個の場合のみ新規注文許可
-        logger.info("✅ POSITION STATE: No positions - new orders allowed")
-        self._check_for_new_trade(df, symbol, current_price)
+            # まだポジションが残っている場合は、損切り・利確チェックも実行
+            if has_exchange_position:
+                logger.info(f"📊 Still have {len(exchange_positions)} positions after signal check - checking SL/TP...")
+                self._check_existing_positions_for_closure_only(exchange_positions, current_price, latest_indicators)
+            else:
+                logger.info("✅ All positions closed by signal - ready for new trades")
+        else:
+            # ポジション0個の場合は通常通り新規注文チェック
+            logger.info("✅ POSITION STATE: No positions - checking for new trade opportunities")
+            self._check_for_new_trade(df, symbol, current_price)
 
         # Only open new trades if no active trades AND no exchange positions
         if len(active_trades) == 0 and not has_exchange_position:
