@@ -45,7 +45,7 @@ class OptimizedLeverageTradingBot:
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
         self.timeframe = config.get('trading', 'default_timeframe', fallback='5m')
-        self.interval = 300  # チェック間隔（秒）- 5分（手数料負け防止のため延長）
+        self.interval = 60  # チェック間隔（秒）- 1分（価格変動に素早く対応）
 
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
@@ -261,18 +261,8 @@ class OptimizedLeverageTradingBot:
 
         logger.info(f"      SL/TP not hit")
 
-        # 最小価格変動チェック（手数料負け防止）
-        price_change_ratio = abs(current_price - entry_price) / entry_price
-        logger.info(f"      Price change: {price_change_ratio*100:.2f}%")
-        logger.info(f"      Checking: price_change ({price_change_ratio*100:.2f}%) >= 1.0%?")
-
-        if price_change_ratio < 0.01:  # 1.0%未満では決済しない（0.5% → 1.0%に引き上げ）
-            logger.info(f"   ❌ Price change too small ({price_change_ratio*100:.2f}% < 1.0%) - holding")
-            return False, "Price change too small", None
-        else:
-            logger.info(f"      ✓ Price change sufficient ({price_change_ratio*100:.2f}% >= 1.0%)")
-
         # 反転シグナルチェック（決済判定用 - 緩い閾値とフィルタースキップ）
+        # 注: 価格変動フィルターは削除（純利益チェックで十分）
         # skip_price_filter=True により、価格フィルター＋閾値の両方が緩和される
         logger.info(f"      Checking reversal signal...")
         should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(
