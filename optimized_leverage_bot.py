@@ -216,6 +216,11 @@ class OptimizedLeverageTradingBot:
         size = position.get('size')
         entry_price = float(position.get('price', 0))
 
+        logger.info(f"   📊 Closure Decision Analysis:")
+        logger.info(f"      Position: {side} {size} @ ¥{entry_price:.3f}")
+        logger.info(f"      Current Price: ¥{current_price:.3f}")
+        logger.info(f"      P/L Ratio: {pl_ratio*100:.2f}%")
+
         # 【最優先】最小利益確保チェック（手数料負け防止）
         # 往復手数料¥2を考慮し、純利益¥3以上で即座に利確
         if side == 'BUY':
@@ -226,45 +231,76 @@ class OptimizedLeverageTradingBot:
         # 往復手数料を引いた純利益
         net_profit = profit_jpy - 2.0  # 往復手数料¥2
 
+        logger.info(f"      Gross Profit: ¥{profit_jpy:.2f}")
+        logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
+        logger.info(f"      Checking: net_profit ({net_profit:.2f}) >= 3.0?")
+
         if net_profit >= 3.0:
-            logger.info(f"   💰 Minimum profit target reached: ¥{net_profit:.2f} (≥¥3)")
+            logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥3)")
             return True, f"Minimum Profit Target: ¥{net_profit:.2f}", None
+        else:
+            logger.info(f"   ❌ Net profit too small: ¥{net_profit:.2f} < ¥3.0")
 
         # 動的ストップロス/テイクプロフィットチェック
+        logger.info(f"      SL: ¥{stop_loss:.3f}, TP: ¥{take_profit:.3f}")
         if side == 'BUY':
             if current_price <= stop_loss:
+                logger.info(f"   ✅ CLOSE DECISION: Stop Loss Hit (¥{current_price:.2f} <= ¥{stop_loss:.2f})")
                 return True, f"Stop Loss Hit: ¥{current_price:.2f} <= ¥{stop_loss:.2f}", None
             if current_price >= take_profit:
+                logger.info(f"   ✅ CLOSE DECISION: Take Profit Hit (¥{current_price:.2f} >= ¥{take_profit:.2f})")
                 return True, f"Take Profit Hit: ¥{current_price:.2f} >= ¥{take_profit:.2f}", None
 
         else:  # SELL
             if current_price >= stop_loss:
+                logger.info(f"   ✅ CLOSE DECISION: Stop Loss Hit (¥{current_price:.2f} >= ¥{stop_loss:.2f})")
                 return True, f"Stop Loss Hit: ¥{current_price:.2f} >= ¥{stop_loss:.2f}", None
             if current_price <= take_profit:
+                logger.info(f"   ✅ CLOSE DECISION: Take Profit Hit (¥{current_price:.2f} <= ¥{take_profit:.2f})")
                 return True, f"Take Profit Hit: ¥{current_price:.2f} <= ¥{take_profit:.2f}", None
+
+        logger.info(f"      SL/TP not hit")
 
         # 最小価格変動チェック（手数料負け防止）
         price_change_ratio = abs(current_price - entry_price) / entry_price
+        logger.info(f"      Price change: {price_change_ratio*100:.2f}%")
+        logger.info(f"      Checking: price_change ({price_change_ratio*100:.2f}%) >= 1.0%?")
 
         if price_change_ratio < 0.01:  # 1.0%未満では決済しない（0.5% → 1.0%に引き上げ）
-            logger.info(f"   → Price change too small ({price_change_ratio*100:.2f}% < 1.0%) - holding")
+            logger.info(f"   ❌ Price change too small ({price_change_ratio*100:.2f}% < 1.0%) - holding")
             return False, "Price change too small", None
+        else:
+            logger.info(f"      ✓ Price change sufficient ({price_change_ratio*100:.2f}% >= 1.0%)")
 
         # 反転シグナルチェック（決済判定用 - 緩い閾値とフィルタースキップ）
         # skip_price_filter=True により、価格フィルター＋閾値の両方が緩和される
+        logger.info(f"      Checking reversal signal...")
         should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(
             indicators, None, skip_price_filter=True
         )
 
-        logger.info(f"   → Reversal check: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
+        logger.info(f"      Reversal result: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}, reason={reason}")
 
         # 決済判定の閾値: 0.8（新規取引より緩い）- トレンド転換を確実に捉える
         if should_trade and trade_type and confidence >= 0.8:
+            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= 0.8")
             if side == 'BUY' and trade_type.upper() == 'SELL':
+                logger.info(f"   ✅ CLOSE DECISION: Strong Reversal SELL (confidence={confidence:.2f})")
                 return True, f"Strong Reversal: SELL (confidence={confidence:.2f})", 'SELL'
             elif side == 'SELL' and trade_type.upper() == 'BUY':
+                logger.info(f"   ✅ CLOSE DECISION: Strong Reversal BUY (confidence={confidence:.2f})")
                 return True, f"Strong Reversal: BUY (confidence={confidence:.2f})", 'BUY'
+            else:
+                logger.info(f"      Signal direction doesn't match position (pos={side}, sig={trade_type})")
+        else:
+            if not should_trade:
+                logger.info(f"      No reversal signal detected")
+            elif not trade_type:
+                logger.info(f"      No trade type in signal")
+            else:
+                logger.info(f"      Confidence too low: {confidence:.2f} < 0.8")
 
+        logger.info(f"   ❌ No close signal - position will be held")
         return False, "No close signal", None
 
     def _close_position(self, position, current_price, reason):
