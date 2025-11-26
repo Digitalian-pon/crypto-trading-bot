@@ -152,7 +152,7 @@ class OptimizedLeverageTradingBot:
 
         for position in positions:
             side = position.get('side')
-            size = position.get('size')
+            size = float(position.get('size', 0))  # 文字列→floatに変換（重要！）
             entry_price = float(position.get('price', 0))
             position_id = position.get('positionId')
 
@@ -213,7 +213,7 @@ class OptimizedLeverageTradingBot:
             (should_close: bool, reason: str, trade_type: str or None)
         """
         side = position.get('side')
-        size = position.get('size')
+        size = float(position.get('size', 0))  # 文字列→floatに変換（重要！）
         entry_price = float(position.get('price', 0))
 
         logger.info(f"   📊 Closure Decision Analysis:")
@@ -298,7 +298,7 @@ class OptimizedLeverageTradingBot:
         try:
             symbol = position.get('symbol')
             side = position.get('side')
-            size = position.get('size')
+            size = float(position.get('size', 0))  # 文字列→floatに変換（重要！）
             position_id = position.get('positionId')
 
             close_side = "SELL" if side == "BUY" else "BUY"
