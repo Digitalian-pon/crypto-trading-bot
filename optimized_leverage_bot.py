@@ -69,16 +69,20 @@ class OptimizedLeverageTradingBot:
 
     def _trading_cycle(self):
         """1回の取引サイクル"""
-        # ボット稼働状況をファイルに記録（Railwayログ確認用）
+        cycle_time = datetime.now()
+
+        # ボット稼働状況をログファイルに記録（ダッシュボードで表示可能）
         try:
-            with open('/tmp/bot_status.txt', 'w') as f:
-                f.write(f"LAST_RUN={datetime.now().isoformat()}\n")
-                f.write(f"INTERVAL={self.interval}\n")
-        except:
-            pass
+            log_file = 'bot_execution_log.txt'
+            with open(log_file, 'a') as f:
+                f.write(f"\n{'='*70}\n")
+                f.write(f"CYCLE_START: {cycle_time.isoformat()}\n")
+                f.write(f"INTERVAL: {self.interval}s\n")
+        except Exception as e:
+            logger.error(f"Failed to write log file: {e}")
 
         logger.info(f"\n{'='*70}")
-        logger.info(f"🔄 Trading Cycle - {datetime.now()}")
+        logger.info(f"🔄 Trading Cycle - {cycle_time}")
         logger.info(f"{'='*70}")
 
         # 1. 市場データ取得（過去100本）
@@ -243,12 +247,33 @@ class OptimizedLeverageTradingBot:
         logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
         logger.info(f"      Checking: net_profit ({net_profit:.2f}) >= 3.0?")
 
+        # ログファイルに決済判定を記録
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"POSITION_CHECK: {side} {size} @ ¥{entry_price:.3f}\n")
+                f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
+                f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
+                f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
+                f.write(f"THRESHOLD: ¥3.0\n")
+        except:
+            pass
+
         # 純利益が¥3以上なら即座に決済
         if net_profit >= 3.0:
             logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥3)")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥3.0)\n")
+            except:
+                pass
             return True, f"Minimum Profit Target: ¥{net_profit:.2f}", None
         else:
             logger.info(f"   ❌ Net profit too small: ¥{net_profit:.2f} < ¥3.0")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥3.0)\n")
+            except:
+                pass
 
         # 動的ストップロス/テイクプロフィットチェック
         logger.info(f"      SL: ¥{stop_loss:.3f}, TP: ¥{take_profit:.3f}")

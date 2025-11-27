@@ -529,6 +529,29 @@ def get_dashboard_instance():
 class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         try:
+            # ログエンドポイント
+            if self.path == '/logs':
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+
+                try:
+                    # ボット実行ログを読み込み
+                    if os.path.exists('bot_execution_log.txt'):
+                        with open('bot_execution_log.txt', 'r') as f:
+                            log_content = f.read()
+                        # 最新1000行のみ表示
+                        lines = log_content.split('\n')
+                        recent_lines = lines[-1000:] if len(lines) > 1000 else lines
+                        self.wfile.write('\n'.join(recent_lines).encode('utf-8'))
+                    else:
+                        self.wfile.write(b'No log file found. Bot may not be running.')
+                except Exception as e:
+                    self.wfile.write(f'Error reading log: {str(e)}'.encode('utf-8'))
+                return
+
+            # 通常のダッシュボード
             # Use shared dashboard instance
             dashboard = get_dashboard_instance()
 
