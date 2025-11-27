@@ -34,20 +34,30 @@ logger = logging.getLogger(__name__)
 
 def run_trading_bot():
     """最適化されたDOGE_JPYレバレッジ取引ボットを実行"""
-    try:
-        logger.info("Starting Optimized DOGE_JPY Leverage Trading Bot...")
-        logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
-        from optimized_leverage_bot import OptimizedLeverageTradingBot
+    while True:  # 永続ループ（確実に動作させる）
+        try:
+            logger.info("="*70)
+            logger.info("🤖 TRADING BOT STARTING...")
+            logger.info("="*70)
+            logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
+            from optimized_leverage_bot import OptimizedLeverageTradingBot
 
-        bot = OptimizedLeverageTradingBot()
-        bot.run()
-    except Exception as e:
-        logger.error(f"Trading bot error: {e}", exc_info=True)
-        # エラー時も継続稼働するため、再起動を試みる
-        import time
-        time.sleep(60)
-        logger.info("Attempting to restart trading bot...")
-        run_trading_bot()
+            bot = OptimizedLeverageTradingBot()
+            logger.info("✅ Bot instance created successfully")
+            bot.run()  # これは無限ループ
+        except KeyboardInterrupt:
+            logger.info("🛑 Bot stopped by user")
+            break
+        except Exception as e:
+            logger.error(f"❌ CRITICAL BOT ERROR: {e}", exc_info=True)
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error details: {str(e)}")
+            # エラー時も継続稼働するため、60秒待って再起動
+            import time
+            logger.info("⏳ Waiting 60 seconds before restart...")
+            time.sleep(60)
+            logger.info("🔄 Attempting to restart trading bot...")
+            # ループが続くので自動的に再起動される
 
 def run_dashboard():
     """DOGE_JPYレバレッジダッシュボードを実行"""

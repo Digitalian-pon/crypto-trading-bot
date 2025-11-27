@@ -243,12 +243,12 @@ class OptimizedLeverageTradingBot:
         logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
         logger.info(f"      Checking: net_profit ({net_profit:.2f}) >= 3.0?")
 
-        # 緊急テスト：純利益が0以上なら即座に決済（デバッグ用）
-        if net_profit >= 0.0:
-            logger.info(f"   ✅ EMERGENCY CLOSE: Net profit ¥{net_profit:.2f} >= ¥0 - FORCING CLOSE")
-            return True, f"Emergency Close: Net Profit ¥{net_profit:.2f}", None
+        # 純利益が¥3以上なら即座に決済
+        if net_profit >= 3.0:
+            logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥3)")
+            return True, f"Minimum Profit Target: ¥{net_profit:.2f}", None
         else:
-            logger.info(f"   ❌ Net profit negative: ¥{net_profit:.2f} < ¥0")
+            logger.info(f"   ❌ Net profit too small: ¥{net_profit:.2f} < ¥3.0")
 
         # 動的ストップロス/テイクプロフィットチェック
         logger.info(f"      SL: ¥{stop_loss:.3f}, TP: ¥{take_profit:.3f}")
