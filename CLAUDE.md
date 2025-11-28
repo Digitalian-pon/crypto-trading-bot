@@ -9,10 +9,11 @@
 ## 🌐 稼働中システム情報
 - **ローカルダッシュボード**: http://localhost:8082 ✅ **正常稼働中**
 - **Railwayダッシュボード**: https://web-production-1f4ce.up.railway.app/ ✅ **24時間稼働中**
+- **Railwayログ監視（改善版）**: https://web-production-1f4ce.up.railway.app/logs ⭐NEW
 - **GitHub**: https://github.com/Digitalian-pon/crypto-trading-bot
 - **監視通貨**: **DOGE/JPY** (レバレッジ取引)
-- **時間足**: 5分足（短期トレード）
-- **更新間隔**: 180秒間隔でシグナルチェック（最適化版）
+- **時間足**: **4時間足（長期トレード）** ⭐2025/11/28変更
+- **更新間隔**: 300秒（5分）間隔でシグナルチェック ⭐2025/11/28変更
 - **トレーディングロジック**: OptimizedTradingLogic（市場レジーム検出・動的SL/TP）
 
 ## 💰 アカウント情報
@@ -70,7 +71,7 @@ crypto-trading-bot/
 
 ### 主要機能:
 - ✅ DOGE/JPYレバレッジ取引（BUY/SELL両方向）
-- ✅ 5分足短期トレンド分析
+- ✅ **4時間足長期トレンド分析** ⭐2025/11/28変更
 - ✅ 最適化トレンドフォロー戦略（落ちるナイフ回避）
 - ✅ 市場レジーム自動検出（TRENDING/RANGING/VOLATILE） ⭐NEW
 - ✅ ATRベース動的損切り・利確システム ⭐NEW
@@ -80,6 +81,7 @@ crypto-trading-bot/
 - ✅ リアルタイム価格監視
 - ✅ 技術指標分析 (RSI, MACD, ボリンジャーバンド, EMA)
 - ✅ ウェブダッシュボード (PC/スマホ対応)
+- ✅ **改善版ログ監視システム（HTML形式・色分け・自動更新）** ⭐2025/11/28追加
 - ✅ PM2自動復旧機能
 - ✅ Railway対応（ボット+ダッシュボード同時起動）
 - ✅ バックテストフレームワーク ⭐NEW
@@ -1780,16 +1782,111 @@ MACD分析:
 
 ---
 
-**最終更新**: 2025年11月25日 20:30
+---
+
+#### 22. **4時間足への変更 + ログシステム大幅改善** (2025年11月28日)
+**問題**: 5分足での頻繁な取引による手数料負け、ログ可視性の低さ
+
+**ユーザーからの要望**:
+「4時間足にして下さい」
+
+**実施した修正**:
+
+**1. 時間足を5分足→4時間足に変更** (`setting.ini`):
+```ini
+# Before
+[trading]
+default_timeframe = 5m
+
+# After
+[trading]
+default_timeframe = 4h
+```
+
+**2. チェック間隔の最適化** (`optimized_leverage_bot.py`):
+```python
+# Before
+self.interval = 60  # 1分
+
+# After
+self.interval = 300  # 5分（4時間足に適した間隔）
+```
+
+**3. ポジション取得の詳細ログ追加** (`optimized_leverage_bot.py`):
+```python
+# ファイルログに記録
+with open('bot_execution_log.txt', 'a') as f:
+    f.write(f"POSITION_FETCH: symbol={self.symbol}, count={len(positions)}\n")
+    if positions:
+        for pos in positions:
+            f.write(f"  - Position: {pos.get('positionId')} {pos.get('side')} {pos.get('size')} @ {pos.get('price')}\n")
+
+# 標準出力にも詳細表示
+if positions:
+    for pos in positions:
+        logger.info(f"  └─ Position {pos.get('positionId')}: {pos.get('side')} {pos.get('size')} @ ¥{pos.get('price')}")
+```
+
+**4. ログエンドポイントの大幅改善** (`final_dashboard.py`):
+```python
+# HTML形式で見やすく表示
+- 色分け機能:
+  - 🟢 CYCLE_START（緑）
+  - 🔴 DECISION: CLOSE（赤）
+  - 🟡 DECISION: HOLD（黄色）
+  - 🔵 POSITION_FETCH（青）
+  - 🔥 ERROR（オレンジ）
+- 30秒ごと自動更新
+- ダッシュボードへのリンク付き
+```
+
+**4時間足の利点**:
+1. **トレンドの明確化** - 短期ノイズを排除、明確なトレンド把握
+2. **手数料削減** - 取引回数減少で手数料負け防止
+3. **安定性向上** - 急激な価格変動の影響を軽減
+4. **より大きな利益** - 長期トレンドに乗って大きな値幅を狙う
+
+**動作確認**:
+```
+2025-11-28 14:26～15:06
+- チェック間隔: 300秒（5分）✅
+- CYCLE_START: 正常に記録
+- ログエンドポイント: HTML形式で表示 ✅
+- 自動更新: 30秒間隔 ✅
+```
+
+**期待される効果**:
+- ✅ **手数料削減**: 5分足の頻繁な取引から4時間足の長期保有へ
+- ✅ **トレンド捕捉**: より大きな値幅を狙える
+- ✅ **ログ可視性向上**: HTML形式・色分けで問題を即座に発見
+- ✅ **デバッグ効率化**: 詳細なポジション取得ログで問題特定が容易
+
+**修正ファイル**:
+- `setting.ini` - 時間足を4hに変更
+- `optimized_leverage_bot.py` - チェック間隔変更、詳細ログ追加
+- `final_dashboard.py` - ログエンドポイント改善
+
+**GitHubコミット**:
+- 405216f - 📊 Change timeframe to 4h + Improve logging system
+
+**解決**: 4時間足への変更とログシステム大幅改善で、より安定した長期トレード戦略へ ✅
+
+---
+
+**最終更新**: 2025年11月28日 15:15
 **ステータス**: 24時間完全稼働中 ✅ (最適化DOGE_JPYレバレッジ取引)
-**現在の残高**: JPY 499円
-**現在のポジション**: BUY 20 DOGE @ ¥22.984（含み益¥20.52、+4.90%）
+**現在の残高**: JPY 518円
+**現在のポジション**: SELL 20 DOGE @ ¥24.096（含み益¥6）
+**時間足**: **4時間足（4h）** ⭐NEW
+**チェック間隔**: **300秒（5分）** ⭐NEW
 **ボット**: optimized-bot (Railway環境で自動稼働中)
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
-**最新修正**: MACD主体ロジック実装 → 利益5-10倍の大幅改善確認 ✅ **SUCCESS**
+- ✅ **ログ監視（改善版）**: https://web-production-1f4ce.up.railway.app/logs ⭐NEW
+**最新修正**: 4時間足への変更 + ログシステム改善 ✅ **SUCCESS**
 **GitHubコミット履歴**:
+- 405216f - 4時間足への変更 + ログシステム改善 ⭐NEW
 - f7a5e62 - シグナルベース決済修復
 - 3de9d80 - MACD主体ロジック実装
 - bb781d8 - 逆張りロジック完全削除
