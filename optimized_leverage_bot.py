@@ -44,8 +44,8 @@ class OptimizedLeverageTradingBot:
 
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
-        self.timeframe = config.get('trading', 'default_timeframe', fallback='5m')
-        self.interval = 60  # チェック間隔（秒）- 1分（価格変動に素早く対応）
+        self.timeframe = config.get('trading', 'default_timeframe', fallback='4h')
+        self.interval = 300  # チェック間隔（秒）- 5分（4時間足に適した間隔）
 
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
@@ -104,8 +104,26 @@ class OptimizedLeverageTradingBot:
         logger.info(f"🎯 Market Regime: {market_regime}")
 
         # 2. 既存ポジション確認
+        logger.info(f"🔍 Fetching positions for symbol: {self.symbol}")
         positions = self.api.get_positions(symbol=self.symbol)
         logger.info(f"📊 Active positions: {len(positions)}")
+
+        # 詳細ログをファイルに記録
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"POSITION_FETCH: symbol={self.symbol}, count={len(positions)}\n")
+                if positions:
+                    for pos in positions:
+                        f.write(f"  - Position: {pos.get('positionId')} {pos.get('side')} {pos.get('size')} @ {pos.get('price')}\n")
+                else:
+                    f.write(f"  - No positions found\n")
+        except:
+            pass
+
+        # 標準出力にも詳細を表示
+        if positions:
+            for pos in positions:
+                logger.info(f"  └─ Position {pos.get('positionId')}: {pos.get('side')} {pos.get('size')} @ ¥{pos.get('price')}")
 
         # 3. ポジションの決済チェック（動的SL/TP使用）
         any_closed = False

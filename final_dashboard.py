@@ -532,11 +532,51 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
             # ログエンドポイント
             if self.path == '/logs':
                 self.send_response(200)
-                self.send_header('Content-type', 'text/plain; charset=utf-8')
+                self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.send_header('Cache-Control', 'no-cache')
+                self.send_header('Refresh', '30')  # 30秒ごとに自動更新
                 self.end_headers()
 
                 try:
+                    html_header = '''
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Trading Bot Logs</title>
+                        <meta charset="utf-8">
+                        <style>
+                            body {
+                                background: #1a1a2e;
+                                color: #00ff00;
+                                font-family: 'Courier New', monospace;
+                                padding: 20px;
+                                font-size: 12px;
+                            }
+                            .header {
+                                background: #16213e;
+                                padding: 15px;
+                                border-radius: 5px;
+                                margin-bottom: 20px;
+                                color: #ffffff;
+                            }
+                            .log-line { margin: 2px 0; }
+                            .cycle-start { color: #00E676; font-weight: bold; }
+                            .decision-close { color: #FF1744; font-weight: bold; }
+                            .decision-hold { color: #FFC107; }
+                            .position-fetch { color: #2196F3; }
+                            .error { color: #FF5722; font-weight: bold; }
+                            pre { white-space: pre-wrap; word-wrap: break-word; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="header">
+                            <h2>🤖 Trading Bot Execution Logs</h2>
+                            <p>最終更新: ''' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '''</p>
+                            <p>自動更新: 30秒間隔 | <a href="/" style="color: #00E676;">ダッシュボードに戻る</a></p>
+                        </div>
+                        <pre>
+                    '''
+
                     # ボット実行ログを読み込み
                     if os.path.exists('bot_execution_log.txt'):
                         with open('bot_execution_log.txt', 'r') as f:
@@ -544,11 +584,45 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
                         # 最新1000行のみ表示
                         lines = log_content.split('\n')
                         recent_lines = lines[-1000:] if len(lines) > 1000 else lines
-                        self.wfile.write('\n'.join(recent_lines).encode('utf-8'))
+
+                        # ログの色分け
+                        formatted_lines = []
+                        for line in recent_lines:
+                            if 'CYCLE_START' in line or '======' in line:
+                                formatted_lines.append(f'<span class="cycle-start">{line}</span>')
+                            elif 'DECISION: CLOSE' in line:
+                                formatted_lines.append(f'<span class="decision-close">{line}</span>')
+                            elif 'DECISION: HOLD' in line:
+                                formatted_lines.append(f'<span class="decision-hold">{line}</span>')
+                            elif 'POSITION_FETCH' in line:
+                                formatted_lines.append(f'<span class="position-fetch">{line}</span>')
+                            elif 'ERROR' in line or 'Error' in line:
+                                formatted_lines.append(f'<span class="error">{line}</span>')
+                            else:
+                                formatted_lines.append(f'<span class="log-line">{line}</span>')
+
+                        log_html = '\n'.join(formatted_lines)
                     else:
-                        self.wfile.write(b'No log file found. Bot may not be running.')
+                        log_html = '<span class="error">No log file found. Bot may not be running.</span>'
+
+                    html_footer = '''
+                        </pre>
+                    </body>
+                    </html>
+                    '''
+
+                    self.wfile.write((html_header + log_html + html_footer).encode('utf-8'))
                 except Exception as e:
-                    self.wfile.write(f'Error reading log: {str(e)}'.encode('utf-8'))
+                    error_html = f'''
+                    <!DOCTYPE html>
+                    <html>
+                    <body style="background: #1a1a2e; color: #FF5722; font-family: monospace; padding: 20px;">
+                        <h2>Error reading logs</h2>
+                        <p>{str(e)}</p>
+                    </body>
+                    </html>
+                    '''
+                    self.wfile.write(error_html.encode('utf-8'))
                 return
 
             # 通常のダッシュボード
