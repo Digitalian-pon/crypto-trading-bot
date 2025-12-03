@@ -355,6 +355,13 @@ class OptimizedLeverageTradingBot:
 
     def _close_position(self, position, current_price, reason):
         """ポジション決済"""
+        # 強制ログ追加
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"CLOSE_POSITION_CALLED: reason='{reason}'\n")
+        except:
+            pass
+
         try:
             symbol = position.get('symbol')
             side = position.get('side')
@@ -364,6 +371,11 @@ class OptimizedLeverageTradingBot:
             close_side = "SELL" if side == "BUY" else "BUY"
 
             logger.info(f"Closing {side} position: {size} {symbol} at ¥{current_price:.2f}")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CLOSE_ATTEMPT: {side} {size} {symbol} @ ¥{current_price:.2f}\n")
+            except:
+                pass
 
             result = self.api.close_position(
                 symbol=symbol,
