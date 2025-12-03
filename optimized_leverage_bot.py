@@ -210,6 +210,14 @@ class OptimizedLeverageTradingBot:
                 position, current_price, df.iloc[-1].to_dict(), pl_ratio, stop_loss, take_profit
             )
 
+            # デバッグログ追加
+            logger.info(f"   DEBUG: should_close={should_close}, reason='{reason}', type={type(should_close)}")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"DEBUG_CLOSE_CHECK: should_close={should_close}, reason='{reason}'\n")
+            except:
+                pass
+
             if should_close:
                 logger.info(f"🔄 Closing position: {reason}")
                 self._close_position(position, current_price, reason)
