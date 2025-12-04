@@ -368,12 +368,18 @@ class OptimizedLeverageTradingBot:
             size = float(position.get('size', 0))  # 文字列→floatに変換（重要！）
             position_id = position.get('positionId')
 
+            # symbolがNoneの場合はself.symbolを使用
+            if not symbol:
+                symbol = self.symbol
+                logger.warning(f"Position symbol is None, using self.symbol: {symbol}")
+
             close_side = "SELL" if side == "BUY" else "BUY"
 
             logger.info(f"Closing {side} position: {size} {symbol} at ¥{current_price:.2f}")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
                     f.write(f"CLOSE_ATTEMPT: {side} {size} {symbol} @ ¥{current_price:.2f}\n")
+                    f.write(f"CLOSE_PARAMS: symbol={symbol}, side={close_side}, positionId={position_id}, size={size}\n")
             except:
                 pass
 
@@ -382,16 +388,38 @@ class OptimizedLeverageTradingBot:
                 side=close_side,
                 execution_type="MARKET",
                 position_id=position_id,
-                size=str(size)
+                size=str(int(size))  # floatをintに変換してから文字列化（20.0 → "20"）
             )
+
+            # API結果をログに記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CLOSE_API_RESULT: {result}\n")
+            except:
+                pass
 
             if result.get('status') == 0:
                 logger.info(f"✅ Position closed successfully")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"CLOSE_SUCCESS\n")
+                except:
+                    pass
             else:
                 logger.error(f"❌ Failed to close position: {result}")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"CLOSE_FAILED: {result}\n")
+                except:
+                    pass
 
         except Exception as e:
             logger.error(f"Error closing position: {e}", exc_info=True)
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CLOSE_EXCEPTION: {type(e).__name__}: {str(e)}\n")
+            except:
+                pass
 
     def _place_forced_reversal_order(self, trade_type, current_price, df):
         """
