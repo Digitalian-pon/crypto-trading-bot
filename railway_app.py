@@ -11,6 +11,29 @@ import sys
 import threading
 import logging
 from datetime import datetime
+import shutil
+import glob
+
+# キャッシュクリア: Railway環境で古いバイトコードが使われるのを防ぐ
+def clear_python_cache():
+    """Pythonキャッシュファイル（__pycache__、.pyc）を削除"""
+    try:
+        # __pycache__ ディレクトリを削除
+        for pycache_dir in glob.glob('**/__pycache__', recursive=True):
+            shutil.rmtree(pycache_dir, ignore_errors=True)
+            print(f"[CACHE] Removed: {pycache_dir}")
+
+        # .pyc ファイルを削除
+        for pyc_file in glob.glob('**/*.pyc', recursive=True):
+            os.remove(pyc_file)
+            print(f"[CACHE] Removed: {pyc_file}")
+
+        print("[CACHE] ✅ Python cache cleared successfully")
+    except Exception as e:
+        print(f"[CACHE] ⚠️ Cache clear warning: {e}")
+
+# 起動時にキャッシュクリア
+clear_python_cache()
 
 # Railway環境: 環境変数を強制的にハードコード値で設定
 # これによりRailway環境でも確実にAPI認証が動作する
