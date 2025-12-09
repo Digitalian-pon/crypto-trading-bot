@@ -284,20 +284,20 @@ class OptimizedLeverageTradingBot:
         except:
             pass
 
-        # 純利益が¥3以上なら即座に決済
-        if net_profit >= 3.0:
-            logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥3)")
+        # 純利益が¥1.5以上なら即座に決済（修正: ¥3.0 → ¥1.5で機会損失削減）
+        if net_profit >= 1.5:
+            logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥1.5)")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥3.0)\n")
+                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥1.5)\n")
             except:
                 pass
             return True, f"Minimum Profit Target: ¥{net_profit:.2f}", None
         else:
-            logger.info(f"   ❌ Net profit too small: ¥{net_profit:.2f} < ¥3.0")
+            logger.info(f"   ❌ Net profit too small: ¥{net_profit:.2f} < ¥1.5")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥3.0)\n")
+                    f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥1.5)\n")
             except:
                 pass
 
