@@ -301,6 +301,16 @@ class OptimizedLeverageTradingBot:
             except:
                 pass
 
+        # 【緊急】固定損失リミット: -2%で強制決済（急激なトレンド転換対応）
+        if pl_ratio <= -0.02:  # -2%以上の損失
+            logger.info(f"   🚨 CLOSE DECISION: Fixed Loss Limit Hit: {pl_ratio*100:.2f}% <= -2.0%")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"DECISION: CLOSE (fixed_loss_limit {pl_ratio*100:.2f}% <= -2.0%)\n")
+            except:
+                pass
+            return True, f"Fixed Loss Limit: {pl_ratio*100:.2f}%", None
+
         # 動的ストップロス/テイクプロフィットチェック
         logger.info(f"      SL: ¥{stop_loss:.3f}, TP: ¥{take_profit:.3f}")
         if side == 'BUY':
@@ -331,9 +341,9 @@ class OptimizedLeverageTradingBot:
 
         logger.info(f"      Reversal result: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}, reason={reason}")
 
-        # 決済判定の閾値: 0.8（新規取引より緩い）- トレンド転換を確実に捉える
-        if should_trade and trade_type and confidence >= 0.8:
-            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= 0.8")
+        # 決済判定の閾値: 0.5（急激なトレンド転換対応 - 早期検出）
+        if should_trade and trade_type and confidence >= 0.5:
+            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= 0.5")
             if side == 'BUY' and trade_type.upper() == 'SELL':
                 logger.info(f"   ✅ CLOSE DECISION: Strong Reversal SELL (confidence={confidence:.2f})")
                 return True, f"Strong Reversal: SELL (confidence={confidence:.2f})", 'SELL'
@@ -348,7 +358,7 @@ class OptimizedLeverageTradingBot:
             elif not trade_type:
                 logger.info(f"      No trade type in signal")
             else:
-                logger.info(f"      Confidence too low: {confidence:.2f} < 0.8")
+                logger.info(f"      Confidence too low: {confidence:.2f} < 0.5")
 
         logger.info(f"   ❌ No close signal - position will be held")
         return False, "No close signal", None

@@ -35,27 +35,28 @@ class OptimizedTradingLogic:
         self.recent_trades_limit = 20  # 直近20取引を追跡
 
         # 市場レジーム別パラメータ（完全トレンドフォロー戦略）
+        # 急激なトレンド転換対応：ストップロスを厳しく、反転検出を早く
         self.regime_params = {
             'TRENDING': {
                 'rsi_oversold': 40,      # 押し目買い
                 'rsi_overbought': 60,    # 戻り売り
                 'signal_threshold': 0.8,  # トレンドフォロー専用で安全
-                'stop_loss_atr_mult': 2.5,  # 早めの損切り
-                'take_profit_atr_mult': 5.0,  # 早めの利確
+                'stop_loss_atr_mult': 1.5,  # 2.5 → 1.5（損失削減）
+                'take_profit_atr_mult': 3.5,  # 5.0 → 3.5（早めの利確）
             },
             'RANGING': {
                 'rsi_oversold': 30,      # 押し目買い（逆張り禁止）
                 'rsi_overbought': 70,    # 戻り売り（逆張り禁止）
                 'signal_threshold': 1.0,  # やや慎重に
-                'stop_loss_atr_mult': 2.0,
-                'take_profit_atr_mult': 4.0,
+                'stop_loss_atr_mult': 1.5,  # 2.0 → 1.5（損失削減）
+                'take_profit_atr_mult': 3.0,  # 4.0 → 3.0（早めの利確）
             },
             'VOLATILE': {
                 'rsi_oversold': 35,
                 'rsi_overbought': 65,
                 'signal_threshold': 1.5,  # 高ボラ時は慎重に
-                'stop_loss_atr_mult': 3.0,
-                'take_profit_atr_mult': 6.0,
+                'stop_loss_atr_mult': 2.0,  # 3.0 → 2.0（損失削減）
+                'take_profit_atr_mult': 4.0,  # 6.0 → 4.0（早めの利確）
             }
         }
 
