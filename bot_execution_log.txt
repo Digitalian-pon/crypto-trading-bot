@@ -1,0 +1,16 @@
+
+======================================================================
+CYCLE_START: 2025-12-03T12:34:30.977006
+INTERVAL: 300s
+
+======================================================================
+CYCLE_START: 2025-12-03T13:41:41.532294
+INTERVAL: 300s
+POSITION_FETCH: symbol=DOGE_JPY, count=1
+  - Position: 272880537 SELL 20 @ 24.096
+POSITION_CHECK: SELL 20.0 @ ¥24.096
+CURRENT_PRICE: ¥23.066
+GROSS_PROFIT: ¥20.60
+NET_PROFIT: ¥18.60
+THRESHOLD: ¥3.0
+DECISION: CLOSE (net_profit ¥18.60 >= ¥3.0)
