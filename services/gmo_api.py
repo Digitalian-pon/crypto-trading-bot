@@ -209,9 +209,10 @@ class GMOCoinAPI:
     def get_klines(self, symbol="BTC_JPY", interval="1h", date=None):
         """
         Get candlestick/OHLCV data
-        
+
         :param symbol: Trading pair symbol (default: BTC_JPY)
-        :param interval: Time interval (1min, 5min, 10min, 15min, 30min, 1h, 4h, 8h, 12h, 1d, 1w)
+        :param interval: Time interval - SUPPORTED: 1min, 5min, 15min, 30min ONLY
+                        UNSUPPORTED: 1h, 4h, 8h, 12h, 1d (will return ERR-5207)
         :param date: Target date (YYYYMMDD format) - required by API
         :return: Candlestick data or error message
         """

@@ -86,6 +86,7 @@ class OptimizedLeverageTradingBot:
         logger.info(f"{'='*70}")
 
         # 1. 市場データ取得（過去100本）
+        logger.info(f"📊 Fetching market data: symbol={self.symbol}, timeframe={self.timeframe}")
         df = self.data_service.get_data_with_indicators(
             self.symbol,
             interval=self.timeframe,
@@ -93,7 +94,19 @@ class OptimizedLeverageTradingBot:
         )
 
         if df is None or df.empty:
-            logger.error("❌ Failed to get market data")
+            logger.error(f"❌ CRITICAL: Failed to get market data for {self.symbol} with timeframe {self.timeframe}")
+            logger.error(f"❌ Possible reasons:")
+            logger.error(f"   1. GMO Coin API may not support '{self.timeframe}' timeframe")
+            logger.error(f"   2. Supported intervals: 1min, 5min, 15min, 30min ONLY")
+            logger.error(f"   3. Network connectivity issues")
+            logger.error(f"❌ Skipping this trading cycle")
+            # ログファイルにもエラーを記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"ERROR: Failed to get market data - symbol={self.symbol}, timeframe={self.timeframe}\n")
+                    f.write(f"ERROR: Check if timeframe is supported by GMO Coin API\n")
+            except:
+                pass
             return
 
         current_price = float(df['close'].iloc[-1])
