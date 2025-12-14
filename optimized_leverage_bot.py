@@ -273,7 +273,7 @@ class OptimizedLeverageTradingBot:
         logger.info(f"      P/L Ratio: {pl_ratio*100:.2f}%")
 
         # 【最優先】最小利益確保チェック（手数料負け防止）
-        # 往復手数料¥2を考慮し、純利益¥3以上で即座に利確
+        # 往復手数料¥2を考慮し、純利益¥4以上で即座に利確（手数料の2倍で安全マージン確保）
         if side == 'BUY':
             profit_jpy = size * (current_price - entry_price)
         else:  # SELL
@@ -284,7 +284,7 @@ class OptimizedLeverageTradingBot:
 
         logger.info(f"      Gross Profit: ¥{profit_jpy:.2f}")
         logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
-        logger.info(f"      Checking: net_profit ({net_profit:.2f}) >= 3.0?")
+        logger.info(f"      Checking: net_profit ({net_profit:.2f}) >= 4.0?")
 
         # ログファイルに決済判定を記録
         try:
@@ -293,36 +293,49 @@ class OptimizedLeverageTradingBot:
                 f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
                 f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
                 f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
-                f.write(f"THRESHOLD: ¥3.0\n")
+                f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
+                f.write(f"THRESHOLD: ¥4.0 (profit) / -1.0% (loss)\n")
         except:
             pass
 
-        # 純利益が¥1.5以上なら即座に決済（修正: ¥3.0 → ¥1.5で機会損失削減）
-        if net_profit >= 1.5:
-            logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥1.5)")
+        # 純利益が¥4以上なら即座に利確（手数料¥2の2倍 = 安全マージン）
+        if net_profit >= 4.0:
+            logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥4.0)")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥1.5)\n")
+                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥4.0)\n")
             except:
                 pass
             return True, f"Minimum Profit Target: ¥{net_profit:.2f}", None
-        else:
-            logger.info(f"   ❌ Net profit too small: ¥{net_profit:.2f} < ¥1.5")
-            try:
-                with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥1.5)\n")
-            except:
-                pass
 
-        # 【緊急】固定損失リミット: -2%で強制決済（急激なトレンド転換対応）
-        if pl_ratio <= -0.02:  # -2%以上の損失
-            logger.info(f"   🚨 CLOSE DECISION: Fixed Loss Limit Hit: {pl_ratio*100:.2f}% <= -2.0%")
+        # 【緊急】固定損失リミット: -1%で早期損切り（損失拡大防止）
+        if pl_ratio <= -0.01:  # -1%以上の損失で早期損切り
+            logger.info(f"   🚨 CLOSE DECISION: Early Stop Loss Hit: {pl_ratio*100:.2f}% <= -1.0%")
+            logger.info(f"      Net loss in JPY: ¥{net_profit:.2f}")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (fixed_loss_limit {pl_ratio*100:.2f}% <= -2.0%)\n")
+                    f.write(f"DECISION: CLOSE (early_stop_loss {pl_ratio*100:.2f}% <= -1.0%, net_loss ¥{net_profit:.2f})\n")
             except:
                 pass
-            return True, f"Fixed Loss Limit: {pl_ratio*100:.2f}%", None
+            return True, f"Early Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
+
+        # 【補助】損失が-¥3を超えたら強制決済（絶対額での損切り）
+        if net_profit <= -3.0:
+            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥3.0")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"DECISION: CLOSE (absolute_loss ¥{net_profit:.2f} <= -¥3.0)\n")
+            except:
+                pass
+            return True, f"Absolute Loss Limit: ¥{net_profit:.2f}", None
+
+        # 利益も損失も小さい場合はHOLDをログに記録（デバッグ用）
+        logger.info(f"   ⏸️ HOLD: Profit ¥{net_profit:.2f} (target ¥4.0), Loss {pl_ratio*100:.2f}% (limit -1.0%)")
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥4.0 and pl_ratio {pl_ratio*100:.2f}% > -1.0%)\n")
+        except:
+            pass
 
         # 動的ストップロス/テイクプロフィットチェック
         logger.info(f"      SL: ¥{stop_loss:.3f}, TP: ¥{take_profit:.3f}")
@@ -354,9 +367,9 @@ class OptimizedLeverageTradingBot:
 
         logger.info(f"      Reversal result: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}, reason={reason}")
 
-        # 決済判定の閾値: 0.5（急激なトレンド転換対応 - 早期検出）
-        if should_trade and trade_type and confidence >= 0.5:
-            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= 0.5")
+        # 決済判定の閾値: 1.0（強い反転シグナルのみで決済 - 誤判定防止）
+        if should_trade and trade_type and confidence >= 1.0:
+            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= 1.0")
             if side == 'BUY' and trade_type.upper() == 'SELL':
                 logger.info(f"   ✅ CLOSE DECISION: Strong Reversal SELL (confidence={confidence:.2f})")
                 return True, f"Strong Reversal: SELL (confidence={confidence:.2f})", 'SELL'
