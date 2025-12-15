@@ -44,8 +44,8 @@ class OptimizedLeverageTradingBot:
 
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
-        self.timeframe = config.get('trading', 'default_timeframe', fallback='4h')
-        self.interval = 300  # チェック間隔（秒）- 5分（4時間足に適した間隔）
+        self.timeframe = config.get('trading', 'default_timeframe', fallback='1hour')
+        self.interval = 180  # チェック間隔（秒）- 3分（1時間足に適した間隔）
 
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
@@ -272,8 +272,8 @@ class OptimizedLeverageTradingBot:
         logger.info(f"      Current Price: ¥{current_price:.3f}")
         logger.info(f"      P/L Ratio: {pl_ratio*100:.2f}%")
 
-        # 【最優先】最小利益確保チェック（手数料負け防止）
-        # 往復手数料¥2を考慮し、純利益¥4以上で即座に利確（手数料の2倍で安全マージン確保）
+        # 【最優先】利益・損失チェック（最適化版）
+        # 往復手数料¥2を考慮し、純利益で判定
         if side == 'BUY':
             profit_jpy = size * (current_price - entry_price)
         else:  # SELL
@@ -284,7 +284,28 @@ class OptimizedLeverageTradingBot:
 
         logger.info(f"      Gross Profit: ¥{profit_jpy:.2f}")
         logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
-        logger.info(f"      Checking: net_profit ({net_profit:.2f}) >= 4.0?")
+
+        # 【トレーリングストップ】¥2以上の利益が出ている場合、損切りラインを建値に移動
+        if position_id in self.active_positions_stops:
+            original_stop_loss = self.active_positions_stops[position_id].get('original_stop_loss')
+
+            # トレーリングストップがまだ発動していない場合
+            if original_stop_loss is None and net_profit >= 2.0:
+                logger.info(f"      🔒 TRAILING STOP ACTIVATED: Net profit ¥{net_profit:.2f} >= ¥2.0")
+                logger.info(f"         Moving stop loss to break-even (entry price)")
+
+                # 元のストップロスを保存
+                self.active_positions_stops[position_id]['original_stop_loss'] = stop_loss
+
+                # 損切りラインを建値に移動（リスクフリー）
+                self.active_positions_stops[position_id]['stop_loss'] = entry_price
+                stop_loss = entry_price
+
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"TRAILING_STOP_ACTIVATED: net_profit=¥{net_profit:.2f}, new_stop_loss=¥{entry_price:.3f}\n")
+                except:
+                    pass
 
         # ログファイルに決済判定を記録
         try:
@@ -294,46 +315,46 @@ class OptimizedLeverageTradingBot:
                 f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
                 f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"THRESHOLD: ¥4.0 (profit) / -1.0% (loss)\n")
+                f.write(f"THRESHOLD: ¥2.5 (profit) / -0.5% (loss) / -¥2.0 (absolute loss)\n")
         except:
             pass
 
-        # 純利益が¥4以上なら即座に利確（手数料¥2の2倍 = 安全マージン）
-        if net_profit >= 4.0:
-            logger.info(f"   ✅ CLOSE DECISION: Minimum profit target reached: ¥{net_profit:.2f} (≥¥4.0)")
+        # 【利確】純利益が¥2.5以上なら利確（手数料¥2 + 最小利益¥0.5）
+        if net_profit >= 2.5:
+            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥2.5)")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥4.0)\n")
+                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥2.5)\n")
             except:
                 pass
-            return True, f"Minimum Profit Target: ¥{net_profit:.2f}", None
+            return True, f"Take Profit: ¥{net_profit:.2f}", None
 
-        # 【緊急】固定損失リミット: -1%で早期損切り（損失拡大防止）
-        if pl_ratio <= -0.01:  # -1%以上の損失で早期損切り
-            logger.info(f"   🚨 CLOSE DECISION: Early Stop Loss Hit: {pl_ratio*100:.2f}% <= -1.0%")
+        # 【損切り】固定損失リミット: -0.5%で早期損切り（1時間足に最適化）
+        if pl_ratio <= -0.005:  # -0.5%以上の損失で早期損切り
+            logger.info(f"   🚨 CLOSE DECISION: Stop Loss Hit: {pl_ratio*100:.2f}% <= -0.5%")
             logger.info(f"      Net loss in JPY: ¥{net_profit:.2f}")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (early_stop_loss {pl_ratio*100:.2f}% <= -1.0%, net_loss ¥{net_profit:.2f})\n")
+                    f.write(f"DECISION: CLOSE (stop_loss {pl_ratio*100:.2f}% <= -0.5%, net_loss ¥{net_profit:.2f})\n")
             except:
                 pass
-            return True, f"Early Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
+            return True, f"Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
 
-        # 【補助】損失が-¥3を超えたら強制決済（絶対額での損切り）
-        if net_profit <= -3.0:
-            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥3.0")
+        # 【緊急損切り】絶対額での損切り: -¥2.0（より早めに）
+        if net_profit <= -2.0:
+            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥2.0")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (absolute_loss ¥{net_profit:.2f} <= -¥3.0)\n")
+                    f.write(f"DECISION: CLOSE (absolute_loss ¥{net_profit:.2f} <= -¥2.0)\n")
             except:
                 pass
             return True, f"Absolute Loss Limit: ¥{net_profit:.2f}", None
 
         # 利益も損失も小さい場合はHOLDをログに記録（デバッグ用）
-        logger.info(f"   ⏸️ HOLD: Profit ¥{net_profit:.2f} (target ¥4.0), Loss {pl_ratio*100:.2f}% (limit -1.0%)")
+        logger.info(f"   ⏸️  HOLD: Profit ¥{net_profit:.2f} (target ¥2.5), Loss {pl_ratio*100:.2f}% (limit -0.5%)")
         try:
             with open('bot_execution_log.txt', 'a') as f:
-                f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥4.0 and pl_ratio {pl_ratio*100:.2f}% > -1.0%)\n")
+                f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥2.5 and pl_ratio {pl_ratio*100:.2f}% > -0.5%)\n")
         except:
             pass
 
@@ -390,7 +411,14 @@ class OptimizedLeverageTradingBot:
         return False, "No close signal", None
 
     def _close_position(self, position, current_price, reason):
-        """ポジション決済"""
+        """
+        ポジション決済（リトライロジック付き）
+
+        エラーハンドリング:
+        1. 個別決済（close_position）を試行
+        2. 失敗した場合、一括決済（close_bulk_position）を試行
+        3. それでも失敗した場合、エラーログを残して継続
+        """
         # 強制ログ追加
         try:
             with open('bot_execution_log.txt', 'a') as f:
@@ -411,7 +439,9 @@ class OptimizedLeverageTradingBot:
 
             close_side = "SELL" if side == "BUY" else "BUY"
 
-            logger.info(f"Closing {side} position: {size} {symbol} at ¥{current_price:.2f}")
+            logger.info(f"🔄 Closing {side} position: {size} {symbol} at ¥{current_price:.2f}")
+            logger.info(f"   Reason: {reason}")
+
             try:
                 with open('bot_execution_log.txt', 'a') as f:
                     f.write(f"CLOSE_ATTEMPT: {side} {size} {symbol} @ ¥{current_price:.2f}\n")
@@ -419,6 +449,8 @@ class OptimizedLeverageTradingBot:
             except:
                 pass
 
+            # 【方法1】個別ポジション決済を試行
+            logger.info(f"   Method 1: Trying individual position close (positionId={position_id})")
             result = self.api.close_position(
                 symbol=symbol,
                 side=close_side,
@@ -430,32 +462,82 @@ class OptimizedLeverageTradingBot:
             # API結果をログに記録
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"CLOSE_API_RESULT: {result}\n")
+                    f.write(f"CLOSE_API_RESULT (Method 1): {result}\n")
             except:
                 pass
 
+            # 成功判定
             if result.get('status') == 0:
-                logger.info(f"✅ Position closed successfully")
+                logger.info(f"✅ Position closed successfully (Method 1)")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"CLOSE_SUCCESS\n")
+                        f.write(f"CLOSE_SUCCESS (Method 1)\n")
                 except:
                     pass
-            else:
-                logger.error(f"❌ Failed to close position: {result}")
+                return True
+
+            # 【方法1失敗】エラーログ記録
+            error_msg = result.get('messages', [{}])[0].get('message_string', 'Unknown error') if 'messages' in result else str(result)
+            logger.warning(f"⚠️  Method 1 failed: {error_msg}")
+            logger.info(f"   Trying fallback method...")
+
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CLOSE_FAILED (Method 1): {error_msg}\n")
+                    f.write(f"TRYING_FALLBACK (Method 2: Bulk close)\n")
+            except:
+                pass
+
+            # 【方法2】一括決済を試行（フォールバック）
+            logger.info(f"   Method 2: Trying bulk close (size={int(size)})")
+            time.sleep(1)  # APIレート制限対策
+
+            bulk_result = self.api.close_bulk_position(
+                symbol=symbol,
+                side=close_side,
+                execution_type="MARKET",
+                size=str(int(size))
+            )
+
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CLOSE_API_RESULT (Method 2): {bulk_result}\n")
+            except:
+                pass
+
+            if bulk_result.get('status') == 0:
+                logger.info(f"✅ Position closed successfully (Method 2 - Bulk)")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"CLOSE_FAILED: {result}\n")
+                        f.write(f"CLOSE_SUCCESS (Method 2)\n")
                 except:
                     pass
+                return True
+
+            # 【両方失敗】最終エラーログ
+            bulk_error_msg = bulk_result.get('messages', [{}])[0].get('message_string', 'Unknown error') if 'messages' in bulk_result else str(bulk_result)
+            logger.error(f"❌ Both close methods failed!")
+            logger.error(f"   Method 1 error: {error_msg}")
+            logger.error(f"   Method 2 error: {bulk_error_msg}")
+            logger.error(f"   ⚠️  CRITICAL: Position may remain open - manual intervention may be required")
+
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CLOSE_FAILED (Method 2): {bulk_error_msg}\n")
+                    f.write(f"CRITICAL_ERROR: Both methods failed - position may remain open\n")
+            except:
+                pass
+
+            return False
 
         except Exception as e:
-            logger.error(f"Error closing position: {e}", exc_info=True)
+            logger.error(f"❌ Exception in close_position: {e}", exc_info=True)
             try:
                 with open('bot_execution_log.txt', 'a') as f:
                     f.write(f"CLOSE_EXCEPTION: {type(e).__name__}: {str(e)}\n")
             except:
                 pass
+            return False
 
     def _place_forced_reversal_order(self, trade_type, current_price, df):
         """
@@ -602,13 +684,16 @@ class OptimizedLeverageTradingBot:
                     latest_position = positions[-1]
                     position_id = latest_position.get('positionId')
 
-                    # SL/TP記録
+                    # SL/TP記録（トレーリングストップ用のフィールドも初期化）
                     self.active_positions_stops[position_id] = {
                         'stop_loss': stop_loss,
-                        'take_profit': take_profit
+                        'take_profit': take_profit,
+                        'original_stop_loss': None  # トレーリングストップ未発動状態
                     }
 
                     logger.info(f"📝 Recorded SL/TP for position {position_id}")
+                    logger.info(f"   SL: ¥{stop_loss:.2f}, TP: ¥{take_profit:.2f}")
+                    logger.info(f"   Trailing stop: Ready (activates at ¥2+ profit)")
                     logger.info(f"📊 Active positions: {len(positions)}")
 
                 return True

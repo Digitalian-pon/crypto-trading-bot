@@ -114,8 +114,10 @@ if __name__ == "__main__":
     logger.info(f"Started at: {datetime.now()}")
     logger.info("Trading Pair: DOGE_JPY")
     logger.info("Trading Type: Leverage (Long & Short)")
-    logger.info("Timeframe: 5m")
-    logger.info("Optimizations: Market Regime, Dynamic SL/TP, ATR Risk")
+    logger.info("Timeframe: 1hour")
+    logger.info("Check Interval: 180s (3min)")
+    logger.info("Optimizations: Market Regime, Dynamic SL/TP, ATR Risk, Trailing Stop")
+    logger.info("Profit Target: ¥2.5 | Stop Loss: -0.5% or -¥2")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
