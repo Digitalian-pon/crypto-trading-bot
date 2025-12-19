@@ -65,6 +65,12 @@ class OptimizedLeverageTradingBot:
                 time.sleep(self.interval)
             except Exception as e:
                 logger.error(f"❌ Error in trading loop: {e}", exc_info=True)
+                # ファイルログにもエラーを記録
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"ERROR: {type(e).__name__}: {str(e)}\n")
+                except:
+                    pass
                 time.sleep(self.interval)
 
     def _trading_cycle(self):
