@@ -67,8 +67,11 @@ class OptimizedLeverageTradingBot:
                 logger.error(f"❌ Error in trading loop: {e}", exc_info=True)
                 # ファイルログにもエラーを記録
                 try:
+                    import traceback
                     with open('bot_execution_log.txt', 'a') as f:
                         f.write(f"ERROR: {type(e).__name__}: {str(e)}\n")
+                        f.write(f"TRACEBACK:\n")
+                        traceback.print_exc(file=f)
                 except:
                     pass
                 time.sleep(self.interval)
