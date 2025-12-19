@@ -35,25 +35,47 @@ class DataService:
     def _convert_interval_for_api(self, interval):
         """
         UI設定の時間足をGMO Coin API形式に変換
-        
+
         :param interval: UI設定の間隔 (5m, 1h, etc.)
         :return: GMO API用の間隔 (5min, 1h, etc.)
+
+        Note: GMO Coin APIがサポートしているのは: 1min, 5min, 15min, 30minのみ
+              1h, 4h, 8h, 12h, 1dは非サポート（ERR-5207エラーになる）
         """
+        # GMO Coin APIがサポートしている時間足のみ
         conversion_map = {
             '1m': '1min',
             '5m': '5min',
             '15m': '15min',
             '30m': '30min',
-            '1h': '1hour',
-            '4h': '4hour',
-            '8h': '8hour',
-            '12h': '12hour',
-            '1d': '1day',
-            '1w': '1week'
+            '1min': '1min',
+            '5min': '5min',
+            '15min': '15min',
+            '30min': '30min'
         }
-        
-        converted = conversion_map.get(interval, interval)
-        logger.info(f"Converting interval: {interval} -> {converted}")
+
+        # サポートされていない時間足の警告と自動変換
+        unsupported_intervals = {
+            '1h': '30min',
+            '4h': '30min',
+            '8h': '30min',
+            '12h': '30min',
+            '1d': '30min',
+            '1hour': '30min',
+            '4hour': '30min',
+            '1day': '30min'
+        }
+
+        if interval in unsupported_intervals:
+            fallback = unsupported_intervals[interval]
+            logger.warning(f"⚠️ GMO Coin API does NOT support '{interval}' timeframe!")
+            logger.warning(f"⚠️ Automatically converting to '{fallback}' (maximum supported interval)")
+            logger.warning(f"⚠️ Supported intervals: 1min, 5min, 15min, 30min ONLY")
+            return fallback
+
+        converted = conversion_map.get(interval, '30min')  # デフォルトは30min
+        if converted != interval:
+            logger.info(f"Converting interval: {interval} -> {converted}")
         return converted
     
     def get_ticker(self, symbol="DOGE_JPY"):

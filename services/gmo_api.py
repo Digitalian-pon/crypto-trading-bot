@@ -206,13 +206,15 @@ class GMOCoinAPI:
         params = {"symbol": symbol}
         return self._public_request("GET", endpoint, params)
     
-    def get_klines(self, symbol="BTC_JPY", interval="1h", date=None):
+    def get_klines(self, symbol="BTC_JPY", interval="1hour", date=None):
         """
         Get candlestick/OHLCV data
-        
+
         :param symbol: Trading pair symbol (default: BTC_JPY)
-        :param interval: Time interval (1min, 5min, 10min, 15min, 30min, 1h, 4h, 8h, 12h, 1d, 1w)
-        :param date: Target date (YYYYMMDD format) - required by API
+        :param interval: Time interval
+                        - With YYYYMMDD date: 1min, 5min, 10min, 15min, 30min, 1hour
+                        - With YYYY date: 4hour, 8hour, 12hour, 1day, 1week, 1month
+        :param date: Target date (YYYYMMDD or YYYY format) - required by API
         :return: Candlestick data or error message
         """
         endpoint = f"/v1/klines"
