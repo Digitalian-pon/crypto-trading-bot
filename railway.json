@@ -9,5 +9,6 @@
     "restartPolicyMaxRetries": 10,
     "healthcheckPath": "/",
     "healthcheckTimeout": 300
-  }
+  },
+  "_comment": "Deployment trigger: 2025-12-19 12:43 - Fix 30min timeframe"
 }

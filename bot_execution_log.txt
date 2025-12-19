@@ -14,3 +14,9 @@ GROSS_PROFIT: ¥20.60
 NET_PROFIT: ¥18.60
 THRESHOLD: ¥3.0
 DECISION: CLOSE (net_profit ¥18.60 >= ¥3.0)
+
+======================================================================
+CYCLE_START: 2025-12-19T12:28:56.706850
+INTERVAL: 180s
+POSITION_FETCH: symbol=DOGE_JPY, count=1
+  - Position: 274103052 SELL 20 @ 20.279
