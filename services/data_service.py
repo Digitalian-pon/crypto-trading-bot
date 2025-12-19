@@ -44,9 +44,12 @@ class DataService:
             '5m': '5min',
             '15m': '15min',
             '30m': '30min',
-            '1h': '1h',
-            '4h': '4h',
-            '1d': '1d'
+            '1h': '1hour',
+            '4h': '4hour',
+            '8h': '8hour',
+            '12h': '12hour',
+            '1d': '1day',
+            '1w': '1week'
         }
         
         converted = conversion_map.get(interval, interval)
