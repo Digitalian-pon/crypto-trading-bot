@@ -146,10 +146,26 @@ class OptimizedLeverageTradingBot:
 
         if positions:
             logger.info(f"Checking {len(positions)} positions for closing...")
+            # ファイルログにも記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CHECKING_CLOSE: Analyzing {len(positions)} positions\n")
+            except:
+                pass
+
             any_closed, reversal_signal, tp_sl_closed, reversal_trade_type = self._check_positions_for_closing(positions, current_price, df)
+
             # 決済後、ポジションを再取得
             positions = self.api.get_positions(symbol=self.symbol)
             logger.info(f"📊 Positions after close check: {len(positions)}")
+
+            # ファイルログにも記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CLOSE_CHECK_RESULT: any_closed={any_closed}, reversal={reversal_signal}, tp_sl={tp_sl_closed}\n")
+                    f.write(f"POSITIONS_REMAINING: {len(positions)}\n")
+            except:
+                pass
 
         # 4. パフォーマンス統計表示
         self._display_performance_stats()
