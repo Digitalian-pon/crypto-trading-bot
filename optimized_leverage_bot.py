@@ -291,6 +291,7 @@ class OptimizedLeverageTradingBot:
         side = position.get('side')
         size = float(position.get('size', 0))  # 文字列→floatに変換（重要！）
         entry_price = float(position.get('price', 0))
+        position_id = position.get('positionId')  # ← 追加：position_idを取得
 
         logger.info(f"   📊 Closure Decision Analysis:")
         logger.info(f"      Position: {side} {size} @ ¥{entry_price:.3f}")
