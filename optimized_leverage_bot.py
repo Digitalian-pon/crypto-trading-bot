@@ -267,8 +267,8 @@ class OptimizedLeverageTradingBot:
                     reversal_signal = True
                     reversal_trade_type = close_trade_type  # 反転シグナルのタイプを記録
                     logger.info(f"🔄 REVERSAL DETECTED - Will place {close_trade_type} order immediately")
-                elif "Take Profit" in reason or "Stop Loss" in reason:
-                    # TP/SLで決済された場合
+                elif "Take Profit" in reason or "Stop Loss" in reason or "Loss Limit" in reason:
+                    # TP/SL/絶対損失リミットで決済された場合
                     tp_sl_closed = True
                     logger.info(f"💰 TP/SL CLOSE - Will check for continuation with moderate threshold")
 
