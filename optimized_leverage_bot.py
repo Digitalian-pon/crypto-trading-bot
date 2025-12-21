@@ -153,6 +153,13 @@ class OptimizedLeverageTradingBot:
         tp_sl_closed = False
         reversal_trade_type = None
 
+        # デバッグログ
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"POSITION_CHECK_START: has_positions={len(positions) > 0}, count={len(positions)}\n")
+        except:
+            pass
+
         if positions:
             logger.info(f"Checking {len(positions)} positions for closing...")
             # ファイルログにも記録
@@ -175,6 +182,13 @@ class OptimizedLeverageTradingBot:
                     f.write(f"POSITIONS_REMAINING: {len(positions)}\n")
             except:
                 pass
+        else:
+            # ポジションがない場合もログに記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"NO_POSITIONS_TO_CLOSE: Skipping close check\n")
+            except:
+                pass
 
         # 4. パフォーマンス統計表示
         self._display_performance_stats()
@@ -191,20 +205,47 @@ class OptimizedLeverageTradingBot:
             not positions                         # ポジションなし
         )
 
+        # デバッグログをファイルに記録
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"NEW_TRADE_CHECK_CONDITIONS: reversal={reversal_signal}, tp_sl={tp_sl_closed}, any_closed={any_closed}, positions={len(positions)}, should_check={should_check_new_trade}\n")
+        except:
+            pass
+
         if should_check_new_trade:
             if reversal_signal and reversal_trade_type:
                 logger.info(f"🔄 Position closed by reversal signal - FORCING {reversal_trade_type} order immediately...")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"NEW_TRADE_ACTION: REVERSAL_ORDER type={reversal_trade_type}\n")
+                except:
+                    pass
                 # 反転シグナル時は、シグナル再評価なしで強制的に反対注文を出す
                 self._place_forced_reversal_order(reversal_trade_type, current_price, df)
             elif tp_sl_closed:
                 logger.info("💰 Position closed by TP/SL - checking for continuation opportunity with moderate threshold...")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"NEW_TRADE_ACTION: TP_SL_CONTINUATION\n")
+                except:
+                    pass
                 # TP/SL決済時は中程度の閾値で継続機会を検討
                 self._check_for_new_trade(df, current_price, is_tpsl_continuation=True)
             elif not positions:
                 logger.info("✅ No positions - checking for new trade opportunities...")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"NEW_TRADE_ACTION: NO_POSITIONS_CHECK\n")
+                except:
+                    pass
                 self._check_for_new_trade(df, current_price, is_reversal=False)
         else:
             logger.info(f"⏸️  Still have {len(positions)} open positions - waiting...")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"NEW_TRADE_ACTION: WAITING (positions={len(positions)})\n")
+            except:
+                pass
 
     def _check_positions_for_closing(self, positions, current_price, df):
         """
