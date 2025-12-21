@@ -679,14 +679,40 @@ class OptimizedLeverageTradingBot:
             is_reversal: 反転シグナル直後かどうか（Trueの場合は価格変動フィルターをスキップ、緩い閾値）
             is_tpsl_continuation: TP/SL決済直後かどうか（Trueの場合は中程度の閾値）
         """
-        last_row = df.iloc[-1].to_dict()
+        # デバッグログ
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"CHECK_NEW_TRADE_CALLED: is_reversal={is_reversal}, is_tpsl={is_tpsl_continuation}, price=¥{current_price:.2f}\n")
+        except:
+            pass
 
-        # シグナル取得（DataFrameも渡す）
-        should_trade, trade_type, reason, confidence, stop_loss, take_profit = self.trading_logic.should_trade(
-            last_row, df, skip_price_filter=is_reversal, is_tpsl_continuation=is_tpsl_continuation
-        )
+        try:
+            last_row = df.iloc[-1].to_dict()
 
-        logger.info(f"🔍 Signal: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
+            # シグナル取得（DataFrameも渡す）
+            should_trade, trade_type, reason, confidence, stop_loss, take_profit = self.trading_logic.should_trade(
+                last_row, df, skip_price_filter=is_reversal, is_tpsl_continuation=is_tpsl_continuation
+            )
+
+            # デバッグログ
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"SIGNAL_RESULT: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}, reason={reason}\n")
+            except:
+                pass
+
+            logger.info(f"🔍 Signal: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}")
+        except Exception as e:
+            logger.error(f"❌ ERROR in _check_for_new_trade: {e}", exc_info=True)
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    import traceback
+                    f.write(f"ERROR_CHECK_NEW_TRADE: {type(e).__name__}: {str(e)}\n")
+                    f.write(f"TRACEBACK:\n")
+                    traceback.print_exc(file=f)
+            except:
+                pass
+            return
         if is_reversal:
             logger.info(f"   🔄 Reversal mode: price filter SKIPPED, relaxed threshold")
         elif is_tpsl_continuation:
