@@ -45,7 +45,7 @@ class OptimizedLeverageTradingBot:
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
         self.timeframe = config.get('trading', 'default_timeframe', fallback='1hour')
-        self.interval = 180  # チェック間隔（秒）- 3分（1時間足に適した間隔）
+        self.interval = 300  # チェック間隔（秒）- 5分（手数料負け防止のため延長）
 
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
@@ -223,14 +223,17 @@ class OptimizedLeverageTradingBot:
                 # 反転シグナル時は、シグナル再評価なしで強制的に反対注文を出す
                 self._place_forced_reversal_order(reversal_trade_type, current_price, df)
             elif tp_sl_closed:
-                logger.info("💰 Position closed by TP/SL - checking for continuation opportunity with moderate threshold...")
+                # TP/SL決済後は即座に再エントリーせず、クールダウン期間を設ける
+                # 理由: 同価格での往復ビンタ防止、手数料負け削減
+                logger.info("💰 Position closed by TP/SL - waiting for better entry opportunity (cooldown period)...")
+                logger.info("   Reason: Prevent immediate re-entry at same price, reduce fee erosion")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"NEW_TRADE_ACTION: TP_SL_CONTINUATION\n")
+                        f.write(f"NEW_TRADE_ACTION: TP_SL_COOLDOWN (no immediate re-entry)\n")
                 except:
                     pass
-                # TP/SL決済時は中程度の閾値で継続機会を検討
-                self._check_for_new_trade(df, current_price, is_tpsl_continuation=True)
+                # 継続機会チェックを無効化（コメントアウト）
+                # self._check_for_new_trade(df, current_price, is_tpsl_continuation=True)
             elif not positions:
                 logger.info("✅ No positions - checking for new trade opportunities...")
                 try:
@@ -317,8 +320,8 @@ class OptimizedLeverageTradingBot:
                 if position_id in self.active_positions_stops:
                     del self.active_positions_stops[position_id]
 
-                # 取引結果を記録
-                self.trading_logic.record_trade(side, entry_price, pl_ratio)
+                # 取引結果を記録（決済時はis_exit=True、決済価格を記録）
+                self.trading_logic.record_trade(side, current_price, pl_ratio, is_exit=True)
 
         return any_closed, reversal_signal, tp_sl_closed, reversal_trade_type
 
@@ -788,6 +791,9 @@ class OptimizedLeverageTradingBot:
                     logger.info(f"   SL: ¥{stop_loss:.2f}, TP: ¥{take_profit:.2f}")
                     logger.info(f"   Trailing stop: Ready (activates at ¥2+ profit)")
                     logger.info(f"📊 Active positions: {len(positions)}")
+
+                # エントリー成功時の記録（is_exit=False）
+                self.trading_logic.record_trade(trade_type, price, result=None, is_exit=False)
 
                 return True
             else:

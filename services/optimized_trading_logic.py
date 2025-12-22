@@ -28,33 +28,35 @@ class OptimizedTradingLogic:
         self.config = config or {}
         self.last_trade_time = None
         self.last_trade_price = None  # 最後の取引価格を記録
+        self.last_exit_price = None   # 最後の決済価格を記録（価格距離フィルター用）
         self.min_trade_interval = 300  # 5分（300秒）- 手数料負け防止のため延長
+        self.min_price_distance_ratio = 0.015  # 決済価格から1.5%以上動くまで再エントリー禁止
 
         # 取引履歴トラッキング（パフォーマンス分析用）
         self.trade_history = []
         self.recent_trades_limit = 20  # 直近20取引を追跡
 
         # 市場レジーム別パラメータ（完全トレンドフォロー戦略）
-        # 急激なトレンド転換対応：ストップロスを厳しく、反転検出を早く
+        # 手数料負け防止のため閾値を引き上げ（高品質シグナルのみ採用）
         self.regime_params = {
             'TRENDING': {
                 'rsi_oversold': 40,      # 押し目買い
                 'rsi_overbought': 60,    # 戻り売り
-                'signal_threshold': 0.8,  # トレンドフォロー専用で安全
+                'signal_threshold': 1.2,  # 0.8 → 1.2（手数料負け防止）
                 'stop_loss_atr_mult': 1.5,  # 2.5 → 1.5（損失削減）
                 'take_profit_atr_mult': 3.5,  # 5.0 → 3.5（早めの利確）
             },
             'RANGING': {
                 'rsi_oversold': 30,      # 押し目買い（逆張り禁止）
                 'rsi_overbought': 70,    # 戻り売り（逆張り禁止）
-                'signal_threshold': 1.0,  # やや慎重に
+                'signal_threshold': 1.5,  # 1.0 → 1.5（レンジ相場は慎重に）
                 'stop_loss_atr_mult': 1.5,  # 2.0 → 1.5（損失削減）
                 'take_profit_atr_mult': 3.0,  # 4.0 → 3.0（早めの利確）
             },
             'VOLATILE': {
                 'rsi_oversold': 35,
                 'rsi_overbought': 65,
-                'signal_threshold': 1.5,  # 高ボラ時は慎重に
+                'signal_threshold': 2.0,  # 1.5 → 2.0（高ボラ時は非常に慎重に）
                 'stop_loss_atr_mult': 2.0,  # 3.0 → 2.0（損失削減）
                 'take_profit_atr_mult': 4.0,  # 6.0 → 4.0（早めの利確）
             }
@@ -195,6 +197,16 @@ class OptimizedTradingLogic:
                 if not self._check_trade_timing():
                     logger.info(f"⏸️ Trade interval too short - waiting...")
                     return False, None, "Trade interval too short", 0.0, None, None
+
+                # 【NEW】価格距離フィルター（決済価格からの距離チェック）
+                # 目的: 利確/損切り直後の同価格再エントリー防止、手数料負け削減
+                if self.last_exit_price is not None:
+                    exit_price_distance = abs(current_price - self.last_exit_price) / self.last_exit_price
+                    if exit_price_distance < self.min_price_distance_ratio:
+                        logger.info(f"⏸️ Too close to last exit price ({exit_price_distance*100:.2f}% < {self.min_price_distance_ratio*100:.1f}%) - waiting for better entry...")
+                        logger.info(f"   Last exit price: ¥{self.last_exit_price:.2f}, Current: ¥{current_price:.2f}")
+                        logger.info(f"   Reason: Prevent whipsaw losses and fee erosion")
+                        return False, None, f"Too close to exit price ({exit_price_distance*100:.2f}%)", 0.0, None, None
 
                 # 最小価格変動チェック（手数料負け防止 - 5分足トレードに最適化）
                 if self.last_trade_price is not None:
@@ -515,16 +527,32 @@ class OptimizedTradingLogic:
         elapsed = (datetime.now(timezone.utc) - self.last_trade_time).total_seconds()
         return elapsed >= self.min_trade_interval
 
-    def record_trade(self, trade_type, price, result=None):
-        """取引記録（パフォーマンス追跡用）"""
+    def record_trade(self, trade_type, price, result=None, is_exit=False):
+        """
+        取引記録（パフォーマンス追跡用）
+
+        Args:
+            trade_type: 取引タイプ（BUY/SELL）
+            price: 取引価格
+            result: 損益結果（オプション）
+            is_exit: True=決済、False=エントリー（デフォルト）
+        """
         self.last_trade_time = datetime.now(timezone.utc)
-        self.last_trade_price = price  # 最後の取引価格を記録
+
+        if is_exit:
+            # 決済時: last_exit_priceを記録（価格距離フィルター用）
+            self.last_exit_price = price
+            logger.info(f"💰 Exit price recorded: ¥{price:.2f} (for price distance filter)")
+        else:
+            # エントリー時: last_trade_priceを記録
+            self.last_trade_price = price
 
         trade_record = {
             'timestamp': self.last_trade_time,
             'type': trade_type,
             'price': price,
-            'result': result
+            'result': result,
+            'is_exit': is_exit
         }
 
         self.trade_history.append(trade_record)
