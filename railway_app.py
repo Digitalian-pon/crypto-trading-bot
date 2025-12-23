@@ -4,6 +4,13 @@ Railway用統合アプリケーション - 最適化版
 - 24時間稼働対応
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
+
+VERSION: 2.1.0 - Fee Erosion Fix (2025-12-23)
+Changes:
+- TP/SL決済後の継続チェック無効化
+- 価格距離フィルター追加（1.5%）
+- 信頼度閾値引き上げ
+- チェック間隔延長（300秒）
 """
 
 import os
@@ -13,6 +20,11 @@ import logging
 from datetime import datetime
 import shutil
 import glob
+
+# バージョン情報
+VERSION = "2.1.0"
+BUILD_DATE = "2025-12-23"
+COMMIT_HASH = "8171d54"
 
 # キャッシュクリア: Railway環境で古いバイトコードが使われるのを防ぐ
 def clear_python_cache():
@@ -41,6 +53,10 @@ os.environ['GMO_API_KEY'] = 'FXhblJAz9Ql0G3pCo5p/+S9zkFw6r2VC'
 os.environ['GMO_API_SECRET'] = '/YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo'
 
 print("[RAILWAY] ========================================")
+print(f"[RAILWAY] VERSION: {VERSION}")
+print(f"[RAILWAY] BUILD_DATE: {BUILD_DATE}")
+print(f"[RAILWAY] COMMIT: {COMMIT_HASH}")
+print("[RAILWAY] ========================================")
 print("[RAILWAY] API Credentials Configuration")
 print("[RAILWAY] ========================================")
 print(f"[RAILWAY] GMO_API_KEY: {os.environ.get('GMO_API_KEY', 'NOT SET')[:10]}... (length: {len(os.environ.get('GMO_API_KEY', ''))})")
@@ -61,8 +77,15 @@ def run_trading_bot():
         try:
             logger.info("="*70)
             logger.info("🤖 TRADING BOT STARTING...")
+            logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
             logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
+            logger.info("🆕 NEW FEATURES:")
+            logger.info("   - TP/SL決済後の継続チェック無効化（クールダウン期間）")
+            logger.info("   - 価格距離フィルター（決済価格から1.5%以上動くまで待機）")
+            logger.info("   - 信頼度閾値引き上げ（高品質シグナルのみ）")
+            logger.info("   - チェック間隔延長（300秒=5分）")
+            logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
             bot = OptimizedLeverageTradingBot()
