@@ -565,6 +565,11 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
                             .decision-hold { color: #FFC107; }
                             .position-fetch { color: #2196F3; }
                             .error { color: #FF5722; font-weight: bold; }
+                            .entry-success { color: #00E676; font-weight: bold; background: #1B5E20; padding: 2px 5px; }
+                            .entry-failed { color: #FF5722; font-weight: bold; background: #BF360C; padding: 2px 5px; }
+                            .reversal-order { color: #FF6F00; font-weight: bold; background: #E65100; padding: 2px 5px; }
+                            .trade-entry { color: #00BCD4; font-weight: bold; }
+                            .trade-exit { color: #9C27B0; font-weight: bold; }
                             pre { white-space: pre-wrap; word-wrap: break-word; }
                         </style>
                     </head>
@@ -590,13 +595,23 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
                         for line in recent_lines:
                             if 'CYCLE_START' in line or '======' in line:
                                 formatted_lines.append(f'<span class="cycle-start">{line}</span>')
+                            elif 'ENTRY_SUCCESS' in line or 'POSITION_OPENED' in line:
+                                formatted_lines.append(f'<span class="entry-success">{line}</span>')
+                            elif 'ENTRY_FAILED' in line:
+                                formatted_lines.append(f'<span class="entry-failed">{line}</span>')
+                            elif 'REVERSAL_ORDER' in line:
+                                formatted_lines.append(f'<span class="reversal-order">{line}</span>')
+                            elif 'TRADE_ENTRY' in line:
+                                formatted_lines.append(f'<span class="trade-entry">{line}</span>')
+                            elif 'TRADE_EXIT' in line:
+                                formatted_lines.append(f'<span class="trade-exit">{line}</span>')
                             elif 'DECISION: CLOSE' in line:
                                 formatted_lines.append(f'<span class="decision-close">{line}</span>')
                             elif 'DECISION: HOLD' in line:
                                 formatted_lines.append(f'<span class="decision-hold">{line}</span>')
                             elif 'POSITION_FETCH' in line:
                                 formatted_lines.append(f'<span class="position-fetch">{line}</span>')
-                            elif 'ERROR' in line or 'Error' in line:
+                            elif 'ERROR' in line or 'Error' in line or 'FAILED' in line:
                                 formatted_lines.append(f'<span class="error">{line}</span>')
                             else:
                                 formatted_lines.append(f'<span class="log-line">{line}</span>')

@@ -543,9 +543,22 @@ class OptimizedTradingLogic:
             # 決済時: last_exit_priceを記録（価格距離フィルター用）
             self.last_exit_price = price
             logger.info(f"💰 Exit price recorded: ¥{price:.2f} (for price distance filter)")
+            # ファイルログに決済記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"TRADE_EXIT: {trade_type.upper()} @ ¥{price:.2f}, P/L={result if result else 'N/A'}\n")
+            except:
+                pass
         else:
             # エントリー時: last_trade_priceを記録
             self.last_trade_price = price
+            logger.info(f"📝 Entry price recorded: ¥{price:.2f}")
+            # ファイルログにエントリー記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"TRADE_ENTRY: {trade_type.upper()} @ ¥{price:.2f}\n")
+            except:
+                pass
 
         trade_record = {
             'timestamp': self.last_trade_time,

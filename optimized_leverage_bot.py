@@ -620,6 +620,13 @@ class OptimizedLeverageTradingBot:
         """
         logger.info(f"💥 FORCING {trade_type} ORDER - No signal re-evaluation")
 
+        # ファイルログに記録（可視性向上）
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"REVERSAL_ORDER_START: Forcing {trade_type.upper()} @ ¥{current_price:.2f}\n")
+        except:
+            pass
+
         # 残高確認
         balance = self.api.get_account_balance()
         available_jpy = 0
@@ -633,6 +640,12 @@ class OptimizedLeverageTradingBot:
 
         if available_jpy < 100:
             logger.warning("⚠️  Insufficient JPY balance for reversal order")
+            # ファイルログに記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"REVERSAL_ORDER_FAILED: Insufficient balance (¥{available_jpy:.2f})\n")
+            except:
+                pass
             return
 
         # ポジションサイズ計算（残高の95%）
@@ -662,6 +675,14 @@ class OptimizedLeverageTradingBot:
         logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")
         logger.info(f"   Reason: Trend Reversal - Forced Opposite Position")
 
+        # ファイルログに詳細記録
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"REVERSAL_ORDER_ATTEMPT: {trade_type.upper()} {trade_size} DOGE @ ¥{current_price:.2f}\n")
+                f.write(f"REVERSAL_ORDER_SL_TP: SL=¥{stop_loss:.2f}, TP=¥{take_profit:.2f}\n")
+        except:
+            pass
+
         # 注文実行
         success = self._place_order(trade_type, trade_size, current_price,
                                     f"Forced {trade_type.upper()} on trend reversal",
@@ -671,6 +692,19 @@ class OptimizedLeverageTradingBot:
             # 取引記録
             self.trading_logic.record_trade(trade_type, current_price)
             logger.info(f"✅ Forced reversal order completed successfully")
+            # ファイルログに成功記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"REVERSAL_ORDER_COMPLETED: {trade_type.upper()} successfully executed\n")
+            except:
+                pass
+        else:
+            # ファイルログに失敗記録
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"REVERSAL_ORDER_FAILED: {trade_type.upper()} execution failed\n")
+            except:
+                pass
 
     def _check_for_new_trade(self, df, current_price, is_reversal=False, is_tpsl_continuation=False):
         """
@@ -771,6 +805,15 @@ class OptimizedLeverageTradingBot:
                 logger.info(f"   Size: {size} DOGE, Price: ¥{price:.2f}")
                 logger.info(f"   Reason: {reason}")
 
+                # ファイルログに記録（可視性向上）
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"ENTRY_SUCCESS: {trade_type.upper()} {size} DOGE @ ¥{price:.2f}\n")
+                        f.write(f"ENTRY_REASON: {reason}\n")
+                        f.write(f"ENTRY_SL_TP: SL=¥{stop_loss:.2f}, TP=¥{take_profit:.2f}\n")
+                except:
+                    pass
+
                 # 注文後、ポジションIDを取得してSL/TP記録
                 time.sleep(2)
                 positions = self.api.get_positions(symbol=self.symbol)
@@ -792,12 +835,25 @@ class OptimizedLeverageTradingBot:
                     logger.info(f"   Trailing stop: Ready (activates at ¥2+ profit)")
                     logger.info(f"📊 Active positions: {len(positions)}")
 
+                    # ファイルログにポジションID記録
+                    try:
+                        with open('bot_execution_log.txt', 'a') as f:
+                            f.write(f"POSITION_OPENED: ID={position_id}, {trade_type.upper()} {size} @ ¥{price:.2f}\n")
+                    except:
+                        pass
+
                 # エントリー成功時の記録（is_exit=False）
                 self.trading_logic.record_trade(trade_type, price, result=None, is_exit=False)
 
                 return True
             else:
                 logger.error(f"❌ Order failed: {result}")
+                # ファイルログに失敗記録
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"ENTRY_FAILED: {trade_type.upper()} {size} DOGE - {result}\n")
+                except:
+                    pass
                 return False
 
         except Exception as e:
