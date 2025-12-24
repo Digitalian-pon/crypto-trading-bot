@@ -5,12 +5,14 @@ Railway用統合アプリケーション - 最適化版
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.1.0 - Fee Erosion Fix (2025-12-23)
+VERSION: 2.1.1 - Complete Logging Enhancement (2025-12-24)
 Changes:
 - TP/SL決済後の継続チェック無効化
 - 価格距離フィルター追加（1.5%）
 - 信頼度閾値引き上げ
 - チェック間隔延長（300秒）
+- 完全なファイルログ記録（エントリー、決済、反転注文）
+- ダッシュボード /logs の色分け強化
 """
 
 import os
@@ -22,9 +24,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.1.0"
-BUILD_DATE = "2025-12-23"
-COMMIT_HASH = "8171d54"
+VERSION = "2.1.1"
+BUILD_DATE = "2025-12-24"
+COMMIT_HASH = "e5088bc"
 
 # キャッシュクリア: Railway環境で古いバイトコードが使われるのを防ぐ
 def clear_python_cache():
@@ -80,11 +82,13 @@ def run_trading_bot():
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
             logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
-            logger.info("🆕 NEW FEATURES:")
+            logger.info("🆕 NEW FEATURES (v2.1.1):")
             logger.info("   - TP/SL決済後の継続チェック無効化（クールダウン期間）")
             logger.info("   - 価格距離フィルター（決済価格から1.5%以上動くまで待機）")
             logger.info("   - 信頼度閾値引き上げ（高品質シグナルのみ）")
             logger.info("   - チェック間隔延長（300秒=5分）")
+            logger.info("   - 📝 完全なファイルログ記録（ENTRY/EXIT/REVERSAL追跡可能）")
+            logger.info("   - 🎨 ダッシュボード /logs の色分け強化")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
