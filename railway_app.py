@@ -5,7 +5,7 @@ Railway用統合アプリケーション - 最適化版
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.1.1 - Complete Logging Enhancement (2025-12-24)
+VERSION: 2.1.2 - Force Cache Clear + Entry Logging (2025-12-25)
 Changes:
 - TP/SL決済後の継続チェック無効化
 - 価格距離フィルター追加（1.5%）
@@ -13,6 +13,8 @@ Changes:
 - チェック間隔延長（300秒）
 - 完全なファイルログ記録（エントリー、決済、反転注文）
 - ダッシュボード /logs の色分け強化
+- 強力なキャッシュクリア（.pyc削除 + importlib無効化）
+- エントリーログの確実な記録
 """
 
 import os
@@ -24,29 +26,54 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.1.1"
-BUILD_DATE = "2025-12-24"
-COMMIT_HASH = "e5088bc"
+VERSION = "2.1.2"
+BUILD_DATE = "2025-12-25"
+COMMIT_HASH = "a0a6099"
 
-# キャッシュクリア: Railway環境で古いバイトコードが使われるのを防ぐ
+# 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
-    """Pythonキャッシュファイル（__pycache__、.pyc）を削除"""
+    """Pythonキャッシュファイル（__pycache__、.pyc、.pyo）を完全削除"""
     try:
+        removed_count = 0
+
         # __pycache__ ディレクトリを削除
         for pycache_dir in glob.glob('**/__pycache__', recursive=True):
-            shutil.rmtree(pycache_dir, ignore_errors=True)
-            print(f"[CACHE] Removed: {pycache_dir}")
+            try:
+                shutil.rmtree(pycache_dir, ignore_errors=False)
+                print(f"[CACHE] Removed directory: {pycache_dir}")
+                removed_count += 1
+            except Exception as e:
+                print(f"[CACHE] Warning removing {pycache_dir}: {e}")
 
         # .pyc ファイルを削除
         for pyc_file in glob.glob('**/*.pyc', recursive=True):
-            os.remove(pyc_file)
-            print(f"[CACHE] Removed: {pyc_file}")
+            try:
+                os.remove(pyc_file)
+                print(f"[CACHE] Removed file: {pyc_file}")
+                removed_count += 1
+            except Exception as e:
+                print(f"[CACHE] Warning removing {pyc_file}: {e}")
 
-        print("[CACHE] ✅ Python cache cleared successfully")
+        # .pyo ファイルも削除（最適化バイトコード）
+        for pyo_file in glob.glob('**/*.pyo', recursive=True):
+            try:
+                os.remove(pyo_file)
+                print(f"[CACHE] Removed file: {pyo_file}")
+                removed_count += 1
+            except Exception as e:
+                print(f"[CACHE] Warning removing {pyo_file}: {e}")
+
+        print(f"[CACHE] ✅ Python cache cleared successfully ({removed_count} items)")
+
+        # sys.dont_write_bytecodeを設定して新しいキャッシュ生成を抑制
+        sys.dont_write_bytecode = True
+        print("[CACHE] ✅ Bytecode generation disabled")
+
     except Exception as e:
-        print(f"[CACHE] ⚠️ Cache clear warning: {e}")
+        print(f"[CACHE] ⚠️ Cache clear error: {e}")
 
 # 起動時にキャッシュクリア
+print("[CACHE] Starting aggressive cache clear...")
 clear_python_cache()
 
 # Railway環境: 環境変数を強制的にハードコード値で設定
@@ -82,13 +109,15 @@ def run_trading_bot():
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
             logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
-            logger.info("🆕 NEW FEATURES (v2.1.1):")
+            logger.info("🆕 NEW FEATURES (v2.1.2):")
             logger.info("   - TP/SL決済後の継続チェック無効化（クールダウン期間）")
             logger.info("   - 価格距離フィルター（決済価格から1.5%以上動くまで待機）")
             logger.info("   - 信頼度閾値引き上げ（高品質シグナルのみ）")
             logger.info("   - チェック間隔延長（300秒=5分）")
             logger.info("   - 📝 完全なファイルログ記録（ENTRY/EXIT/REVERSAL追跡可能）")
             logger.info("   - 🎨 ダッシュボード /logs の色分け強化")
+            logger.info("   - 🔥 強力なキャッシュクリア（.pyc/.pyo完全削除）")
+            logger.info("   - 🚀 エントリーログの確実な記録")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 

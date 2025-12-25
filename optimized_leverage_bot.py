@@ -811,8 +811,11 @@ class OptimizedLeverageTradingBot:
                         f.write(f"ENTRY_SUCCESS: {trade_type.upper()} {size} DOGE @ ¥{price:.2f}\n")
                         f.write(f"ENTRY_REASON: {reason}\n")
                         f.write(f"ENTRY_SL_TP: SL=¥{stop_loss:.2f}, TP=¥{take_profit:.2f}\n")
-                except:
-                    pass
+                        f.flush()  # 即座にディスクに書き込み
+                    logger.info(f"📝 Entry log written to file")
+                except Exception as e:
+                    logger.error(f"❌ Failed to write entry log: {e}")
+                    # エラーでも継続
 
                 # 注文後、ポジションIDを取得してSL/TP記録
                 time.sleep(2)
@@ -839,8 +842,11 @@ class OptimizedLeverageTradingBot:
                     try:
                         with open('bot_execution_log.txt', 'a') as f:
                             f.write(f"POSITION_OPENED: ID={position_id}, {trade_type.upper()} {size} @ ¥{price:.2f}\n")
-                    except:
-                        pass
+                            f.flush()  # 即座にディスクに書き込み
+                        logger.info(f"📝 Position opened log written to file")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to write position log: {e}")
+                        # エラーでも継続
 
                 # エントリー成功時の記録（is_exit=False）
                 self.trading_logic.record_trade(trade_type, price, result=None, is_exit=False)
