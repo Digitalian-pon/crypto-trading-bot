@@ -5,16 +5,17 @@ Railway用統合アプリケーション - 最適化版
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.1.2 - Force Cache Clear + Entry Logging (2025-12-25)
+VERSION: 2.1.3 - Dynamic Price Distance Filter (2025-12-26)
 Changes:
+- 動的価格距離フィルター実装（信頼度ベース）
+  - 高信頼度(>=1.5): 1.0% → 強いシグナルを早期捕捉
+  - 中信頼度(>=1.0): 1.5% → 標準的な安全マージン
+  - 低信頼度(<1.0): 2.0% → 慎重な取引
+- シグナルが出ているのに注文が出ない問題を解決
 - TP/SL決済後の継続チェック無効化
-- 価格距離フィルター追加（1.5%）
-- 信頼度閾値引き上げ
-- チェック間隔延長（300秒）
 - 完全なファイルログ記録（エントリー、決済、反転注文）
 - ダッシュボード /logs の色分け強化
 - 強力なキャッシュクリア（.pyc削除 + importlib無効化）
-- エントリーログの確実な記録
 """
 
 import os
@@ -26,9 +27,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.1.2"
-BUILD_DATE = "2025-12-25"
-COMMIT_HASH = "a0a6099"
+VERSION = "2.1.3"
+BUILD_DATE = "2025-12-26"
+COMMIT_HASH = "dynamic-filter"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
