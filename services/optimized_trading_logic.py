@@ -355,17 +355,20 @@ class OptimizedTradingLogic:
                 trend_strength = (price_ema_diff + ema_trend) / 2
                 trend_quality = 0.5  # デフォルト品質
 
-            # トレンド方向分類
+            # トレンド方向分類（NEUTRAL範囲を厳格化: ±1% → ±0.3%）
+            # 理由: 弱いトレンドもトレンドとして扱い、NEUTRAL時の誤シグナルを防ぐ
             if trend_strength > 0.03:
                 direction = 'STRONG_UP'
-            elif trend_strength > 0.01:
+            elif trend_strength > 0.003:  # 0.01 → 0.003（0.3%）に厳格化
                 direction = 'UP'
             elif trend_strength < -0.03:
                 direction = 'STRONG_DOWN'
-            elif trend_strength < -0.01:
+            elif trend_strength < -0.003:  # -0.01 → -0.003（-0.3%）に厳格化
                 direction = 'DOWN'
             else:
-                direction = 'NEUTRAL'
+                direction = 'NEUTRAL'  # ±0.3%以内のみNEUTRAL
+
+            logger.info(f"🎯 Trend Classification: {direction} (strength={trend_strength:.5f}, threshold=±0.003)")
 
             return {
                 'direction': direction,
@@ -396,13 +399,9 @@ class OptimizedTradingLogic:
             if rsi < oversold_level:
                 signals.append(('BUY', 'RSI Dip Uptrend', 0.4))  # 0.8 → 0.4（補助指標化）
         elif trend_direction == 'NEUTRAL':
-            # NEUTRAL時: 極端な値で取引（補助シグナル）
-            if rsi < 25:
-                # 極端な売られすぎ → 補助BUYシグナル
-                signals.append(('BUY', 'RSI Extreme Oversold', 0.6))  # 1.2 → 0.6（補助指標化）
-            elif rsi > 75:
-                # 極端な買われすぎ → 補助SELLシグナル
-                signals.append(('SELL', 'RSI Extreme Overbought', 0.6))  # 1.2 → 0.6（補助指標化）
+            # NEUTRAL時: RSIシグナルなし（トレンドフォロー戦略に徹する）
+            # 理由: NEUTRAL時の逆張りは損失の原因となるため完全に無効化
+            logger.info(f"⚪ RSI analysis skipped for NEUTRAL trend (RSI={rsi:.1f})")
 
         return signals
 
@@ -418,8 +417,8 @@ class OptimizedTradingLogic:
         histogram_strength = abs(macd_histogram)
 
         if is_bullish_cross:
-            # 上昇トレンドまたは中立時のみ採用
-            if trend_direction in ['UP', 'STRONG_UP', 'NEUTRAL']:
+            # 上昇トレンド時のみ採用（NEUTRALを除外してトレンドフォローに徹する）
+            if trend_direction in ['UP', 'STRONG_UP']:
                 if histogram_strength > 0.03:  # 強いシグナル
                     signals.append(('BUY', 'MACD Strong Bullish', 2.5))  # 1.0 → 2.5（主要指標化）
                 elif histogram_strength > 0.005:  # 通常シグナル（閾値を0.01→0.005に下げて感度向上）
@@ -427,10 +426,13 @@ class OptimizedTradingLogic:
                 else:
                     # 弱いクロスでも記録
                     signals.append(('BUY', 'MACD Weak Cross', 1.2))  # 新規追加
+                logger.info(f"🟢 MACD Bullish Cross detected in {trend_direction} trend")
+            else:
+                logger.info(f"⚪ MACD Bullish Cross ignored ({trend_direction} - not uptrend)")
 
         elif is_bearish_cross:
-            # 下降トレンドまたは中立時のみ採用
-            if trend_direction in ['DOWN', 'STRONG_DOWN', 'NEUTRAL']:
+            # 下降トレンド時のみ採用（NEUTRALを除外してトレンドフォローに徹する）
+            if trend_direction in ['DOWN', 'STRONG_DOWN']:
                 if histogram_strength > 0.03:  # 強いシグナル
                     signals.append(('SELL', 'MACD Strong Bearish', 2.5))  # 1.0 → 2.5（主要指標化）
                 elif histogram_strength > 0.005:  # 通常シグナル（閾値を0.01→0.005に下げて感度向上）
@@ -438,6 +440,9 @@ class OptimizedTradingLogic:
                 else:
                     # 弱いクロスでも記録
                     signals.append(('SELL', 'MACD Weak Cross', 1.2))  # 新規追加
+                logger.info(f"🔴 MACD Bearish Cross detected in {trend_direction} trend")
+            else:
+                logger.info(f"⚪ MACD Bearish Cross ignored ({trend_direction} - not downtrend)")
 
         return signals
 

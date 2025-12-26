@@ -5,17 +5,27 @@ Railway用統合アプリケーション - 最適化版
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.1.3 - Dynamic Price Distance Filter (2025-12-26)
+VERSION: 2.2.0 - Fix Signal Reversal Bug (2025-12-26)
 Changes:
-- 動的価格距離フィルター実装（信頼度ベース）
-  - 高信頼度(>=1.5): 1.0% → 強いシグナルを早期捕捉
-  - 中信頼度(>=1.0): 1.5% → 標準的な安全マージン
-  - 低信頼度(<1.0): 2.0% → 慎重な取引
-- シグナルが出ているのに注文が出ない問題を解決
-- TP/SL決済後の継続チェック無効化
-- 完全なファイルログ記録（エントリー、決済、反転注文）
-- ダッシュボード /logs の色分け強化
-- 強力なキャッシュクリア（.pyc削除 + importlib無効化）
+🔧 **CRITICAL FIX**: シグナル逆転バグの完全修正
+- NEUTRAL判定範囲を厳格化（±1% → ±0.3%）
+- MACDシグナルからNEUTRALを完全除外
+- RSI NEUTRAL時のシグナル無効化
+- 完全トレンドフォロー戦略に徹する
+
+問題の原因:
+- 上昇トレンド中でもNEUTRAL判定 → MACDベアリッシュ発動 → SELLシグナル
+- 結果: 市場と逆方向の取引で損失累積（勝率20%）
+
+修正内容:
+- NEUTRAL範囲: ±0.3%以内のみ（弱いトレンドもトレンドとして扱う）
+- MACD: 明確なトレンド時のみシグナル発動
+- RSI: NEUTRAL時は完全沈黙
+
+期待される効果:
+- シグナルと市場動向の一致
+- 勝率の大幅改善（20% → 50%+）
+- 損失削減
 """
 
 import os
@@ -27,9 +37,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.1.3"
+VERSION = "2.2.0"
 BUILD_DATE = "2025-12-26"
-COMMIT_HASH = "dynamic-filter"
+COMMIT_HASH = "fix-signal-reversal"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
