@@ -5,27 +5,23 @@ Railway用統合アプリケーション - 最適化版
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.2.0 - Fix Signal Reversal Bug (2025-12-26)
+VERSION: 2.2.1 - Optimize Signal Thresholds (2025-12-28)
 Changes:
-🔧 **CRITICAL FIX**: シグナル逆転バグの完全修正
-- NEUTRAL判定範囲を厳格化（±1% → ±0.3%）
-- MACDシグナルからNEUTRALを完全除外
-- RSI NEUTRAL時のシグナル無効化
-- 完全トレンドフォロー戦略に徹する
+⚡ **機会損失削減**: シグナル閾値の最適化
+- RANGING閾値: 1.5 → 1.0（レンジ相場でもシグナルが出やすく）
+- VOLATILE閾値: 2.0 → 1.7（高ボラ市場でも適度に取引）
+- TRENDING判定条件: EMA差0.3% → 0.2%（より多くの状況でTRENDING判定）
 
-問題の原因:
-- 上昇トレンド中でもNEUTRAL判定 → MACDベアリッシュ発動 → SELLシグナル
-- 結果: 市場と逆方向の取引で損失累積（勝率20%）
-
-修正内容:
-- NEUTRAL範囲: ±0.3%以内のみ（弱いトレンドもトレンドとして扱う）
-- MACD: 明確なトレンド時のみシグナル発動
-- RSI: NEUTRAL時は完全沈黙
+Version 2.2.0の効果を維持:
+- NEUTRAL判定範囲: ±0.3%（厳格化維持）
+- MACDシグナル: トレンド方向のみ（逆張り禁止維持）
+- RSI: NEUTRAL時は無効化（維持）
 
 期待される効果:
-- シグナルと市場動向の一致
-- 勝率の大幅改善（20% → 50%+）
-- 損失削減
+- シグナル実行率の向上（取引機会増加）
+- 機会損失の削減
+- Version 2.2.0の品質改善を維持
+- 手数料負け防止（0.5%価格フィルター）は継続
 """
 
 import os
@@ -37,9 +33,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.2.0"
-BUILD_DATE = "2025-12-26"
-COMMIT_HASH = "fix-signal-reversal"
+VERSION = "2.2.1"
+BUILD_DATE = "2025-12-28"
+COMMIT_HASH = "optimize-thresholds"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

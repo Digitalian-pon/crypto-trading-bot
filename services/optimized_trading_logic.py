@@ -37,7 +37,7 @@ class OptimizedTradingLogic:
         self.recent_trades_limit = 20  # 直近20取引を追跡
 
         # 市場レジーム別パラメータ（完全トレンドフォロー戦略）
-        # 手数料負け防止のため閾値を引き上げ（高品質シグナルのみ採用）
+        # 機会損失削減のため閾値を最適化（Version 2.2.1）
         self.regime_params = {
             'TRENDING': {
                 'rsi_oversold': 40,      # 押し目買い
@@ -49,14 +49,14 @@ class OptimizedTradingLogic:
             'RANGING': {
                 'rsi_oversold': 30,      # 押し目買い（逆張り禁止）
                 'rsi_overbought': 70,    # 戻り売り（逆張り禁止）
-                'signal_threshold': 1.5,  # 1.0 → 1.5（レンジ相場は慎重に）
+                'signal_threshold': 1.0,  # 1.5 → 1.0（機会損失削減、v2.2.1で最適化）
                 'stop_loss_atr_mult': 1.5,  # 2.0 → 1.5（損失削減）
                 'take_profit_atr_mult': 3.0,  # 4.0 → 3.0（早めの利確）
             },
             'VOLATILE': {
                 'rsi_oversold': 35,
                 'rsi_overbought': 65,
-                'signal_threshold': 2.0,  # 1.5 → 2.0（高ボラ時は非常に慎重に）
+                'signal_threshold': 1.7,  # 2.0 → 1.7（機会損失削減、v2.2.1で最適化）
                 'stop_loss_atr_mult': 2.0,  # 3.0 → 2.0（損失削減）
                 'take_profit_atr_mult': 4.0,  # 6.0 → 4.0（早めの利確）
             }
@@ -301,10 +301,10 @@ class OptimizedTradingLogic:
 
             logger.info(f"Regime Detection: ATR%={atr_pct:.3f}, Slope={normalized_slope:.6f}, EMA Diff%={ema_diff_pct:.3f}")
 
-            # レジーム判定（TRENDING判定を緩和してトレンドフォロー機会を増やす）
+            # レジーム判定（TRENDING判定を緩和してトレンドフォロー機会を増やす、v2.2.1で最適化）
             if atr_pct > 4.0:  # 4%以上のボラティリティ
                 return 'VOLATILE'
-            elif abs(normalized_slope) > 0.01 and ema_diff_pct > 0.3:  # 1.0% → 0.3%に大幅緩和
+            elif abs(normalized_slope) > 0.01 and ema_diff_pct > 0.2:  # 0.3% → 0.2%にさらに緩和
                 return 'TRENDING'
             else:
                 return 'RANGING'
