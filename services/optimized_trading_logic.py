@@ -200,32 +200,38 @@ class OptimizedTradingLogic:
 
                 # 【NEW】動的価格距離フィルター（信頼度に応じた距離チェック）
                 # 目的: 利確/損切り直後の同価格再エントリー防止、手数料負け削減
-                # 高信頼度シグナルなら早めにエントリー可能
+                # 高信頼度シグナルなら早めにエントリー可能（v2.2.2で閾値を大幅緩和）
                 if self.last_exit_price is not None:
                     exit_price_distance = abs(current_price - self.last_exit_price) / self.last_exit_price
 
                     # 現在のシグナル強度を取得（仮のconfidence）
                     potential_confidence = max(buy_score, sell_score)
 
-                    # 信頼度に応じた動的閾値
-                    if potential_confidence >= 1.5:
-                        # 高信頼度: 1.0%（強いシグナルなら早めにエントリー）
-                        dynamic_threshold = 0.010
-                    elif potential_confidence >= 1.0:
-                        # 中信頼度: 1.5%（通常の安全マージン）
-                        dynamic_threshold = 0.015
+                    # 非常に高信頼度（2.0以上）のシグナルは価格距離フィルターをスキップ
+                    if potential_confidence >= 2.0:
+                        logger.info(f"✨ Very high confidence signal ({potential_confidence:.2f}) - SKIP price distance filter")
+                        logger.info(f"   Last exit: ¥{self.last_exit_price:.2f}, Current: ¥{current_price:.2f}, Distance: {exit_price_distance*100:.2f}%")
+                        # フィルターをスキップ（次のチェックへ進む）
                     else:
-                        # 低信頼度: 2.0%（弱いシグナルは慎重に）
-                        dynamic_threshold = 0.020
+                        # 信頼度に応じた動的閾値（v2.2.2で半分に緩和）
+                        if potential_confidence >= 1.5:
+                            # 高信頼度: 0.5%（1.0% → 0.5%に緩和）
+                            dynamic_threshold = 0.005
+                        elif potential_confidence >= 1.0:
+                            # 中信頼度: 0.75%（1.5% → 0.75%に緩和）
+                            dynamic_threshold = 0.0075
+                        else:
+                            # 低信頼度: 1.0%（2.0% → 1.0%に緩和）
+                            dynamic_threshold = 0.010
 
-                    if exit_price_distance < dynamic_threshold:
-                        logger.info(f"⏸️ Too close to last exit price ({exit_price_distance*100:.2f}% < {dynamic_threshold*100:.1f}%) - waiting for better entry...")
-                        logger.info(f"   Signal confidence: {potential_confidence:.2f}, Required distance: {dynamic_threshold*100:.1f}%")
-                        logger.info(f"   Last exit price: ¥{self.last_exit_price:.2f}, Current: ¥{current_price:.2f}")
-                        logger.info(f"   Reason: Prevent whipsaw losses (dynamic threshold based on signal strength)")
-                        return False, None, f"Too close to exit price ({exit_price_distance*100:.2f}%)", 0.0, None, None
-                    else:
-                        logger.info(f"✅ Price distance OK: {exit_price_distance*100:.2f}% >= {dynamic_threshold*100:.1f}% (confidence={potential_confidence:.2f})")
+                        if exit_price_distance < dynamic_threshold:
+                            logger.info(f"⏸️ Too close to last exit price ({exit_price_distance*100:.2f}% < {dynamic_threshold*100:.1f}%) - waiting for better entry...")
+                            logger.info(f"   Signal confidence: {potential_confidence:.2f}, Required distance: {dynamic_threshold*100:.1f}%")
+                            logger.info(f"   Last exit price: ¥{self.last_exit_price:.2f}, Current: ¥{current_price:.2f}")
+                            logger.info(f"   Reason: Prevent whipsaw losses (dynamic threshold based on signal strength)")
+                            return False, None, f"Too close to exit price ({exit_price_distance*100:.2f}%)", 0.0, None, None
+                        else:
+                            logger.info(f"✅ Price distance OK: {exit_price_distance*100:.2f}% >= {dynamic_threshold*100:.1f}% (confidence={potential_confidence:.2f})")
 
                 # 最小価格変動チェック（手数料負け防止 - 5分足トレードに最適化）
                 if self.last_trade_price is not None:

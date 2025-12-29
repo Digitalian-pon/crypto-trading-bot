@@ -385,7 +385,7 @@ class OptimizedLeverageTradingBot:
                 f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
                 f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"THRESHOLD: ¥2.5 (profit) / -0.5% (loss) / -¥2.0 (absolute loss)\n")
+                f.write(f"THRESHOLD: ¥2.5 (profit) / -0.5% (loss) / -¥5.0 (absolute loss)\n")
         except:
             pass
 
@@ -410,12 +410,12 @@ class OptimizedLeverageTradingBot:
                 pass
             return True, f"Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
 
-        # 【緊急損切り】絶対額での損切り: -¥2.0（より早めに）
-        if net_profit <= -2.0:
-            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥2.0")
+        # 【緊急損切り】絶対額での損切り: -¥5.0（4時間足に最適化）
+        if net_profit <= -5.0:
+            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥5.0")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (absolute_loss ¥{net_profit:.2f} <= -¥2.0)\n")
+                    f.write(f"DECISION: CLOSE (absolute_loss ¥{net_profit:.2f} <= -¥5.0)\n")
             except:
                 pass
             return True, f"Absolute Loss Limit: ¥{net_profit:.2f}", None
