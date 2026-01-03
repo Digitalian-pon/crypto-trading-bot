@@ -223,17 +223,17 @@ class OptimizedLeverageTradingBot:
                 # 反転シグナル時は、シグナル再評価なしで強制的に反対注文を出す
                 self._place_forced_reversal_order(reversal_trade_type, current_price, df)
             elif tp_sl_closed:
-                # TP/SL決済後は即座に再エントリーせず、クールダウン期間を設ける
-                # 理由: 同価格での往復ビンタ防止、手数料負け削減
-                logger.info("💰 Position closed by TP/SL - waiting for better entry opportunity (cooldown period)...")
-                logger.info("   Reason: Prevent immediate re-entry at same price, reduce fee erosion")
+                # TP/SL決済後も新規エントリーをチェック（価格距離フィルターで保護）
+                # 改善: 完全クールダウン→価格距離フィルターのみで制御
+                logger.info("💰 Position closed by TP/SL - checking for new opportunities...")
+                logger.info("   Note: Price distance filter will prevent immediate re-entry at same price")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"NEW_TRADE_ACTION: TP_SL_COOLDOWN (no immediate re-entry)\n")
+                        f.write(f"NEW_TRADE_ACTION: TP_SL_CHECK (with price distance filter)\n")
                 except:
                     pass
-                # 継続機会チェックを無効化（コメントアウト）
-                # self._check_for_new_trade(df, current_price, is_tpsl_continuation=True)
+                # 価格距離フィルターが機能するので、新規エントリーチェックを実行
+                self._check_for_new_trade(df, current_price, is_reversal=False)
             elif not positions:
                 logger.info("✅ No positions - checking for new trade opportunities...")
                 try:
@@ -385,16 +385,17 @@ class OptimizedLeverageTradingBot:
                 f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
                 f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"THRESHOLD: ¥2.5 (profit) / -0.5% (loss) / -¥5.0 (absolute loss, 1h optimized)\n")
+                f.write(f"THRESHOLD: ¥1.5 (profit) / -0.5% (loss) / -¥5.0 (absolute loss, optimized for 4h)\n")
         except:
             pass
 
-        # 【利確】純利益が¥2.5以上なら利確（手数料¥2 + 最小利益¥0.5）
-        if net_profit >= 2.5:
-            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥2.5)")
+        # 【利確】純利益が¥1.5以上なら利確（手数料¥2を考慮しつつ早めの利確）
+        # 改善: ¥2.5→¥1.5に下げて機会損失を削減
+        if net_profit >= 1.5:
+            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥1.5)")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥2.5)\n")
+                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥1.5)\n")
             except:
                 pass
             return True, f"Take Profit: ¥{net_profit:.2f}", None

@@ -37,28 +37,28 @@ class OptimizedTradingLogic:
         self.recent_trades_limit = 20  # 直近20取引を追跡
 
         # 市場レジーム別パラメータ（完全トレンドフォロー戦略）
-        # 機会損失削減のため閾値を最適化（Version 2.2.1）
+        # Version 2.3.0 - 4時間足最適化（機会損失削減と損失抑制のバランス）
         self.regime_params = {
             'TRENDING': {
                 'rsi_oversold': 40,      # 押し目買い
                 'rsi_overbought': 60,    # 戻り売り
-                'signal_threshold': 1.2,  # 0.8 → 1.2（手数料負け防止）
-                'stop_loss_atr_mult': 1.5,  # 2.5 → 1.5（損失削減）
-                'take_profit_atr_mult': 3.5,  # 5.0 → 3.5（早めの利確）
+                'signal_threshold': 1.0,  # 1.2 → 1.0（4時間足では厳しすぎる）
+                'stop_loss_atr_mult': 1.5,  # 損失削減
+                'take_profit_atr_mult': 3.5,  # 早めの利確
             },
             'RANGING': {
                 'rsi_oversold': 30,      # 押し目買い（逆張り禁止）
                 'rsi_overbought': 70,    # 戻り売り（逆張り禁止）
-                'signal_threshold': 1.0,  # 1.5 → 1.0（機会損失削減、v2.2.1で最適化）
-                'stop_loss_atr_mult': 1.5,  # 2.0 → 1.5（損失削減）
-                'take_profit_atr_mult': 3.0,  # 4.0 → 3.0（早めの利確）
+                'signal_threshold': 0.9,  # 1.0 → 0.9（機会損失削減）
+                'stop_loss_atr_mult': 1.5,  # 損失削減
+                'take_profit_atr_mult': 3.0,  # 早めの利確
             },
             'VOLATILE': {
                 'rsi_oversold': 35,
                 'rsi_overbought': 65,
-                'signal_threshold': 1.7,  # 2.0 → 1.7（機会損失削減、v2.2.1で最適化）
-                'stop_loss_atr_mult': 2.0,  # 3.0 → 2.0（損失削減）
-                'take_profit_atr_mult': 4.0,  # 6.0 → 4.0（早めの利確）
+                'signal_threshold': 1.5,  # 1.7 → 1.5（機会損失削減）
+                'stop_loss_atr_mult': 2.0,  # 損失削減
+                'take_profit_atr_mult': 4.0,  # 早めの利確
             }
         }
 
@@ -213,16 +213,16 @@ class OptimizedTradingLogic:
                         logger.info(f"   Last exit: ¥{self.last_exit_price:.2f}, Current: ¥{current_price:.2f}, Distance: {exit_price_distance*100:.2f}%")
                         # フィルターをスキップ（次のチェックへ進む）
                     else:
-                        # 信頼度に応じた動的閾値（v2.2.2で半分に緩和）
+                        # 信頼度に応じた動的閾値（v2.3.0でさらに緩和 - 4時間足最適化）
                         if potential_confidence >= 1.5:
-                            # 高信頼度: 0.5%（1.0% → 0.5%に緩和）
-                            dynamic_threshold = 0.005
+                            # 高信頼度: 0.3%（機会損失削減を優先）
+                            dynamic_threshold = 0.003
                         elif potential_confidence >= 1.0:
-                            # 中信頼度: 0.75%（1.5% → 0.75%に緩和）
-                            dynamic_threshold = 0.0075
+                            # 中信頼度: 0.5%（バランス型）
+                            dynamic_threshold = 0.005
                         else:
-                            # 低信頼度: 1.0%（2.0% → 1.0%に緩和）
-                            dynamic_threshold = 0.010
+                            # 低信頼度: 0.7%（やや慎重）
+                            dynamic_threshold = 0.007
 
                         if exit_price_distance < dynamic_threshold:
                             logger.info(f"⏸️ Too close to last exit price ({exit_price_distance*100:.2f}% < {dynamic_threshold*100:.1f}%) - waiting for better entry...")
@@ -233,11 +233,12 @@ class OptimizedTradingLogic:
                         else:
                             logger.info(f"✅ Price distance OK: {exit_price_distance*100:.2f}% >= {dynamic_threshold*100:.1f}% (confidence={potential_confidence:.2f})")
 
-                # 最小価格変動チェック（手数料負け防止 - 5分足トレードに最適化）
+                # 最小価格変動チェック（手数料負け防止 - 4時間足に最適化）
+                # 改善: 0.5%→0.3%に緩和（4時間足では機会損失削減を優先）
                 if self.last_trade_price is not None:
                     price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
-                    if price_change_ratio < 0.005:  # 0.5%未満の変動では取引しない（1.0% → 0.5%に緩和）
-                        logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 0.5%) - waiting...")
+                    if price_change_ratio < 0.003:  # 0.3%未満の変動では取引しない
+                        logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 0.3%) - waiting...")
                         logger.info(f"   Last trade price: ¥{self.last_trade_price:.2f}, Current: ¥{current_price:.2f}")
                         return False, None, f"Price change too small ({price_change_ratio*100:.2f}%)", 0.0, None, None
             else:
