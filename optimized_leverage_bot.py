@@ -389,67 +389,8 @@ class OptimizedLeverageTradingBot:
         except:
             pass
 
-        # 【利確】純利益が¥1.5以上なら利確（手数料¥2を考慮しつつ早めの利確）
-        # 改善: ¥2.5→¥1.5に下げて機会損失を削減
-        if net_profit >= 1.5:
-            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥1.5)")
-            try:
-                with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (net_profit ¥{net_profit:.2f} >= ¥1.5)\n")
-            except:
-                pass
-            return True, f"Take Profit: ¥{net_profit:.2f}", None
-
-        # 【損切り】固定損失リミット: -0.5%で早期損切り（1時間足に最適化）
-        if pl_ratio <= -0.005:  # -0.5%以上の損失で早期損切り
-            logger.info(f"   🚨 CLOSE DECISION: Stop Loss Hit: {pl_ratio*100:.2f}% <= -0.5%")
-            logger.info(f"      Net loss in JPY: ¥{net_profit:.2f}")
-            try:
-                with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (stop_loss {pl_ratio*100:.2f}% <= -0.5%, net_loss ¥{net_profit:.2f})\n")
-            except:
-                pass
-            return True, f"Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
-
-        # 【緊急損切り】絶対額での損切り: -¥5.0（1時間足に最適化）
-        if net_profit <= -5.0:
-            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥5.0")
-            try:
-                with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DECISION: CLOSE (absolute_loss ¥{net_profit:.2f} <= -¥5.0)\n")
-            except:
-                pass
-            return True, f"Absolute Loss Limit: ¥{net_profit:.2f}", None
-
-        # 利益も損失も小さい場合はHOLDをログに記録（デバッグ用）
-        logger.info(f"   ⏸️  HOLD: Profit ¥{net_profit:.2f} (target ¥2.5), Loss {pl_ratio*100:.2f}% (limit -0.5%)")
-        try:
-            with open('bot_execution_log.txt', 'a') as f:
-                f.write(f"DECISION: HOLD (net_profit ¥{net_profit:.2f} < ¥2.5 and pl_ratio {pl_ratio*100:.2f}% > -0.5%)\n")
-        except:
-            pass
-
-        # 動的ストップロス/テイクプロフィットチェック
-        logger.info(f"      SL: ¥{stop_loss:.3f}, TP: ¥{take_profit:.3f}")
-        if side == 'BUY':
-            if current_price <= stop_loss:
-                logger.info(f"   ✅ CLOSE DECISION: Stop Loss Hit (¥{current_price:.2f} <= ¥{stop_loss:.2f})")
-                return True, f"Stop Loss Hit: ¥{current_price:.2f} <= ¥{stop_loss:.2f}", None
-            if current_price >= take_profit:
-                logger.info(f"   ✅ CLOSE DECISION: Take Profit Hit (¥{current_price:.2f} >= ¥{take_profit:.2f})")
-                return True, f"Take Profit Hit: ¥{current_price:.2f} >= ¥{take_profit:.2f}", None
-
-        else:  # SELL
-            if current_price >= stop_loss:
-                logger.info(f"   ✅ CLOSE DECISION: Stop Loss Hit (¥{current_price:.2f} >= ¥{stop_loss:.2f})")
-                return True, f"Stop Loss Hit: ¥{current_price:.2f} >= ¥{stop_loss:.2f}", None
-            if current_price <= take_profit:
-                logger.info(f"   ✅ CLOSE DECISION: Take Profit Hit (¥{current_price:.2f} <= ¥{take_profit:.2f})")
-                return True, f"Take Profit Hit: ¥{current_price:.2f} <= ¥{take_profit:.2f}", None
-
-        logger.info(f"      SL/TP not hit")
-
-        # 反転シグナルチェック（決済判定用 - 緩い閾値とフィルタースキップ）
+        # 【最優先】反転シグナルチェック（決済判定用 - 緩い閾値とフィルタースキップ）
+        # TP/SLよりも先にチェックして、反対注文のシグナルタイプを取得
         # 注: 価格変動フィルターは削除（純利益チェックで十分）
         # skip_price_filter=True により、価格フィルター＋閾値の両方が緩和される
         logger.info(f"      Checking reversal signal...")
@@ -463,7 +404,7 @@ class OptimizedLeverageTradingBot:
         # TRENDING: 0.8（トレンド転換は早めに検出）
         # RANGING: 0.9（レンジでは慎重に）
         # VOLATILE: 1.2（ボラティリティ高い時は確実なシグナルのみ）
-        market_regime = df['market_regime'].iloc[-1] if 'market_regime' in df.columns else 'RANGING'
+        market_regime = indicators.get('market_regime', 'RANGING')
         reversal_thresholds = {
             'TRENDING': 0.8,
             'RANGING': 0.9,
@@ -472,6 +413,8 @@ class OptimizedLeverageTradingBot:
         required_reversal_confidence = reversal_thresholds.get(market_regime, 1.0)
         logger.info(f"      Reversal threshold for {market_regime}: {required_reversal_confidence:.2f}")
 
+        # 反対シグナルを保存（TP/SL決済時に使用）
+        opposite_signal = None
         if should_trade and trade_type and confidence >= required_reversal_confidence:
             logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= {required_reversal_confidence:.2f}")
             if side == 'BUY' and trade_type.upper() == 'SELL':
@@ -480,15 +423,55 @@ class OptimizedLeverageTradingBot:
             elif side == 'SELL' and trade_type.upper() == 'BUY':
                 logger.info(f"   ✅ CLOSE DECISION: Strong Reversal BUY (confidence={confidence:.2f})")
                 return True, f"Strong Reversal: BUY (confidence={confidence:.2f})", 'BUY'
-            else:
-                logger.info(f"      Signal direction doesn't match position (pos={side}, sig={trade_type})")
+            elif side == 'BUY' and trade_type.upper() == 'BUY':
+                # BUYポジション保持中にBUYシグナル → 保存のみ（決済しない）
+                opposite_signal = None  # 同方向なので反対シグナルなし
+                logger.info(f"      Same direction signal (BUY) - no close")
+            elif side == 'SELL' and trade_type.upper() == 'SELL':
+                # SELLポジション保持中にSELLシグナル → 保存のみ（決済しない）
+                opposite_signal = None  # 同方向なので反対シグナルなし
+                logger.info(f"      Same direction signal (SELL) - no close")
         else:
             if not should_trade:
                 logger.info(f"      No reversal signal detected")
             elif not trade_type:
                 logger.info(f"      No trade type in signal")
             else:
-                logger.info(f"      Confidence too low: {confidence:.2f} < 0.5")
+                logger.info(f"      Confidence too low: {confidence:.2f} < {required_reversal_confidence:.2f}")
+
+        # 【利確/損切り判定】反転シグナルがない場合、TP/SLで決済
+        # TP/SL決済時も反対シグナルがあれば返す（反対注文を出すため）
+
+        # 【利確】純利益が¥1.5以上なら利確
+        if net_profit >= 1.5:
+            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥1.5)")
+            # 反対シグナルがある場合はそれを返す（弱いシグナルでも反対注文を出す）
+            if should_trade and trade_type:
+                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
+                    logger.info(f"      → Will place opposite {trade_type.upper()} order after close")
+                    return True, f"Take Profit: ¥{net_profit:.2f} + Opposite Signal", trade_type.upper()
+            return True, f"Take Profit: ¥{net_profit:.2f}", None
+
+        # 【損切り】固定損失リミット: -0.5%で早期損切り
+        if pl_ratio <= -0.005:
+            logger.info(f"   🚨 CLOSE DECISION: Stop Loss Hit: {pl_ratio*100:.2f}% <= -0.5%")
+            logger.info(f"      Net loss in JPY: ¥{net_profit:.2f}")
+            # 反対シグナルがある場合はそれを返す（損切り後すぐに反対注文）
+            if should_trade and trade_type:
+                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
+                    logger.info(f"      → Will place opposite {trade_type.upper()} order after close")
+                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + Opposite Signal", trade_type.upper()
+            return True, f"Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
+
+        # 【緊急損切り】絶対額での損切り: -¥5.0
+        if net_profit <= -5.0:
+            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥5.0")
+            # 反対シグナルがある場合はそれを返す
+            if should_trade and trade_type:
+                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
+                    logger.info(f"      → Will place opposite {trade_type.upper()} order after close")
+                    return True, f"Absolute Loss: ¥{net_profit:.2f} + Opposite Signal", trade_type.upper()
+            return True, f"Absolute Loss Limit: ¥{net_profit:.2f}", None
 
         logger.info(f"   ❌ No close signal - position will be held")
         return False, "No close signal", None
