@@ -459,9 +459,21 @@ class OptimizedLeverageTradingBot:
 
         logger.info(f"      Reversal result: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}, reason={reason}")
 
-        # 決済判定の閾値: 1.0（強い反転シグナルのみで決済 - 誤判定防止）
-        if should_trade and trade_type and confidence >= 1.0:
-            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= 1.0")
+        # 決済判定の閾値: 市場レジーム別（反転を確実に捉える）
+        # TRENDING: 0.8（トレンド転換は早めに検出）
+        # RANGING: 0.9（レンジでは慎重に）
+        # VOLATILE: 1.2（ボラティリティ高い時は確実なシグナルのみ）
+        market_regime = df['market_regime'].iloc[-1] if 'market_regime' in df.columns else 'RANGING'
+        reversal_thresholds = {
+            'TRENDING': 0.8,
+            'RANGING': 0.9,
+            'VOLATILE': 1.2
+        }
+        required_reversal_confidence = reversal_thresholds.get(market_regime, 1.0)
+        logger.info(f"      Reversal threshold for {market_regime}: {required_reversal_confidence:.2f}")
+
+        if should_trade and trade_type and confidence >= required_reversal_confidence:
+            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= {required_reversal_confidence:.2f}")
             if side == 'BUY' and trade_type.upper() == 'SELL':
                 logger.info(f"   ✅ CLOSE DECISION: Strong Reversal SELL (confidence={confidence:.2f})")
                 return True, f"Strong Reversal: SELL (confidence={confidence:.2f})", 'SELL'
