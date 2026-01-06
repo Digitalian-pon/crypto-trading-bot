@@ -417,7 +417,12 @@ class OptimizedTradingLogic:
         return signals
 
     def _analyze_macd(self, macd_line, macd_signal, macd_histogram, trend_direction, regime):
-        """MACD分析（主要インジケーター - 最高重み付け）"""
+        """
+        MACD分析（主要インジケーター - 4時間足専用最適化）
+
+        4時間足では、MACDを最も信頼できる指標として扱います。
+        トレンドフィルターを大幅に緩和し、MACD単独でも判断できるようにします。
+        """
         signals = []
 
         # MACDクロス検出
@@ -428,32 +433,42 @@ class OptimizedTradingLogic:
         histogram_strength = abs(macd_histogram)
 
         if is_bullish_cross:
-            # 上昇トレンド時のみ採用（NEUTRALを除外してトレンドフォローに徹する）
-            if trend_direction in ['UP', 'STRONG_UP']:
-                if histogram_strength > 0.03:  # 強いシグナル
-                    signals.append(('BUY', 'MACD Strong Bullish', 2.5))  # 1.0 → 2.5（主要指標化）
-                elif histogram_strength > 0.005:  # 通常シグナル（閾値を0.01→0.005に下げて感度向上）
-                    signals.append(('BUY', 'MACD Bullish', 1.8))  # 0.7 → 1.8（主要指標化）
-                else:
-                    # 弱いクロスでも記録
-                    signals.append(('BUY', 'MACD Weak Cross', 1.2))  # 新規追加
-                logger.info(f"🟢 MACD Bullish Cross detected in {trend_direction} trend")
+            # 🆕 NEUTRAL時も採用（4時間足MACDは高精度）
+            # トレンドフィルターは「強い逆トレンド」のみ除外
+            if trend_direction in ['STRONG_DOWN']:
+                # 強い下降トレンド中のMACDブリッシュは無視（騙しの可能性）
+                logger.info(f"⚪ MACD Bullish Cross ignored ({trend_direction} - strong downtrend)")
             else:
-                logger.info(f"⚪ MACD Bullish Cross ignored ({trend_direction} - not uptrend)")
+                # NEUTRAL、UP、DOWN、STRONG_UPすべて採用
+                if histogram_strength > 0.03:  # 強いシグナル
+                    signals.append(('BUY', 'MACD Strong Bullish', 2.5))  # 主要指標
+                elif histogram_strength > 0.005:  # 通常シグナル
+                    signals.append(('BUY', 'MACD Bullish', 1.8))  # 主要指標
+                else:
+                    # 弱いクロスでも記録（4時間足では有効）
+                    signals.append(('BUY', 'MACD Weak Cross', 1.2))
+
+                logger.info(f"🟢 MACD Bullish Cross ACCEPTED in {trend_direction} ({regime})")
+                logger.info(f"   Histogram strength: {histogram_strength:.6f}")
 
         elif is_bearish_cross:
-            # 下降トレンド時のみ採用（NEUTRALを除外してトレンドフォローに徹する）
-            if trend_direction in ['DOWN', 'STRONG_DOWN']:
-                if histogram_strength > 0.03:  # 強いシグナル
-                    signals.append(('SELL', 'MACD Strong Bearish', 2.5))  # 1.0 → 2.5（主要指標化）
-                elif histogram_strength > 0.005:  # 通常シグナル（閾値を0.01→0.005に下げて感度向上）
-                    signals.append(('SELL', 'MACD Bearish', 1.8))  # 0.7 → 1.8（主要指標化）
-                else:
-                    # 弱いクロスでも記録
-                    signals.append(('SELL', 'MACD Weak Cross', 1.2))  # 新規追加
-                logger.info(f"🔴 MACD Bearish Cross detected in {trend_direction} trend")
+            # 🆕 NEUTRAL時も採用（4時間足MACDは高精度）
+            # トレンドフィルターは「強い逆トレンド」のみ除外
+            if trend_direction in ['STRONG_UP']:
+                # 強い上昇トレンド中のMACDベアリッシュは無視（騙しの可能性）
+                logger.info(f"⚪ MACD Bearish Cross ignored ({trend_direction} - strong uptrend)")
             else:
-                logger.info(f"⚪ MACD Bearish Cross ignored ({trend_direction} - not downtrend)")
+                # NEUTRAL、UP、DOWN、STRONG_DOWNすべて採用
+                if histogram_strength > 0.03:  # 強いシグナル
+                    signals.append(('SELL', 'MACD Strong Bearish', 2.5))  # 主要指標
+                elif histogram_strength > 0.005:  # 通常シグナル
+                    signals.append(('SELL', 'MACD Bearish', 1.8))  # 主要指標
+                else:
+                    # 弱いクロスでも記録（4時間足では有効）
+                    signals.append(('SELL', 'MACD Weak Cross', 1.2))
+
+                logger.info(f"🔴 MACD Bearish Cross ACCEPTED in {trend_direction} ({regime})")
+                logger.info(f"   Histogram strength: {histogram_strength:.6f}")
 
         return signals
 

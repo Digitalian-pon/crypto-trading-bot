@@ -333,10 +333,58 @@ class DataService:
             logger.error(f"Sample data: {klines_data[:2] if klines_data else 'None'}")
             return None
     
+    def _resample_to_4hour(self, df_30min):
+        """
+        30分足データを4時間足にリサンプリング
+
+        :param df_30min: 30分足のDataFrame
+        :return: 4時間足のDataFrame
+        """
+        try:
+            if df_30min is None or df_30min.empty:
+                logger.error("Empty dataframe for resampling")
+                return None
+
+            logger.info(f"🔄 Resampling 30min data to 4hour: {len(df_30min)} candles")
+
+            # timestampをインデックスに設定
+            df_resampled = df_30min.set_index('timestamp')
+
+            # 4時間足にリサンプリング（30分 × 8 = 4時間）
+            # - open: 最初の値
+            # - high: 最大値
+            # - low: 最小値
+            # - close: 最後の値
+            # - volume: 合計
+            df_4h = df_resampled.resample('4H').agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            })
+
+            # NaNを削除（不完全な足）
+            df_4h = df_4h.dropna()
+
+            # インデックスをリセット
+            df_4h = df_4h.reset_index()
+
+            logger.info(f"✅ Resampling complete: {len(df_30min)} → {len(df_4h)} candles (4hour)")
+            logger.info(f"   4hour candles timerange: {df_4h['timestamp'].min()} to {df_4h['timestamp'].max()}")
+
+            return df_4h
+
+        except Exception as e:
+            logger.error(f"Error resampling to 4hour: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
     def get_data_with_indicators(self, symbol="DOGE_JPY", interval="1h", limit=100, force_refresh=False):
         """
         Get market data with technical indicators
-        
+
         :param symbol: Trading pair symbol
         :param interval: Time interval
         :param limit: Number of data points
@@ -344,14 +392,43 @@ class DataService:
         :return: DataFrame with OHLCV data and technical indicators
         """
         logger.info(f"Getting data with indicators for {symbol}, interval={interval}, force_refresh={force_refresh}")
-        
-        # Get raw klines data
-        df = self.get_klines(symbol, interval, limit, force_refresh)
-        
+
+        # 4時間足が要求された場合、30分足から構築
+        if interval in ['4hour', '4h', '4H']:
+            logger.info("🎯 4hour timeframe requested - will resample from 30min data")
+
+            # 4時間足 × limit本 = 30分足 × (limit × 8)本が必要
+            # さらに、途中で切れることを考慮して余裕を持たせる
+            min_30min_candles = limit * 8 * 2  # 2倍の余裕
+
+            logger.info(f"📊 Fetching {min_30min_candles} × 30min candles for {limit} × 4hour candles")
+
+            # 30分足データを取得
+            df_30min = self.get_klines(symbol, '30min', min_30min_candles, force_refresh)
+
+            if df_30min is None or df_30min.empty:
+                logger.error("Failed to get 30min klines data for resampling")
+                return None
+
+            # 4時間足にリサンプリング
+            df = self._resample_to_4hour(df_30min)
+
+            if df is None or df.empty:
+                logger.error("Failed to resample to 4hour")
+                return None
+
+            # 必要な本数に制限
+            if len(df) > limit:
+                df = df.tail(limit).reset_index(drop=True)
+                logger.info(f"✂️ Trimmed to {limit} × 4hour candles")
+        else:
+            # Get raw klines data (通常の処理)
+            df = self.get_klines(symbol, interval, limit, force_refresh)
+
         if df is None or df.empty:
             logger.error("Failed to get klines data")
             return None
-        
+
         try:
             # Update the last candle with current ticker price if available
             logger.info("Updating last candle with current price")
@@ -369,13 +446,13 @@ class DataService:
                             logger.warning("'close' column not found in DataFrame")
                     except Exception as e:
                         logger.error(f"Error updating close price: {e}")
-            
+
             # Add technical indicators
             df_with_indicators = TechnicalIndicators.add_all_indicators(df)
             logger.info("All technical indicators added successfully")
-            
+
             return df_with_indicators
-            
+
         except Exception as e:
             logger.error(f"Error adding indicators: {e}")
             import traceback
