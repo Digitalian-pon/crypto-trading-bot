@@ -84,11 +84,13 @@ class FinalDashboard:
 
             # Get execution history (取引履歴)
             try:
-                executions_response = api.get_latest_executions(symbol='DOGE_JPY', page=1, count=10)
+                # 最新20件の取引履歴を取得（より多くの履歴を表示）
+                executions_response = api.get_latest_executions(symbol='DOGE_JPY', page=1, count=20)
                 if executions_response and executions_response.get('status') == 0:
                     data = executions_response.get('data', {})
                     if isinstance(data, dict) and 'list' in data:
                         self.execution_history = data['list']
+                        logger.info(f"[DASHBOARD] Execution history fetched: {len(self.execution_history)} records")
                     else:
                         self.execution_history = []
                 else:
@@ -220,8 +222,8 @@ class FinalDashboard:
                 history_html += f'<td style="padding: 10px; color: #ffffff;">{timestamp_formatted}</td>'
                 history_html += f'<td style="padding: 10px; text-align: center;"><span style="color: {side_color}; font-weight: bold;">{side_text}</span></td>'
                 history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">{size:.0f}</td>'
-                history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">¥{price:,.0f}</td>'
-                history_html += f'<td style="padding: 10px; text-align: right; color: #FF9800;">¥{fee:,.0f}</td>'
+                history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">¥{price:,.3f}</td>'
+                history_html += f'<td style="padding: 10px; text-align: right; color: #FF9800;">¥{fee:,.2f}</td>'
                 history_html += f'<td style="padding: 10px; text-align: center; color: #888; font-size: 0.85em;">{order_id}</td>'
                 history_html += '</tr>'
 
@@ -503,7 +505,7 @@ class FinalDashboard:
         </div>
 
         <div class="section">
-            <h2>📜 取引履歴 (最新10件)</h2>
+            <h2>📜 取引履歴 (最新20件)</h2>
             {self.get_execution_history_html()}
         </div>
 
