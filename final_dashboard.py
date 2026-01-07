@@ -36,7 +36,9 @@ class FinalDashboard:
         self.balance_info = {}
         self.signal_info = {'should_trade': False, 'trade_type': None, 'reason': 'システム初期化中', 'confidence': 0.0}
         self.market_data = {}
-        self.last_update = datetime.now()
+        # JST時刻で初期化（UTC+9時間）
+        from datetime import timedelta
+        self.last_update = datetime.utcnow() + timedelta(hours=9)
         self.data_service = None
         self.trading_logic = SimpleTradingLogic()
         self.update_all_data()
@@ -160,7 +162,9 @@ class FinalDashboard:
                     'confidence': 0.0
                 }
 
-            self.last_update = datetime.now()
+            # JST時刻で更新（UTC+9時間）
+            from datetime import timedelta
+            self.last_update = datetime.utcnow() + timedelta(hours=9)
             logger.info(f"Dashboard updated - Positions: {len(self.api_positions)}, Price: ¥{self.current_price}, Signal: {self.signal_info.get('trade_type', 'なし')}")
 
         except Exception as e:
@@ -205,11 +209,13 @@ class FinalDashboard:
                 side_text = '買い' if side == 'BUY' else '売り' if side == 'SELL' else side
 
                 timestamp = execution.get('timestamp', '')
-                # タイムスタンプをフォーマット
+                # タイムスタンプをフォーマット（UTC→JST変換）
                 try:
-                    from datetime import datetime
+                    from datetime import datetime, timedelta
                     dt = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%fZ')
-                    timestamp_formatted = dt.strftime('%m/%d %H:%M:%S')
+                    # UTC→JST変換（+9時間）
+                    dt_jst = dt + timedelta(hours=9)
+                    timestamp_formatted = dt_jst.strftime('%m/%d %H:%M:%S')
                 except:
                     timestamp_formatted = timestamp[:16] if len(timestamp) > 16 else timestamp
 
@@ -337,7 +343,7 @@ class FinalDashboard:
 
     def generate_html(self):
         """Generate dashboard HTML"""
-        current_time = self.last_update.strftime('%Y-%m-%d %H:%M:%S')
+        current_time = self.last_update.strftime('%Y-%m-%d %H:%M:%S') + ' (JST)'
 
         # Position HTML
         position_html = ""
@@ -578,7 +584,7 @@ class FinalDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     <body>
                         <div class="header">
                             <h2>🤖 Trading Bot Execution Logs</h2>
-                            <p>最終更新: ''' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '''</p>
+                            <p>最終更新: ''' + (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S') + ''' (JST)</p>
                             <p>自動更新: 30秒間隔 | <a href="/" style="color: #00E676;">ダッシュボードに戻る</a></p>
                         </div>
                         <pre>
