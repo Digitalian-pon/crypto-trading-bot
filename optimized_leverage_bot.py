@@ -349,19 +349,24 @@ class OptimizedLeverageTradingBot:
         else:  # SELL
             profit_jpy = size * (entry_price - current_price)
 
-        # 往復手数料を引いた純利益
-        net_profit = profit_jpy - 2.0  # 往復手数料¥2
+        # GMO Coin手数料計算（動的）
+        # 手数料率: 0.04% per trade (maker/taker共通)
+        fee_rate = 0.0004  # 0.04%
+        position_value = size * entry_price
+        round_trip_fee = position_value * fee_rate * 2  # 往復手数料
+        net_profit = profit_jpy - round_trip_fee
 
         logger.info(f"      Gross Profit: ¥{profit_jpy:.2f}")
+        logger.info(f"      Round-trip Fee (0.04% × 2): ¥{round_trip_fee:.2f}")
         logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
 
-        # 【トレーリングストップ】¥2以上の利益が出ている場合、損切りラインを建値に移動
+        # 【トレーリングストップ】¥1.0以上の利益が出ている場合、損切りラインを建値に移動
         if position_id in self.active_positions_stops:
             original_stop_loss = self.active_positions_stops[position_id].get('original_stop_loss')
 
             # トレーリングストップがまだ発動していない場合
-            if original_stop_loss is None and net_profit >= 2.0:
-                logger.info(f"      🔒 TRAILING STOP ACTIVATED: Net profit ¥{net_profit:.2f} >= ¥2.0")
+            if original_stop_loss is None and net_profit >= 1.0:
+                logger.info(f"      🔒 TRAILING STOP ACTIVATED: Net profit ¥{net_profit:.2f} >= ¥1.0")
                 logger.info(f"         Moving stop loss to break-even (entry price)")
 
                 # 元のストップロスを保存
@@ -385,7 +390,7 @@ class OptimizedLeverageTradingBot:
                 f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
                 f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"THRESHOLD: ¥1.5 (profit) / -0.5% (loss) / -¥5.0 (absolute loss, optimized for 4h)\n")
+                f.write(f"THRESHOLD: ¥1.5 (profit) / -0.5% (loss) / ¥1.0 (trailing stop) | Fee: 0.04% × 2 = dynamic\n")
         except:
             pass
 
