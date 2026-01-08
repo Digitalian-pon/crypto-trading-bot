@@ -398,10 +398,11 @@ class DataService:
             logger.info("🎯 4hour timeframe requested - will resample from 30min data")
 
             # 4時間足 × limit本 = 30分足 × (limit × 8)本が必要
-            # さらに、途中で切れることを考慮して余裕を持たせる
-            min_30min_candles = limit * 8 * 2  # 2倍の余裕
+            # RSI計算のため、さらに余裕を持たせる（RSIは最低14本必要）
+            # limitが10本の場合: (10 + 20) × 8 = 240本の30分足を要求
+            min_30min_candles = (limit + 20) * 8  # RSI用に20本余分に追加
 
-            logger.info(f"📊 Fetching {min_30min_candles} × 30min candles for {limit} × 4hour candles")
+            logger.info(f"📊 Fetching {min_30min_candles} × 30min candles for {limit} × 4hour candles (with RSI buffer)")
 
             # 30分足データを取得
             df_30min = self.get_klines(symbol, '30min', min_30min_candles, force_refresh)

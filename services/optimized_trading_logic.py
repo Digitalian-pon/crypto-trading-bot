@@ -395,9 +395,10 @@ class OptimizedTradingLogic:
         """RSI分析（補助インジケーター - 低重み付け）"""
         signals = []
 
-        # RSI計算エラー時はスキップ
-        if rsi is None or rsi == 0 or not isinstance(rsi, (int, float)):
-            logger.warning(f"⚠️ RSI calculation error or missing - skipping RSI analysis")
+        # RSI計算エラー時はスキップ（NaN、None、0をチェック）
+        # pd.isna()を先にチェック（pandas.NAとの比較エラーを回避）
+        if pd.isna(rsi) or rsi is None or rsi == 0 or not isinstance(rsi, (int, float)):
+            logger.warning(f"⚠️ RSI calculation error or missing (value={rsi}) - skipping RSI analysis")
             return signals
 
         # 全てのレジームでトレンドフォローのみ採用（逆張り完全禁止）
