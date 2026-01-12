@@ -360,13 +360,14 @@ class OptimizedLeverageTradingBot:
         logger.info(f"      Round-trip Fee (0.04% × 2): ¥{round_trip_fee:.2f}")
         logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
 
-        # 【トレーリングストップ】¥1.0以上の利益が出ている場合、損切りラインを建値に移動
+        # 【トレーリングストップ】¥2.0以上の利益が出ている場合、損切りラインを建値に移動
+        # バランス型設定：現実的な値幅でリスクフリー化
         if position_id in self.active_positions_stops:
             original_stop_loss = self.active_positions_stops[position_id].get('original_stop_loss')
 
             # トレーリングストップがまだ発動していない場合
-            if original_stop_loss is None and net_profit >= 1.0:
-                logger.info(f"      🔒 TRAILING STOP ACTIVATED: Net profit ¥{net_profit:.2f} >= ¥1.0")
+            if original_stop_loss is None and net_profit >= 2.0:
+                logger.info(f"      🔒 TRAILING STOP ACTIVATED: Net profit ¥{net_profit:.2f} >= ¥2.0")
                 logger.info(f"         Moving stop loss to break-even (entry price)")
 
                 # 元のストップロスを保存
@@ -390,7 +391,7 @@ class OptimizedLeverageTradingBot:
                 f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
                 f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"THRESHOLD: ¥1.5 (profit) / -0.5% (loss) / ¥1.0 (trailing stop) | Fee: 0.04% × 2 = dynamic\n")
+                f.write(f"THRESHOLD: ¥3.0 (profit) / -0.8% (loss) / ¥2.0 (trailing) / -¥8 (emergency) | Balanced Strategy\n")
         except:
             pass
 
@@ -447,9 +448,9 @@ class OptimizedLeverageTradingBot:
         # 【利確/損切り判定】反転シグナルがない場合、TP/SLで決済
         # TP/SL決済時も反対シグナルがあれば返す（反対注文を出すため）
 
-        # 【利確】純利益が¥1.5以上なら利確
-        if net_profit >= 1.5:
-            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥1.5)")
+        # 【利確】純利益が¥3.0以上なら利確（バランス型：現実的な利益目標）
+        if net_profit >= 3.0:
+            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥3.0)")
             # 反対シグナルがある場合はそれを返す（弱いシグナルでも反対注文を出す）
             if should_trade and trade_type:
                 if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
@@ -457,9 +458,9 @@ class OptimizedLeverageTradingBot:
                     return True, f"Take Profit: ¥{net_profit:.2f} + Opposite Signal", trade_type.upper()
             return True, f"Take Profit: ¥{net_profit:.2f}", None
 
-        # 【損切り】固定損失リミット: -0.5%で早期損切り
-        if pl_ratio <= -0.005:
-            logger.info(f"   🚨 CLOSE DECISION: Stop Loss Hit: {pl_ratio*100:.2f}% <= -0.5%")
+        # 【損切り】固定損失リミット: -0.8%で早期損切り（バランス型：損失を抑制）
+        if pl_ratio <= -0.008:
+            logger.info(f"   🚨 CLOSE DECISION: Stop Loss Hit: {pl_ratio*100:.2f}% <= -0.8%")
             logger.info(f"      Net loss in JPY: ¥{net_profit:.2f}")
             # 反対シグナルがある場合はそれを返す（損切り後すぐに反対注文）
             if should_trade and trade_type:
@@ -468,9 +469,9 @@ class OptimizedLeverageTradingBot:
                     return True, f"Stop Loss: {pl_ratio*100:.2f}% + Opposite Signal", trade_type.upper()
             return True, f"Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
 
-        # 【緊急損切り】絶対額での損切り: -¥5.0
-        if net_profit <= -5.0:
-            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥5.0")
+        # 【緊急損切り】絶対額での損切り: -¥8（バランス型：残高の4%でリスク管理）
+        if net_profit <= -8.0:
+            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥8")
             # 反対シグナルがある場合はそれを返す
             if should_trade and trade_type:
                 if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):

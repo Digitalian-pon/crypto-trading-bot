@@ -5,36 +5,34 @@ Railway用統合アプリケーション - 最適化版
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.4.1 - Fee Calculation Fix (2026-01-07)
+VERSION: 2.5.1 - Balanced Strategy (2026-01-12)
 Changes:
-🔧 **CRITICAL FIX**: 手数料計算エラー修正 - ポジション決済問題を完全解決
+⚖️ **バランス型戦略** - 現実的な利益目標と早期損切りで損失を抑制
 
 【修正内容】
-- 手数料計算を動的化：ハードコード¥2.0 → position_value × 0.0004 × 2
-- トレーリングストップ閾値を最適化：¥2.0 → ¥1.0
-- 10 DOGE @ ¥23.2の例：往復手数料 ¥2.0 → ¥0.19（約1/10に修正）
+- 利確閾値: ¥1.5 → ¥3.0（2倍）- 現実的な利益目標（1.4%変動）
+- 損切り: -0.5% → -0.8%（1.6倍）- 早期損切りで損失抑制
+- 緊急損切り: -¥5 → -¥8（1.6倍）- 残高の4%でリスク管理
+- トレーリングストップ: ¥1 → ¥2（2倍）- 1%の利益でリスクフリー化
+- 価格変動フィルター: 0.5% → 0.6%（1.2倍）- 適度なバランス
 
-【問題の詳細（v2.4.0以前）】
-- ハードコード手数料¥2.0が実際の手数料（約¥0.19）の10倍
-- 純利益¥0.83 - ¥2.0 = -¥1.17（赤字判定）→ 決済されない
-- ポジションが3.5時間保持され、"No close signal"が継続
-- 結果：利益確定できず、損失が累積
+【問題の詳細（v2.4.2）】
+- 利確¥1.5が困難（0.7%変動必要）→ ¥-0.3～¥-0.9で推移
+- 損切り-0.5%が遅い → ¥-1.27まで損失拡大
+- 取引頻度高い（15-20分間隔）→ 手数料負けで損失累積
+- 残高: ¥730 → ¥188（-74.2%の大損失）
 
 【修正後の動作】
-- 純利益¥0.83 - ¥0.19 = ¥0.64（黒字判定）✅
-- 利確閾値¥1.5到達で即座に決済 ✅
-- トレーリングストップ¥1.0で早期リスク管理 ✅
-
-【v2.4.0の機能（継続）】
-- 本物の4時間足データ（30分足からリサンプリング）
-- MACD主体ロジック（NEUTRAL時も発動）
-- 機会損失ゼロ、勝率40%→60%を期待
+- ¥3.0の利益で即座に利確 → 1.4%変動で達成可能 ✅
+- -0.8%で早期損切り → 損失を早めに抑制 ✅
+- 取引頻度: 1日3-8回（適度）✅
+- 手数料負け防止 → リスクリワード比1:3.75 ✅
 
 期待される効果:
-- ✅ ポジション決済の正常化（利益が出れば確実に決済）
-- ✅ 手数料負け完全防止（正確な手数料計算）
-- ✅ 早期利確・早期リスク管理
-- ✅ 残高回復の加速（¥338 → ¥500+を目指す）
+- ✅ 現実的な利益目標（1日1-2回の利確）
+- ✅ 損失の早期抑制（-¥0.5以内で損切り）
+- ✅ 適度な取引頻度で手数料負け防止
+- ✅ 残高回復の加速（¥188 → ¥300以上を目指す）
 """
 
 import os
@@ -46,9 +44,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.4.1"
-BUILD_DATE = "2026-01-07"
-COMMIT_HASH = "fix-fee-calculation"
+VERSION = "2.5.1"
+BUILD_DATE = "2026-01-12"
+COMMIT_HASH = "balanced-strategy"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -129,13 +127,13 @@ def run_trading_bot():
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
             logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
-            logger.info("🎯 MAJOR UPDATE (v2.4.0):")
-            logger.info("   - 🕐 本物の4時間足トレード（30分足からリサンプリング）")
-            logger.info("   - 📈 MACD主体ロジック完全実装（NEUTRAL時も発動）")
-            logger.info("   - 🔧 トレンドフィルター大幅緩和（強い逆トレンドのみ除外）")
-            logger.info("   - ✅ 損失の根本原因を解決（機会損失ゼロ）")
-            logger.info("   - 📊 4時間足MACD = 高精度シグナル")
-            logger.info("   - 🎯 期待: 勝率40%→60%、損失削減、残高回復")
+            logger.info("⚖️ BALANCED STRATEGY (v2.5.1):")
+            logger.info("   - 💰 利確: ¥3.0（現実的な目標、1.4%変動）")
+            logger.info("   - 🚨 損切り: -0.8%（早期損切りで損失抑制）")
+            logger.info("   - 🛡️ 緊急損切り: -¥8（残高の4%）")
+            logger.info("   - 🔒 トレーリング: ¥2（1%でリスクフリー化）")
+            logger.info("   - 📊 価格フィルター: 0.6%（適度なバランス）")
+            logger.info("   - 🎯 期待: 取引頻度3-8回/日、損失抑制、残高回復")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
@@ -188,11 +186,12 @@ if __name__ == "__main__":
     logger.info(f"Started at: {datetime.now()}")
     logger.info("Trading Pair: DOGE_JPY")
     logger.info("Trading Type: Leverage (Long & Short)")
-    logger.info("Timeframe: 4hour (resampled from 30min) 🆕")
+    logger.info("Timeframe: 4hour (resampled from 30min)")
     logger.info("Check Interval: 300s (5min)")
-    logger.info("Primary Indicator: MACD (weight 2.5, works in NEUTRAL) 🆕")
-    logger.info("Optimizations: Market Regime, Dynamic SL/TP, ATR Risk")
-    logger.info("Profit Target: ¥1.5 | Stop Loss: -0.5% or dynamic")
+    logger.info("Primary Indicator: MACD (weight 2.5, works in NEUTRAL)")
+    logger.info("Strategy: BALANCED ⚖️")
+    logger.info("Profit Target: ¥3.0 | Stop Loss: -0.8% | Emergency: -¥8")
+    logger.info("Trailing Stop: ¥2.0 | Price Filter: 0.6%")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
