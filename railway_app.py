@@ -5,34 +5,28 @@ Railway用統合アプリケーション - 最適化版
 - 市場レジーム検出、動的SL/TP、ATRベースリスク管理
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.5.1 - Balanced Strategy (2026-01-12)
+VERSION: 2.6.0 - 5min Timeframe Switch (2026-01-14)
 Changes:
-⚖️ **バランス型戦略** - 現実的な利益目標と早期損切りで損失を抑制
+⚡ **5分足トレードに変更** - 短期スキャルピング戦略で素早い利確を狙う
 
 【修正内容】
-- 利確閾値: ¥1.5 → ¥3.0（2倍）- 現実的な利益目標（1.4%変動）
-- 損切り: -0.5% → -0.8%（1.6倍）- 早期損切りで損失抑制
-- 緊急損切り: -¥5 → -¥8（1.6倍）- 残高の4%でリスク管理
-- トレーリングストップ: ¥1 → ¥2（2倍）- 1%の利益でリスクフリー化
-- 価格変動フィルター: 0.5% → 0.6%（1.2倍）- 適度なバランス
+- タイムフレーム: 4hour → 5min（短期トレードに変更）
+- 5分足データを直接使用（リサンプリング不要）
+- インジケーター: MACD + RSI + Bollinger Bands（短期向け）
+- チェック間隔: 300秒（5分）- 5分足1本ごとに判断
 
-【問題の詳細（v2.4.2）】
-- 利確¥1.5が困難（0.7%変動必要）→ ¥-0.3～¥-0.9で推移
-- 損切り-0.5%が遅い → ¥-1.27まで損失拡大
-- 取引頻度高い（15-20分間隔）→ 手数料負けで損失累積
-- 残高: ¥730 → ¥188（-74.2%の大損失）
+【変更の理由】
+- v2.5.1（4時間足）では損失が継続（¥730 → ¥212、-71%）
+- 4時間足戦略と5分チェック間隔のミスマッチ
+- 手数料負けを防ぐため、より明確なシグナルでエントリー
+- 5分足で素早い利確を狙い、損失を最小化
 
-【修正後の動作】
-- ¥3.0の利益で即座に利確 → 1.4%変動で達成可能 ✅
-- -0.8%で早期損切り → 損失を早めに抑制 ✅
-- 取引頻度: 1日3-8回（適度）✅
-- 手数料負け防止 → リスクリワード比1:3.75 ✅
-
-期待される効果:
-- ✅ 現実的な利益目標（1日1-2回の利確）
-- ✅ 損失の早期抑制（-¥0.5以内で損切り）
-- ✅ 適度な取引頻度で手数料負け防止
-- ✅ 残高回復の加速（¥188 → ¥300以上を目指す）
+【期待される効果】
+- ✅ 短期トレンドを素早く捉える
+- ✅ 利確¥3.0を達成しやすい（5分足での変動を活用）
+- ✅ 明確なシグナルでエントリー精度向上
+- ✅ 損失を早期に切る（-0.8%損切り）
+- ✅ 残高回復を目指す（¥212 → ¥300以上）
 """
 
 import os
@@ -44,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.5.1"
-BUILD_DATE = "2026-01-12"
-COMMIT_HASH = "balanced-strategy"
+VERSION = "2.6.0"
+BUILD_DATE = "2026-01-14"
+COMMIT_HASH = "5min-timeframe-switch"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -186,9 +180,9 @@ if __name__ == "__main__":
     logger.info(f"Started at: {datetime.now()}")
     logger.info("Trading Pair: DOGE_JPY")
     logger.info("Trading Type: Leverage (Long & Short)")
-    logger.info("Timeframe: 4hour (resampled from 30min)")
+    logger.info("Timeframe: 5min (short-term scalping)")
     logger.info("Check Interval: 300s (5min)")
-    logger.info("Primary Indicator: MACD (weight 2.5, works in NEUTRAL)")
+    logger.info("Primary Indicator: MACD + RSI + Bollinger Bands")
     logger.info("Strategy: BALANCED ⚖️")
     logger.info("Profit Target: ¥3.0 | Stop Loss: -0.8% | Emergency: -¥8")
     logger.info("Trailing Stop: ¥2.0 | Price Filter: 0.6%")
