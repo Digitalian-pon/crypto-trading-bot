@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.6.0"
-BUILD_DATE = "2026-01-14"
-COMMIT_HASH = "5min-timeframe-switch"
+VERSION = "2.6.1"
+BUILD_DATE = "2026-01-16"
+COMMIT_HASH = "force-restart-fix"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
