@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.6.1"
-BUILD_DATE = "2026-01-16"
-COMMIT_HASH = "force-restart-fix"
+VERSION = "2.7.0"
+BUILD_DATE = "2026-01-17"
+COMMIT_HASH = "conservative-risk-management"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -121,13 +121,13 @@ def run_trading_bot():
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
             logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
-            logger.info("⚖️ BALANCED STRATEGY (v2.5.1):")
-            logger.info("   - 💰 利確: ¥3.0（現実的な目標、1.4%変動）")
-            logger.info("   - 🚨 損切り: -0.8%（早期損切りで損失抑制）")
-            logger.info("   - 🛡️ 緊急損切り: -¥8（残高の4%）")
-            logger.info("   - 🔒 トレーリング: ¥2（1%でリスクフリー化）")
-            logger.info("   - 📊 価格フィルター: 0.6%（適度なバランス）")
-            logger.info("   - 🎯 期待: 取引頻度3-8回/日、損失抑制、残高回復")
+            logger.info("🛡️ CONSERVATIVE STRATEGY (v2.7.0):")
+            logger.info("   - 💰 利確: ¥2.0（50 DOGEで0.9%変動で達成）")
+            logger.info("   - 🚨 損切り: -1.2%（ノイズ耐性向上）")
+            logger.info("   - 🛡️ 緊急損切り: -¥5（残高の4%）")
+            logger.info("   - 🔒 トレーリング: ¥1.0（早めのリスクフリー化）")
+            logger.info("   - 📊 価格フィルター: 1.0%（往復ビンタ防止）")
+            logger.info("   - 🎯 期待: 損失抑制、勝率向上、残高回復")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
@@ -183,9 +183,9 @@ if __name__ == "__main__":
     logger.info("Timeframe: 5min (short-term scalping)")
     logger.info("Check Interval: 300s (5min)")
     logger.info("Primary Indicator: MACD + RSI + Bollinger Bands")
-    logger.info("Strategy: BALANCED ⚖️")
-    logger.info("Profit Target: ¥3.0 | Stop Loss: -0.8% | Emergency: -¥8")
-    logger.info("Trailing Stop: ¥2.0 | Price Filter: 0.6%")
+    logger.info("Strategy: CONSERVATIVE 🛡️")
+    logger.info("Profit Target: ¥2.0 | Stop Loss: -1.2% | Emergency: -¥5")
+    logger.info("Trailing Stop: ¥1.0 | Price Filter: 1.0%")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動

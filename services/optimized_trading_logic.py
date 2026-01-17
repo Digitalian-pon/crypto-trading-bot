@@ -237,12 +237,12 @@ class OptimizedTradingLogic:
                         else:
                             logger.info(f"✅ Price distance OK: {exit_price_distance*100:.2f}% >= {dynamic_threshold*100:.1f}% (confidence={potential_confidence:.2f})")
 
-                # 最小価格変動チェック（手数料負け防止 - バランス型設定）
-                # v2.5.1: 0.6%に設定（現実的なバランス）
+                # 最小価格変動チェック（手数料負け防止 - 保守的設定）
+                # v2.7.0: 1.0%に設定（往復ビンタ防止）
                 if self.last_trade_price is not None:
                     price_change_ratio = abs(current_price - self.last_trade_price) / self.last_trade_price
-                    if price_change_ratio < 0.006:  # 0.6%未満の変動では取引しない
-                        logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 0.6%) - waiting...")
+                    if price_change_ratio < 0.01:  # 1.0%未満の変動では取引しない
+                        logger.info(f"⏸️ Price hasn't moved enough ({price_change_ratio*100:.2f}% < 1.0%) - waiting...")
                         logger.info(f"   Last trade price: ¥{self.last_trade_price:.2f}, Current: ¥{current_price:.2f}")
                         return False, None, f"Price change too small ({price_change_ratio*100:.2f}%)", 0.0, None, None
             else:
