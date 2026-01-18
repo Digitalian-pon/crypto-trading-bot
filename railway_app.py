@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.7.0"
+VERSION = "2.7.1"
 BUILD_DATE = "2026-01-17"
-COMMIT_HASH = "conservative-risk-management"
+COMMIT_HASH = "price-filter-relaxed"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -126,7 +126,7 @@ def run_trading_bot():
             logger.info("   - 🚨 損切り: -1.2%（ノイズ耐性向上）")
             logger.info("   - 🛡️ 緊急損切り: -¥5（残高の4%）")
             logger.info("   - 🔒 トレーリング: ¥1.0（早めのリスクフリー化）")
-            logger.info("   - 📊 価格フィルター: 1.0%（往復ビンタ防止）")
+            logger.info("   - 📊 価格フィルター: 0.7%（バランス設定）")
             logger.info("   - 🎯 期待: 損失抑制、勝率向上、残高回復")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
@@ -185,7 +185,7 @@ if __name__ == "__main__":
     logger.info("Primary Indicator: MACD + RSI + Bollinger Bands")
     logger.info("Strategy: CONSERVATIVE 🛡️")
     logger.info("Profit Target: ¥2.0 | Stop Loss: -1.2% | Emergency: -¥5")
-    logger.info("Trailing Stop: ¥1.0 | Price Filter: 1.0%")
+    logger.info("Trailing Stop: ¥1.0 | Price Filter: 0.7%")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
