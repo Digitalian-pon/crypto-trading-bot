@@ -762,6 +762,17 @@ class OptimizedLeverageTradingBot:
             logger.info(f"⏸️  No trade signal")
             return
 
+        # 【重複ポジション防止】注文前に既存ポジションを確認（v2.7.2追加）
+        existing_positions = self.api.get_positions(symbol=self.symbol)
+        if existing_positions and len(existing_positions) > 0:
+            logger.warning(f"⚠️ Already have {len(existing_positions)} position(s) - skipping new order")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"DUPLICATE_PREVENTION: Skipped new order, already have {len(existing_positions)} position(s)\n")
+            except:
+                pass
+            return
+
         # 残高確認
         balance = self.api.get_account_balance()
         available_jpy = 0
@@ -819,8 +830,8 @@ class OptimizedLeverageTradingBot:
                     logger.error(f"❌ Failed to write entry log: {e}")
                     # エラーでも継続
 
-                # 注文後、ポジションIDを取得してSL/TP記録
-                time.sleep(2)
+                # 注文後、ポジションIDを取得してSL/TP記録（v2.7.2: 待機時間延長で重複防止）
+                time.sleep(5)  # 2秒→5秒に延長
                 positions = self.api.get_positions(symbol=self.symbol)
 
                 if positions:
