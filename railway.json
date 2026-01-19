@@ -10,5 +10,5 @@
     "healthcheckPath": "/",
     "healthcheckTimeout": 300
   },
-  "_comment": "Deployment trigger: 2026-01-16 00:38 - Force redeploy: Previous deploy not detected"
+  "_comment": "Deployment trigger: 2026-01-20 00:30 - Force v2.7.2 deploy with duplicate position fix"
 }
