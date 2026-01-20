@@ -327,159 +327,67 @@ class OptimizedLeverageTradingBot:
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
         """
-        ポジション決済判定（動的SL/TP使用）
+        ポジション決済判定 - MACD v3.0 シンプル版
+
+        ルール:
+        1. 利確: +2%
+        2. 損切り: -1.5%
+        3. MACDが反対クロスしたら決済
 
         Returns:
             (should_close: bool, reason: str, trade_type: str or None)
         """
         side = position.get('side')
-        size = float(position.get('size', 0))  # 文字列→floatに変換（重要！）
+        size = float(position.get('size', 0))
         entry_price = float(position.get('price', 0))
-        position_id = position.get('positionId')  # ← 追加：position_idを取得
 
-        logger.info(f"   📊 Closure Decision Analysis:")
-        logger.info(f"      Position: {side} {size} @ ¥{entry_price:.3f}")
-        logger.info(f"      Current Price: ¥{current_price:.3f}")
-        logger.info(f"      P/L Ratio: {pl_ratio*100:.2f}%")
+        logger.info(f"   📊 [MACD v3.0] Position Check:")
+        logger.info(f"      {side} {size} DOGE @ ¥{entry_price:.3f}")
+        logger.info(f"      Current: ¥{current_price:.3f}, P/L: {pl_ratio*100:.2f}%")
 
-        # 【最優先】利益・損失チェック（最適化版）
-        # 往復手数料¥2を考慮し、純利益で判定
-        if side == 'BUY':
-            profit_jpy = size * (current_price - entry_price)
-        else:  # SELL
-            profit_jpy = size * (entry_price - current_price)
-
-        # GMO Coin手数料計算（動的）
-        # 手数料率: 0.04% per trade (maker/taker共通)
-        fee_rate = 0.0004  # 0.04%
-        position_value = size * entry_price
-        round_trip_fee = position_value * fee_rate * 2  # 往復手数料
-        net_profit = profit_jpy - round_trip_fee
-
-        logger.info(f"      Gross Profit: ¥{profit_jpy:.2f}")
-        logger.info(f"      Round-trip Fee (0.04% × 2): ¥{round_trip_fee:.2f}")
-        logger.info(f"      Net Profit (after fees): ¥{net_profit:.2f}")
-
-        # 【トレーリングストップ】¥1.0以上の利益が出ている場合、損切りラインを建値に移動
-        # v2.7.0：早めのリスクフリー化で利益を保護
-        if position_id in self.active_positions_stops:
-            original_stop_loss = self.active_positions_stops[position_id].get('original_stop_loss')
-
-            # トレーリングストップがまだ発動していない場合
-            if original_stop_loss is None and net_profit >= 1.0:
-                logger.info(f"      🔒 TRAILING STOP ACTIVATED: Net profit ¥{net_profit:.2f} >= ¥1.0")
-                logger.info(f"         Moving stop loss to break-even (entry price)")
-
-                # 元のストップロスを保存
-                self.active_positions_stops[position_id]['original_stop_loss'] = stop_loss
-
-                # 損切りラインを建値に移動（リスクフリー）
-                self.active_positions_stops[position_id]['stop_loss'] = entry_price
-                stop_loss = entry_price
-
-                try:
-                    with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"TRAILING_STOP_ACTIVATED: net_profit=¥{net_profit:.2f}, new_stop_loss=¥{entry_price:.3f}\n")
-                except:
-                    pass
-
-        # ログファイルに決済判定を記録
+        # ログファイルに記録
         try:
             with open('bot_execution_log.txt', 'a') as f:
                 f.write(f"POSITION_CHECK: {side} {size} @ ¥{entry_price:.3f}\n")
                 f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
-                f.write(f"GROSS_PROFIT: ¥{profit_jpy:.2f}\n")
-                f.write(f"NET_PROFIT: ¥{net_profit:.2f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"THRESHOLD: ¥2.0 (profit) / -1.2% (loss) / ¥1.0 (trailing) / -¥5 (emergency) | v2.7.0 Conservative\n")
+                f.write(f"THRESHOLD: TP +2% / SL -1.5% | MACD v3.0\n")
         except:
             pass
 
-        # 【最優先】反転シグナルチェック（決済判定用 - 緩い閾値とフィルタースキップ）
-        # TP/SLよりも先にチェックして、反対注文のシグナルタイプを取得
-        # 注: 価格変動フィルターは削除（純利益チェックで十分）
-        # skip_price_filter=True により、価格フィルター＋閾値の両方が緩和される
-        logger.info(f"      Checking reversal signal...")
+        # === 1. 利確チェック（+2%） ===
+        if pl_ratio >= 0.02:
+            logger.info(f"   ✅ TAKE PROFIT: {pl_ratio*100:.2f}% >= 2%")
+            return True, f"Take Profit: {pl_ratio*100:.2f}%", None
+
+        # === 2. 損切りチェック（-1.5%） ===
+        if pl_ratio <= -0.015:
+            logger.info(f"   🚨 STOP LOSS: {pl_ratio*100:.2f}% <= -1.5%")
+            # MACDの状態をチェックして反対注文を出すかどうか判断
+            should_trade, trade_type, _, confidence, _, _ = self.trading_logic.should_trade(
+                indicators, None, skip_price_filter=True
+            )
+            if should_trade and trade_type:
+                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
+                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + Reversal", trade_type.upper()
+            return True, f"Stop Loss: {pl_ratio*100:.2f}%", None
+
+        # === 3. MACDクロスによる決済チェック ===
         should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(
             indicators, None, skip_price_filter=True
         )
 
-        logger.info(f"      Reversal result: should_trade={should_trade}, type={trade_type}, confidence={confidence:.2f}, reason={reason}")
-
-        # 決済判定の閾値: 市場レジーム別（反転を確実に捉える）
-        # TRENDING: 0.8（トレンド転換は早めに検出）
-        # RANGING: 0.9（レンジでは慎重に）
-        # VOLATILE: 1.2（ボラティリティ高い時は確実なシグナルのみ）
-        market_regime = indicators.get('market_regime', 'RANGING')
-        reversal_thresholds = {
-            'TRENDING': 0.8,
-            'RANGING': 0.9,
-            'VOLATILE': 1.2
-        }
-        required_reversal_confidence = reversal_thresholds.get(market_regime, 1.0)
-        logger.info(f"      Reversal threshold for {market_regime}: {required_reversal_confidence:.2f}")
-
-        # 反対シグナルを保存（TP/SL決済時に使用）
-        opposite_signal = None
-        if should_trade and trade_type and confidence >= required_reversal_confidence:
-            logger.info(f"      Checking signal match: position={side}, signal={trade_type}, confidence={confidence:.2f} >= {required_reversal_confidence:.2f}")
+        if should_trade and trade_type:
+            # BUYポジションでSELLシグナル → 決済
             if side == 'BUY' and trade_type.upper() == 'SELL':
-                logger.info(f"   ✅ CLOSE DECISION: Strong Reversal SELL (confidence={confidence:.2f})")
-                return True, f"Strong Reversal: SELL (confidence={confidence:.2f})", 'SELL'
+                logger.info(f"   🔄 MACD REVERSAL: BUY → SELL signal")
+                return True, f"MACD Reversal: SELL", 'SELL'
+            # SELLポジションでBUYシグナル → 決済
             elif side == 'SELL' and trade_type.upper() == 'BUY':
-                logger.info(f"   ✅ CLOSE DECISION: Strong Reversal BUY (confidence={confidence:.2f})")
-                return True, f"Strong Reversal: BUY (confidence={confidence:.2f})", 'BUY'
-            elif side == 'BUY' and trade_type.upper() == 'BUY':
-                # BUYポジション保持中にBUYシグナル → 保存のみ（決済しない）
-                opposite_signal = None  # 同方向なので反対シグナルなし
-                logger.info(f"      Same direction signal (BUY) - no close")
-            elif side == 'SELL' and trade_type.upper() == 'SELL':
-                # SELLポジション保持中にSELLシグナル → 保存のみ（決済しない）
-                opposite_signal = None  # 同方向なので反対シグナルなし
-                logger.info(f"      Same direction signal (SELL) - no close")
-        else:
-            if not should_trade:
-                logger.info(f"      No reversal signal detected")
-            elif not trade_type:
-                logger.info(f"      No trade type in signal")
-            else:
-                logger.info(f"      Confidence too low: {confidence:.2f} < {required_reversal_confidence:.2f}")
+                logger.info(f"   🔄 MACD REVERSAL: SELL → BUY signal")
+                return True, f"MACD Reversal: BUY", 'BUY'
 
-        # 【利確/損切り判定】反転シグナルがない場合、TP/SLで決済
-        # TP/SL決済時も反対シグナルがあれば返す（反対注文を出すため）
-
-        # 【利確】純利益が¥2.0以上なら利確（v2.7.0：50 DOGEで0.9%変動で達成可能）
-        if net_profit >= 2.0:
-            logger.info(f"   ✅ CLOSE DECISION: Profit target reached: ¥{net_profit:.2f} (≥¥3.0)")
-            # 反対シグナルがある場合はそれを返す（弱いシグナルでも反対注文を出す）
-            if should_trade and trade_type:
-                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
-                    logger.info(f"      → Will place opposite {trade_type.upper()} order after close")
-                    return True, f"Take Profit: ¥{net_profit:.2f} + Opposite Signal", trade_type.upper()
-            return True, f"Take Profit: ¥{net_profit:.2f}", None
-
-        # 【損切り】固定損失リミット: -1.2%で損切り（v2.7.0：ノイズ耐性向上）
-        if pl_ratio <= -0.012:
-            logger.info(f"   🚨 CLOSE DECISION: Stop Loss Hit: {pl_ratio*100:.2f}% <= -0.8%")
-            logger.info(f"      Net loss in JPY: ¥{net_profit:.2f}")
-            # 反対シグナルがある場合はそれを返す（損切り後すぐに反対注文）
-            if should_trade and trade_type:
-                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
-                    logger.info(f"      → Will place opposite {trade_type.upper()} order after close")
-                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + Opposite Signal", trade_type.upper()
-            return True, f"Stop Loss: {pl_ratio*100:.2f}% (¥{net_profit:.2f})", None
-
-        # 【緊急損切り】絶対額での損切り: -¥5（v2.7.0：残高の4%でリスク管理）
-        if net_profit <= -5.0:
-            logger.info(f"   🚨 CLOSE DECISION: Absolute Loss Limit Hit: ¥{net_profit:.2f} <= -¥8")
-            # 反対シグナルがある場合はそれを返す
-            if should_trade and trade_type:
-                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
-                    logger.info(f"      → Will place opposite {trade_type.upper()} order after close")
-                    return True, f"Absolute Loss: ¥{net_profit:.2f} + Opposite Signal", trade_type.upper()
-            return True, f"Absolute Loss Limit: ¥{net_profit:.2f}", None
-
-        logger.info(f"   ❌ No close signal - position will be held")
+        logger.info(f"   ⏸️ No close signal - holding position")
         return False, "No close signal", None
 
     def _close_position(self, position, current_price, reason):

@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.7.3"
-BUILD_DATE = "2026-01-20"
-COMMIT_HASH = "force-deploy-duplicate-fix"
+VERSION = "3.0.0"
+BUILD_DATE = "2026-01-21"
+COMMIT_HASH = "macd-simple-strategy"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -121,13 +121,13 @@ def run_trading_bot():
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
             logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
-            logger.info("🛡️ CONSERVATIVE STRATEGY (v2.7.0):")
-            logger.info("   - 💰 利確: ¥2.0（50 DOGEで0.9%変動で達成）")
-            logger.info("   - 🚨 損切り: -1.2%（ノイズ耐性向上）")
-            logger.info("   - 🛡️ 緊急損切り: -¥5（残高の4%）")
-            logger.info("   - 🔒 トレーリング: ¥1.0（早めのリスクフリー化）")
-            logger.info("   - 📊 価格フィルター: 0.7%（バランス設定）")
-            logger.info("   - 🎯 期待: 損失抑制、勝率向上、残高回復")
+            logger.info("🎯 MACD SIMPLE STRATEGY (v3.0.0):")
+            logger.info("   - 📈 エントリー: MACDクロスのみ")
+            logger.info("   - 🟢 BUY: MACDゴールデンクロス")
+            logger.info("   - 🔴 SELL: MACDデッドクロス")
+            logger.info("   - 💰 利確: +2%")
+            logger.info("   - 🚨 損切り: -1.5%")
+            logger.info("   - 🎯 シンプルなルールで確実な利益を狙う")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
@@ -182,10 +182,10 @@ if __name__ == "__main__":
     logger.info("Trading Type: Leverage (Long & Short)")
     logger.info("Timeframe: 5min (short-term scalping)")
     logger.info("Check Interval: 300s (5min)")
-    logger.info("Primary Indicator: MACD + RSI + Bollinger Bands")
-    logger.info("Strategy: CONSERVATIVE 🛡️")
-    logger.info("Profit Target: ¥2.0 | Stop Loss: -1.2% | Emergency: -¥5")
-    logger.info("Trailing Stop: ¥1.0 | Price Filter: 0.7%")
+    logger.info("Primary Indicator: MACD ONLY (Simple Strategy)")
+    logger.info("Strategy: MACD SIMPLE 🎯")
+    logger.info("Entry: MACD Cross only | TP: +2% | SL: -1.5%")
+    logger.info("BUY = Golden Cross | SELL = Death Cross")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
