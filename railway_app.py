@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "2.7.2"
-BUILD_DATE = "2026-01-18"
-COMMIT_HASH = "fix-duplicate-positions"
+VERSION = "2.7.3"
+BUILD_DATE = "2026-01-20"
+COMMIT_HASH = "force-deploy-duplicate-fix"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
