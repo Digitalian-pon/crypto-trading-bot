@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.0.2"
+VERSION = "3.0.3"
 BUILD_DATE = "2026-01-21"
-COMMIT_HASH = "standard-macd-12-26-9-force-deploy"
+COMMIT_HASH = "dashboard-pnl-display"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

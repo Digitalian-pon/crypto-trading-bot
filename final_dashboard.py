@@ -187,7 +187,7 @@ class FinalDashboard:
             logger.error(f"Error getting current price: {e}")
 
     def get_execution_history_html(self):
-        """Generate execution history HTML"""
+        """Generate execution history HTML with P&L for settlements"""
         try:
             if not self.execution_history:
                 return '<div style="color: #888; padding: 20px; text-align: center;">取引履歴がありません</div>'
@@ -197,16 +197,26 @@ class FinalDashboard:
             history_html += '<thead><tr style="background: rgba(255,255,255,0.1); border-bottom: 2px solid rgba(255,255,255,0.2);">'
             history_html += '<th style="padding: 12px; text-align: left;">日時</th>'
             history_html += '<th style="padding: 12px; text-align: center;">売買</th>'
-            history_html += '<th style="padding: 12px; text-align: right;">数量 (DOGE)</th>'
-            history_html += '<th style="padding: 12px; text-align: right;">価格 (JPY)</th>'
-            history_html += '<th style="padding: 12px; text-align: right;">手数料 (JPY)</th>'
-            history_html += '<th style="padding: 12px; text-align: center;">注文ID</th>'
+            history_html += '<th style="padding: 12px; text-align: center;">タイプ</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">数量</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">価格</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">損益</th>'
+            history_html += '<th style="padding: 12px; text-align: right;">手数料</th>'
             history_html += '</tr></thead><tbody>'
 
             for execution in self.execution_history:
                 side = execution.get('side', 'N/A')
                 side_color = '#00E676' if side == 'BUY' else '#FF1744' if side == 'SELL' else '#FFEB3B'
                 side_text = '買い' if side == 'BUY' else '売り' if side == 'SELL' else side
+
+                # 新規/決済の判定
+                settle_type = execution.get('settleType', 'OPEN')
+                if settle_type == 'CLOSE':
+                    type_text = '決済'
+                    type_color = '#FF9800'  # オレンジ
+                else:
+                    type_text = '新規'
+                    type_color = '#2196F3'  # 青
 
                 timestamp = execution.get('timestamp', '')
                 # タイムスタンプをフォーマット（UTC→JST変換）
@@ -222,15 +232,28 @@ class FinalDashboard:
                 size = float(execution.get('size', 0))
                 price = float(execution.get('price', 0))
                 fee = float(execution.get('fee', 0))
-                order_id = execution.get('orderId', 'N/A')
+
+                # 損益の取得（決済時のみ）
+                loss_gain = execution.get('lossGain', None)
+                if loss_gain is not None and settle_type == 'CLOSE':
+                    loss_gain = float(loss_gain)
+                    if loss_gain > 0:
+                        pnl_text = f'<span style="color: #00E676; font-weight: bold;">+¥{loss_gain:,.0f}</span>'
+                    elif loss_gain < 0:
+                        pnl_text = f'<span style="color: #FF1744; font-weight: bold;">¥{loss_gain:,.0f}</span>'
+                    else:
+                        pnl_text = f'<span style="color: #FFEB3B;">¥0</span>'
+                else:
+                    pnl_text = '<span style="color: #666;">-</span>'
 
                 history_html += f'<tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">'
                 history_html += f'<td style="padding: 10px; color: #ffffff;">{timestamp_formatted}</td>'
                 history_html += f'<td style="padding: 10px; text-align: center;"><span style="color: {side_color}; font-weight: bold;">{side_text}</span></td>'
+                history_html += f'<td style="padding: 10px; text-align: center;"><span style="color: {type_color}; font-weight: bold;">{type_text}</span></td>'
                 history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">{size:.0f}</td>'
                 history_html += f'<td style="padding: 10px; text-align: right; color: #ffffff;">¥{price:,.3f}</td>'
+                history_html += f'<td style="padding: 10px; text-align: right;">{pnl_text}</td>'
                 history_html += f'<td style="padding: 10px; text-align: right; color: #FF9800;">¥{fee:,.2f}</td>'
-                history_html += f'<td style="padding: 10px; text-align: center; color: #888; font-size: 0.85em;">{order_id}</td>'
                 history_html += '</tr>'
 
             history_html += '</tbody></table></div>'
