@@ -327,12 +327,14 @@ class OptimizedLeverageTradingBot:
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
         """
-        ポジション決済判定 - MACD v3.0 シンプル版
+        ポジション決済判定 - MACD v3.0.1 修正版
 
         ルール:
         1. 利確: +2%
         2. 損切り: -1.5%
-        3. MACDが反対クロスしたら決済
+        3. MACDの「現在位置」で決済判定（クロスの瞬間だけでなく）
+           - BUYポジション: MACD Line < Signal Line → 決済
+           - SELLポジション: MACD Line > Signal Line → 決済
 
         Returns:
             (should_close: bool, reason: str, trade_type: str or None)
@@ -341,9 +343,16 @@ class OptimizedLeverageTradingBot:
         size = float(position.get('size', 0))
         entry_price = float(position.get('price', 0))
 
-        logger.info(f"   📊 [MACD v3.0] Position Check:")
+        # MACDデータを直接取得
+        macd_line = indicators.get('macd_line', 0)
+        macd_signal = indicators.get('macd_signal', 0)
+        macd_histogram = indicators.get('macd_histogram', 0)
+
+        logger.info(f"   📊 [MACD v3.0.1] Position Check:")
         logger.info(f"      {side} {size} DOGE @ ¥{entry_price:.3f}")
         logger.info(f"      Current: ¥{current_price:.3f}, P/L: {pl_ratio*100:.2f}%")
+        logger.info(f"      MACD Line: {macd_line:.6f}, Signal: {macd_signal:.6f}")
+        logger.info(f"      MACD Position: {'BULLISH (Line > Signal)' if macd_line > macd_signal else 'BEARISH (Line < Signal)'}")
 
         # ログファイルに記録
         try:
@@ -351,7 +360,8 @@ class OptimizedLeverageTradingBot:
                 f.write(f"POSITION_CHECK: {side} {size} @ ¥{entry_price:.3f}\n")
                 f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"THRESHOLD: TP +2% / SL -1.5% | MACD v3.0\n")
+                f.write(f"MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}\n")
+                f.write(f"THRESHOLD: TP +2% / SL -1.5% | MACD Position Check v3.0.1\n")
         except:
             pass
 
@@ -363,32 +373,31 @@ class OptimizedLeverageTradingBot:
         # === 2. 損切りチェック（-1.5%） ===
         if pl_ratio <= -0.015:
             logger.info(f"   🚨 STOP LOSS: {pl_ratio*100:.2f}% <= -1.5%")
-            # MACDの状態をチェックして反対注文を出すかどうか判断
-            should_trade, trade_type, _, confidence, _, _ = self.trading_logic.should_trade(
-                indicators, None, skip_price_filter=True
-            )
-            if should_trade and trade_type:
-                if (side == 'BUY' and trade_type.upper() == 'SELL') or (side == 'SELL' and trade_type.upper() == 'BUY'):
-                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + Reversal", trade_type.upper()
+            # MACDの位置で反対注文を判断
+            if side == 'BUY' and macd_line < macd_signal:
+                return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bearish", 'SELL'
+            elif side == 'SELL' and macd_line > macd_signal:
+                return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bullish", 'BUY'
             return True, f"Stop Loss: {pl_ratio*100:.2f}%", None
 
-        # === 3. MACDクロスによる決済チェック ===
-        should_trade, trade_type, reason, confidence, _, _ = self.trading_logic.should_trade(
-            indicators, None, skip_price_filter=True
-        )
+        # === 3. MACDの「現在位置」で決済判定（重要な修正！） ===
+        # クロスの瞬間だけでなく、MACDが反対側にある限り決済シグナル
 
-        if should_trade and trade_type:
-            # BUYポジションでSELLシグナル → 決済
-            if side == 'BUY' and trade_type.upper() == 'SELL':
-                logger.info(f"   🔄 MACD REVERSAL: BUY → SELL signal")
-                return True, f"MACD Reversal: SELL", 'SELL'
-            # SELLポジションでBUYシグナル → 決済
-            elif side == 'SELL' and trade_type.upper() == 'BUY':
-                logger.info(f"   🔄 MACD REVERSAL: SELL → BUY signal")
-                return True, f"MACD Reversal: BUY", 'BUY'
+        # BUYポジション: MACD Line < Signal Line（ベアリッシュ）→ 決済してSELLへ
+        if side == 'BUY' and macd_line < macd_signal:
+            logger.info(f"   🔴 MACD BEARISH POSITION: Line({macd_line:.6f}) < Signal({macd_signal:.6f})")
+            logger.info(f"   🔄 Closing BUY position - MACD is bearish")
+            return True, f"MACD Bearish (Line < Signal)", 'SELL'
 
-        logger.info(f"   ⏸️ No close signal - holding position")
-        return False, "No close signal", None
+        # SELLポジション: MACD Line > Signal Line（ブリッシュ）→ 決済してBUYへ
+        if side == 'SELL' and macd_line > macd_signal:
+            logger.info(f"   🟢 MACD BULLISH POSITION: Line({macd_line:.6f}) > Signal({macd_signal:.6f})")
+            logger.info(f"   🔄 Closing SELL position - MACD is bullish")
+            return True, f"MACD Bullish (Line > Signal)", 'BUY'
+
+        # MACDがポジションと同じ方向 → 保持継続
+        logger.info(f"   ✅ MACD confirms position direction - holding")
+        return False, "MACD confirms direction", None
 
     def _close_position(self, position, current_price, reason):
         """
