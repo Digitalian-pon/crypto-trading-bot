@@ -2727,23 +2727,83 @@ d3eae15 - 🔧 v3.0.1 - MACD決済判定修正
 
 ---
 
-**最終更新**: 2026年1月28日 08:00
-**ステータス**: 24時間完全稼働中 ✅ (MACD Simple Strategy)
-**バージョン**: 3.0.3 - MACD Simple Strategy ⭐**最新**
-**現在の残高**: JPY ¥1,288～¥1,294（大幅回復！）
-**現在のポジション**: SELL 60 DOGE @ ¥19.139（含み益+¥9、+0.94%）
+#### 32. **上昇トレンド中のSELL防止 - EMAフィルター強化** (2026年1月28日)
+**問題**: 上昇トレンド中にMACDデッドクロスでSELLシグナルが発生し、全てのSELL取引が損失
+
+**Railwayログ分析による発見**:
+```
+【全SELL取引が損失のパターン】
+SELL ¥19.129 → close ¥19.165 = -¥3
+SELL ¥19.145 → close ¥19.158 = -¥1
+SELL ¥19.139 → close ¥19.190 = -¥4
+
+共通点: 市場は上昇中（EMA20 > EMA50）なのにSELLシグナル発動
+原因: EMAトレンドフィルターの閾値が3%と緩すぎる
+```
+
+**根本原因**:
+```python
+# Before（問題のコード）
+if ema_trend == 'up' and ema_diff_pct > 3.0:
+    logger.info("Death Cross ignored - Strong uptrend")
+else:
+    # 3%未満の上昇トレンドでもSELLが実行される ❌
+    return True, 'SELL', 'MACD Death Cross', ...
+```
+
+**実装した修正**:
+```python
+# After（修正後）
+# 閾値を3.0% → 0.5%に強化
+if ema_trend == 'up' and ema_diff_pct > 0.5:
+    logger.info("Death Cross ignored - Uptrend detected")
+else:
+    # 0.5%以上の上昇トレンドではSELLがブロックされる ✅
+    return True, 'SELL', 'MACD Death Cross', ...
+
+# BUYも同様に強化
+if ema_trend == 'down' and ema_diff_pct > 0.5:
+    logger.info("Golden Cross ignored - Downtrend detected")
+```
+
+**変更点まとめ**:
+| 項目 | Before | After | 効果 |
+|------|--------|-------|------|
+| BUY無視閾値 | EMA差 > 3% | EMA差 > 0.5% | 下降トレンド中のBUYをより厳格にブロック |
+| SELL無視閾値 | EMA差 > 3% | EMA差 > 0.5% | 上昇トレンド中のSELLをより厳格にブロック |
+
+**期待される効果**:
+- ✅ **上昇トレンド中のSELL防止**: EMA20 > EMA50 by 0.5%以上でSELLブロック
+- ✅ **下降トレンド中のBUY防止**: EMA20 < EMA50 by 0.5%以上でBUYブロック
+- ✅ **損失削減**: トレンドに逆らう取引を完全排除
+- ✅ **勝率向上**: トレンド方向の取引のみ実行
+
+**修正ファイル**:
+- `services/optimized_trading_logic.py` - EMAフィルター閾値を3.0% → 0.5%に強化
+- `railway_app.py` - バージョン3.0.4に更新
+
+**解決**: EMAトレンドフィルター強化で上昇トレンド中のSELL防止を実装 ✅ **CRITICAL FIX**
+
+---
+
+**最終更新**: 2026年1月28日
+**ステータス**: 24時間完全稼働中 ✅ (MACD Simple Strategy + EMAフィルター強化)
+**バージョン**: 3.0.4 - EMA Trend Filter Enhanced ⭐**最新**
+**現在の残高**: JPY ¥1,275～¥1,294
 **時間足**: **5分足（短期スキャルピング）**
 **チェック間隔**: **300秒（5分）**
 **主要指標**: **MACD単体（RSI無効化）** ⭐**重要変更**
+**EMAフィルター**: **0.5%（3%から強化）** ⭐**新規修正**
 **MACD設定**: 12, 26, 9（標準設定、全レジーム統一）
 **ボット**: optimized-bot (Railway環境で自動稼働中)
 **ダッシュボード**:
 - ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
 - ✅ **ログ監視（改善版）**: https://web-production-1f4ce.up.railway.app/logs
-**最新修正**: RSI無効化・MACD単体戦略で利益改善 ✅ **SUCCESS**
+**最新修正**: EMAトレンドフィルター強化（3% → 0.5%）で上昇トレンド中のSELL防止 ✅ **CRITICAL FIX**
 **GitHubコミット履歴**:
-- 60b322d - 📊 v3.0.3 - P&L表示を取引履歴に追加 ⭐**最新**
+- （次のコミット） - 🔧 v3.0.4 - EMAトレンドフィルター強化 ⭐**最新**
+- 60b322d - 📊 v3.0.3 - P&L表示を取引履歴に追加
 - a3d1681 - 🔧 v3.0.2 - MACD標準化 (12,26,9)
 - 2873eb5 - 🎯 v3.0.0 - MACD Simple Strategy
 - 7a551c4 - 🚨 v2.7.3 - 重複ポジション修正

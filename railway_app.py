@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.0.3"
-BUILD_DATE = "2026-01-21"
-COMMIT_HASH = "dashboard-pnl-display"
+VERSION = "3.0.4"
+BUILD_DATE = "2026-01-28"
+COMMIT_HASH = "fix-uptrend-sell-filter"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

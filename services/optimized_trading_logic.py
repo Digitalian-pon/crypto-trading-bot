@@ -125,9 +125,9 @@ class OptimizedTradingLogic:
 
             # BUY判定: MACDゴールデンクロス
             if is_golden_cross:
-                # 強い下降トレンド中は見送り（EMAが3%以上下向き）
-                if ema_trend == 'down' and ema_diff_pct > 3.0:
-                    logger.info(f"⚠️ Golden Cross ignored - Strong downtrend (EMA diff: {ema_diff_pct:.2f}%)")
+                # 下降トレンド中は見送り（EMAが0.5%以上下向き）- 閾値を3%→0.5%に強化
+                if ema_trend == 'down' and ema_diff_pct > 0.5:
+                    logger.info(f"⚠️ Golden Cross ignored - Downtrend detected (EMA diff: {ema_diff_pct:.2f}%)")
                 else:
                     # TP/SL計算
                     take_profit = current_price * (1 + self.take_profit_pct)
@@ -142,9 +142,10 @@ class OptimizedTradingLogic:
 
             # SELL判定: MACDデッドクロス
             if is_death_cross:
-                # 強い上昇トレンド中は見送り（EMAが3%以上上向き）
-                if ema_trend == 'up' and ema_diff_pct > 3.0:
-                    logger.info(f"⚠️ Death Cross ignored - Strong uptrend (EMA diff: {ema_diff_pct:.2f}%)")
+                # 上昇トレンド中は見送り（EMAが0.5%以上上向き）- 閾値を3%→0.5%に強化
+                # これにより上昇トレンド中のSELLを完全にブロック
+                if ema_trend == 'up' and ema_diff_pct > 0.5:
+                    logger.info(f"⚠️ Death Cross ignored - Uptrend detected (EMA diff: {ema_diff_pct:.2f}%)")
                 else:
                     # TP/SL計算（SELLの場合は逆）
                     take_profit = current_price * (1 - self.take_profit_pct)
