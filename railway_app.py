@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.0.4"
-BUILD_DATE = "2026-01-28"
-COMMIT_HASH = "fix-uptrend-sell-filter"
+VERSION = "3.0.5"
+BUILD_DATE = "2026-01-29"
+COMMIT_HASH = "force-deploy-ema-filter"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
