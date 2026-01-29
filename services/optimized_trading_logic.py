@@ -1,12 +1,16 @@
 """
-MACD主体トレーディングロジック v3.0.0
+MACD主体トレーディングロジック v3.2.0
 シンプルなMACD売買戦略
 
 方針:
-- MACDクロスのみでエントリー判断（他のインジケーターは補助のみ）
-- MACDゴールデンクロス → BUY
-- MACDデッドクロス → SELL
+- MACDクロス または 継続シグナルでエントリー判断
+- MACDゴールデンクロス or Bullish継続 → BUY（上昇トレンド中のみ）
+- MACDデッドクロス or Bearish継続 → SELL（下降トレンド中のみ）
 - シンプルな固定TP/SL（利確2%、損切り1.5%）
+
+v3.2.0変更点:
+- MACDクロスを待たずに継続シグナルでもエントリー可能
+- 長時間ノートレード問題を解決
 """
 
 import logging
@@ -162,33 +166,42 @@ class OptimizedTradingLogic:
 
                     return True, 'SELL', 'MACD Death Cross + Downtrend', confidence, stop_loss, take_profit
 
-            # === クロスなし: 継続シグナルチェック（反転シグナル用） ===
-            if skip_price_filter:
-                # 反転シグナルモード: トレンド方向のシグナルのみ許可
-                if macd_position == 'above' and macd_histogram > 0.01:
-                    # 上昇トレンド中のみBUY許可
-                    if ema_trend == 'up':
-                        take_profit = current_price * (1 + self.take_profit_pct)
-                        stop_loss = current_price * (1 - self.stop_loss_pct)
-                        logger.info(f"🟢 BUY SIGNAL (Reversal mode) - MACD Bullish + Uptrend")
-                        return True, 'BUY', 'MACD Bullish (reversal) + Uptrend', confidence, stop_loss, take_profit
-                    else:
-                        logger.info(f"🚫 BUY blocked in reversal mode - Downtrend active")
+            # === クロスなし: 継続シグナルチェック ===
+            # v3.2.0: 通常取引でも継続シグナルを許可（長時間ノートレード問題を解決）
+            # 反転シグナルモードは閾値を緩く、通常取引は厳しく
+            histogram_threshold = 0.02 if not skip_price_filter else 0.01
 
-                elif macd_position == 'below' and macd_histogram < -0.01:
-                    # 下降トレンド中のみSELL許可
-                    if ema_trend == 'down':
-                        take_profit = current_price * (1 - self.take_profit_pct)
-                        stop_loss = current_price * (1 + self.stop_loss_pct)
-                        logger.info(f"🔴 SELL SIGNAL (Reversal mode) - MACD Bearish + Downtrend")
-                        return True, 'SELL', 'MACD Bearish (reversal) + Downtrend', confidence, stop_loss, take_profit
-                    else:
-                        logger.info(f"🚫 SELL blocked in reversal mode - Uptrend active")
+            logger.info(f"   📈 Checking continuation signal (threshold: {histogram_threshold})")
+
+            # BUY継続シグナル: MACD above + 強いヒストグラム + 上昇トレンド
+            if macd_position == 'above' and macd_histogram > histogram_threshold:
+                if ema_trend == 'up':
+                    take_profit = current_price * (1 + self.take_profit_pct)
+                    stop_loss = current_price * (1 - self.stop_loss_pct)
+                    signal_type = "Reversal" if skip_price_filter else "Continuation"
+                    logger.info(f"🟢 BUY SIGNAL ({signal_type}) - MACD Bullish + Uptrend")
+                    logger.info(f"   Histogram: {macd_histogram:.4f} > {histogram_threshold}")
+                    return True, 'BUY', f'MACD Bullish ({signal_type}) + Uptrend', confidence, stop_loss, take_profit
+                else:
+                    logger.info(f"🚫 BUY blocked - Downtrend active (EMA20 < EMA50)")
+
+            # SELL継続シグナル: MACD below + 強いヒストグラム + 下降トレンド
+            elif macd_position == 'below' and macd_histogram < -histogram_threshold:
+                if ema_trend == 'down':
+                    take_profit = current_price * (1 - self.take_profit_pct)
+                    stop_loss = current_price * (1 + self.stop_loss_pct)
+                    signal_type = "Reversal" if skip_price_filter else "Continuation"
+                    logger.info(f"🔴 SELL SIGNAL ({signal_type}) - MACD Bearish + Downtrend")
+                    logger.info(f"   Histogram: {macd_histogram:.4f} < -{histogram_threshold}")
+                    return True, 'SELL', f'MACD Bearish ({signal_type}) + Downtrend', confidence, stop_loss, take_profit
+                else:
+                    logger.info(f"🚫 SELL blocked - Uptrend active (EMA20 > EMA50)")
 
             # シグナルなし
             logger.info(f"⏸️ No valid signal - waiting...")
-            logger.info(f"   MACD position: {macd_position}, EMA trend: {ema_trend}")
-            return False, None, "No MACD cross", confidence, None, None
+            logger.info(f"   MACD position: {macd_position}, Histogram: {macd_histogram:.4f}")
+            logger.info(f"   EMA trend: {ema_trend}, Required histogram: >{histogram_threshold} or <-{histogram_threshold}")
+            return False, None, "No valid signal (waiting for stronger MACD)", confidence, None, None
 
         except Exception as e:
             logger.error(f"Error in MACD trading logic: {e}", exc_info=True)

@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 BUILD_DATE = "2026-01-29"
-COMMIT_HASH = "trend-follow-only-mode"
+COMMIT_HASH = "continuation-signal-enabled"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -120,14 +120,15 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: Market Regime Detection, Dynamic SL/TP, ATR-based Risk Management")
-            logger.info("🎯 MACD SIMPLE STRATEGY (v3.0.0):")
-            logger.info("   - 📈 エントリー: MACDクロスのみ")
-            logger.info("   - 🟢 BUY: MACDゴールデンクロス")
-            logger.info("   - 🔴 SELL: MACDデッドクロス")
+            logger.info("Features: MACD + EMA Trend Following, Dynamic SL/TP")
+            logger.info("🎯 MACD TREND-FOLLOW STRATEGY (v3.2.0):")
+            logger.info("   - 📈 エントリー: MACDクロス OR 継続シグナル")
+            logger.info("   - 🟢 BUY: 上昇トレンド中のみ（EMA20 > EMA50）")
+            logger.info("   - 🔴 SELL: 下降トレンド中のみ（EMA20 < EMA50）")
+            logger.info("   - 📊 継続シグナル: ヒストグラム > 0.02 でエントリー")
             logger.info("   - 💰 利確: +2%")
             logger.info("   - 🚨 損切り: -1.5%")
-            logger.info("   - 🎯 シンプルなルールで確実な利益を狙う")
+            logger.info("   - 🎯 クロス待ちによるノートレード問題を解決")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
@@ -182,10 +183,10 @@ if __name__ == "__main__":
     logger.info("Trading Type: Leverage (Long & Short)")
     logger.info("Timeframe: 5min (short-term scalping)")
     logger.info("Check Interval: 300s (5min)")
-    logger.info("Primary Indicator: MACD ONLY (Simple Strategy)")
-    logger.info("Strategy: MACD SIMPLE 🎯")
-    logger.info("Entry: MACD Cross only | TP: +2% | SL: -1.5%")
-    logger.info("BUY = Golden Cross | SELL = Death Cross")
+    logger.info("Primary Indicator: MACD + EMA Trend Following")
+    logger.info("Strategy: TREND-FOLLOW + CONTINUATION SIGNAL 🎯")
+    logger.info("Entry: MACD Cross OR Continuation (histogram > 0.02)")
+    logger.info("BUY = Uptrend only | SELL = Downtrend only")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
