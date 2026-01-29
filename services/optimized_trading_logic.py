@@ -102,11 +102,13 @@ class OptimizedTradingLogic:
             else:
                 confidence = 1.0  # 最小
 
-            # === EMAトレンド確認（軽いフィルターのみ） ===
+            # === EMAトレンド確認（トレンドフォロー専用モード） ===
+            # v3.1.0: トレンド方向のみ取引を許可（逆方向は完全禁止）
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
 
             logger.info(f"   EMA Trend: {ema_trend} (EMA20-EMA50 diff: {ema_diff_pct:.2f}%)")
+            logger.info(f"   🎯 TREND-FOLLOW MODE: Only {ema_trend.upper()}TREND trades allowed")
 
             # === 取引タイミングフィルター ===
             if not skip_price_filter:
@@ -121,61 +123,71 @@ class OptimizedTradingLogic:
                         logger.info(f"⏸️ Price change too small ({price_change*100:.2f}% < 0.5%)")
                         return False, None, f"Price change too small", 0.0, None, None
 
-            # === 売買判定（MACDクロスのみ） ===
+            # === 売買判定（トレンドフォロー専用モード） ===
+            # v3.1.0: トレンド方向のシグナルのみ許可、逆方向は完全ブロック
 
             # BUY判定: MACDゴールデンクロス
             if is_golden_cross:
-                # 下降トレンド中は見送り（EMAが0.5%以上下向き）- 閾値を3%→0.5%に強化
-                if ema_trend == 'down' and ema_diff_pct > 0.5:
-                    logger.info(f"⚠️ Golden Cross ignored - Downtrend detected (EMA diff: {ema_diff_pct:.2f}%)")
+                # 【重要】下降トレンド中はBUY完全禁止（閾値なし）
+                if ema_trend == 'down':
+                    logger.info(f"🚫 Golden Cross BLOCKED - Downtrend active (EMA20 < EMA50)")
+                    logger.info(f"   In downtrend, only SELL signals are allowed")
                 else:
-                    # TP/SL計算
+                    # 上昇トレンド中のみBUY許可
                     take_profit = current_price * (1 + self.take_profit_pct)
                     stop_loss = current_price * (1 - self.stop_loss_pct)
 
-                    logger.info(f"🟢 BUY SIGNAL - MACD Golden Cross")
+                    logger.info(f"🟢 BUY SIGNAL - MACD Golden Cross + Uptrend confirmed")
                     logger.info(f"   Confidence: {confidence:.2f}")
                     logger.info(f"   TP: ¥{take_profit:.2f} (+{self.take_profit_pct*100:.1f}%)")
                     logger.info(f"   SL: ¥{stop_loss:.2f} (-{self.stop_loss_pct*100:.1f}%)")
 
-                    return True, 'BUY', 'MACD Golden Cross', confidence, stop_loss, take_profit
+                    return True, 'BUY', 'MACD Golden Cross + Uptrend', confidence, stop_loss, take_profit
 
             # SELL判定: MACDデッドクロス
             if is_death_cross:
-                # 上昇トレンド中は見送り（EMAが0.5%以上上向き）- 閾値を3%→0.5%に強化
-                # これにより上昇トレンド中のSELLを完全にブロック
-                if ema_trend == 'up' and ema_diff_pct > 0.5:
-                    logger.info(f"⚠️ Death Cross ignored - Uptrend detected (EMA diff: {ema_diff_pct:.2f}%)")
+                # 【重要】上昇トレンド中はSELL完全禁止（閾値なし）
+                if ema_trend == 'up':
+                    logger.info(f"🚫 Death Cross BLOCKED - Uptrend active (EMA20 > EMA50)")
+                    logger.info(f"   In uptrend, only BUY signals are allowed")
                 else:
-                    # TP/SL計算（SELLの場合は逆）
+                    # 下降トレンド中のみSELL許可
                     take_profit = current_price * (1 - self.take_profit_pct)
                     stop_loss = current_price * (1 + self.stop_loss_pct)
 
-                    logger.info(f"🔴 SELL SIGNAL - MACD Death Cross")
+                    logger.info(f"🔴 SELL SIGNAL - MACD Death Cross + Downtrend confirmed")
                     logger.info(f"   Confidence: {confidence:.2f}")
                     logger.info(f"   TP: ¥{take_profit:.2f} (-{self.take_profit_pct*100:.1f}%)")
                     logger.info(f"   SL: ¥{stop_loss:.2f} (+{self.stop_loss_pct*100:.1f}%)")
 
-                    return True, 'SELL', 'MACD Death Cross', confidence, stop_loss, take_profit
+                    return True, 'SELL', 'MACD Death Cross + Downtrend', confidence, stop_loss, take_profit
 
             # === クロスなし: 継続シグナルチェック（反転シグナル用） ===
             if skip_price_filter:
-                # 反転シグナルモード: クロスなしでもMACDの位置でシグナル
+                # 反転シグナルモード: トレンド方向のシグナルのみ許可
                 if macd_position == 'above' and macd_histogram > 0.01:
-                    take_profit = current_price * (1 + self.take_profit_pct)
-                    stop_loss = current_price * (1 - self.stop_loss_pct)
-                    logger.info(f"🟢 BUY SIGNAL (Reversal mode) - MACD Above Signal")
-                    return True, 'BUY', 'MACD Bullish (reversal)', confidence, stop_loss, take_profit
+                    # 上昇トレンド中のみBUY許可
+                    if ema_trend == 'up':
+                        take_profit = current_price * (1 + self.take_profit_pct)
+                        stop_loss = current_price * (1 - self.stop_loss_pct)
+                        logger.info(f"🟢 BUY SIGNAL (Reversal mode) - MACD Bullish + Uptrend")
+                        return True, 'BUY', 'MACD Bullish (reversal) + Uptrend', confidence, stop_loss, take_profit
+                    else:
+                        logger.info(f"🚫 BUY blocked in reversal mode - Downtrend active")
 
                 elif macd_position == 'below' and macd_histogram < -0.01:
-                    take_profit = current_price * (1 - self.take_profit_pct)
-                    stop_loss = current_price * (1 + self.stop_loss_pct)
-                    logger.info(f"🔴 SELL SIGNAL (Reversal mode) - MACD Below Signal")
-                    return True, 'SELL', 'MACD Bearish (reversal)', confidence, stop_loss, take_profit
+                    # 下降トレンド中のみSELL許可
+                    if ema_trend == 'down':
+                        take_profit = current_price * (1 - self.take_profit_pct)
+                        stop_loss = current_price * (1 + self.stop_loss_pct)
+                        logger.info(f"🔴 SELL SIGNAL (Reversal mode) - MACD Bearish + Downtrend")
+                        return True, 'SELL', 'MACD Bearish (reversal) + Downtrend', confidence, stop_loss, take_profit
+                    else:
+                        logger.info(f"🚫 SELL blocked in reversal mode - Uptrend active")
 
             # シグナルなし
-            logger.info(f"⏸️ No MACD cross - waiting for signal...")
-            logger.info(f"   Current MACD position: {macd_position}")
+            logger.info(f"⏸️ No valid signal - waiting...")
+            logger.info(f"   MACD position: {macd_position}, EMA trend: {ema_trend}")
             return False, None, "No MACD cross", confidence, None, None
 
         except Exception as e:
