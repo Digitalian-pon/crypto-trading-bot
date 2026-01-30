@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.2.0"
-BUILD_DATE = "2026-01-29"
-COMMIT_HASH = "continuation-signal-enabled"
+VERSION = "3.2.1"
+BUILD_DATE = "2026-01-30"
+COMMIT_HASH = "lower-histogram-threshold"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -121,14 +121,14 @@ def run_trading_bot():
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
             logger.info("Features: MACD + EMA Trend Following, Dynamic SL/TP")
-            logger.info("🎯 MACD TREND-FOLLOW STRATEGY (v3.2.0):")
+            logger.info("🎯 MACD TREND-FOLLOW STRATEGY (v3.2.1):")
             logger.info("   - 📈 エントリー: MACDクロス OR 継続シグナル")
             logger.info("   - 🟢 BUY: 上昇トレンド中のみ（EMA20 > EMA50）")
             logger.info("   - 🔴 SELL: 下降トレンド中のみ（EMA20 < EMA50）")
-            logger.info("   - 📊 継続シグナル: ヒストグラム > 0.02 でエントリー")
+            logger.info("   - 📊 継続シグナル: ヒストグラム > 0.015 でエントリー")
             logger.info("   - 💰 利確: +2%")
             logger.info("   - 🚨 損切り: -1.5%")
-            logger.info("   - 🎯 クロス待ちによるノートレード問題を解決")
+            logger.info("   - 🎯 閾値緩和でより多くの取引機会を確保")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 

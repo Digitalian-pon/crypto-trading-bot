@@ -1,5 +1,5 @@
 """
-MACD主体トレーディングロジック v3.2.0
+MACD主体トレーディングロジック v3.2.1
 シンプルなMACD売買戦略
 
 方針:
@@ -8,9 +8,9 @@ MACD主体トレーディングロジック v3.2.0
 - MACDデッドクロス or Bearish継続 → SELL（下降トレンド中のみ）
 - シンプルな固定TP/SL（利確2%、損切り1.5%）
 
-v3.2.0変更点:
-- MACDクロスを待たずに継続シグナルでもエントリー可能
-- 長時間ノートレード問題を解決
+v3.2.1変更点:
+- 継続シグナル閾値を緩和: 0.02 → 0.015（通常）、0.01 → 0.008（反転）
+- より多くの取引機会を確保
 """
 
 import logging
@@ -167,9 +167,9 @@ class OptimizedTradingLogic:
                     return True, 'SELL', 'MACD Death Cross + Downtrend', confidence, stop_loss, take_profit
 
             # === クロスなし: 継続シグナルチェック ===
-            # v3.2.0: 通常取引でも継続シグナルを許可（長時間ノートレード問題を解決）
-            # 反転シグナルモードは閾値を緩く、通常取引は厳しく
-            histogram_threshold = 0.02 if not skip_price_filter else 0.01
+            # v3.2.1: 閾値を緩和（0.02→0.015）してより多くの取引機会を確保
+            # 反転シグナルモードは閾値を緩く、通常取引はやや厳しく
+            histogram_threshold = 0.015 if not skip_price_filter else 0.008
 
             logger.info(f"   📈 Checking continuation signal (threshold: {histogram_threshold})")
 
