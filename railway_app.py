@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.3.0"
+VERSION = "3.3.1"
 BUILD_DATE = "2026-02-01"
-COMMIT_HASH = "stop-loss-cooldown-fix"
+COMMIT_HASH = "lower-histogram-threshold-fix"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
