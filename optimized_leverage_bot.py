@@ -316,6 +316,11 @@ class OptimizedLeverageTradingBot:
                     tp_sl_closed = True
                     logger.info(f"💰 TP/SL CLOSE - Will check for continuation with moderate threshold")
 
+                    # v3.3.0: 損切り時はクールダウンを記録（連続損失防止）
+                    if "Stop Loss" in reason:
+                        self.trading_logic.record_stop_loss(side)
+                        logger.info(f"⏳ Stop loss cooldown started: {side} blocked for 30 minutes")
+
                 # 決済後、SL/TP記録を削除
                 if position_id in self.active_positions_stops:
                     del self.active_positions_stops[position_id]
@@ -361,7 +366,7 @@ class OptimizedLeverageTradingBot:
                 f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
                 f.write(f"MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}\n")
-                f.write(f"THRESHOLD: TP +2% / SL -1.5% | MACD Position Check v3.0.1\n")
+                f.write(f"THRESHOLD: TP +2% / SL -2.0% | MACD Position Check v3.3.0\n")
         except:
             pass
 
@@ -370,9 +375,9 @@ class OptimizedLeverageTradingBot:
             logger.info(f"   ✅ TAKE PROFIT: {pl_ratio*100:.2f}% >= 2%")
             return True, f"Take Profit: {pl_ratio*100:.2f}%", None
 
-        # === 2. 損切りチェック（-1.5%） ===
-        if pl_ratio <= -0.015:
-            logger.info(f"   🚨 STOP LOSS: {pl_ratio*100:.2f}% <= -1.5%")
+        # === 2. 損切りチェック（-2.0%） v3.3.0: 1.5%→2.0%に緩和（短期ノイズ対策） ===
+        if pl_ratio <= -0.020:
+            logger.info(f"   🚨 STOP LOSS: {pl_ratio*100:.2f}% <= -2.0%")
             # MACDの位置で反対注文を判断
             if side == 'BUY' and macd_line < macd_signal:
                 return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bearish", 'SELL'

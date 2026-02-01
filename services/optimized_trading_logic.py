@@ -1,16 +1,18 @@
 """
-MACD主体トレーディングロジック v3.2.1
+MACD主体トレーディングロジック v3.3.0
 シンプルなMACD売買戦略
 
 方針:
 - MACDクロス または 継続シグナルでエントリー判断
 - MACDゴールデンクロス or Bullish継続 → BUY（上昇トレンド中のみ）
 - MACDデッドクロス or Bearish継続 → SELL（下降トレンド中のみ）
-- シンプルな固定TP/SL（利確2%、損切り1.5%）
+- シンプルな固定TP/SL（利確2%、損切り2.0%）
 
-v3.2.1変更点:
-- 継続シグナル閾値を緩和: 0.02 → 0.015（通常）、0.01 → 0.008（反転）
-- より多くの取引機会を確保
+v3.3.0変更点:
+- 損切りラインを緩和: 1.5% → 2.0%（短期ノイズ対策）
+- 価格変動フィルターを緩和: 0.5% → 0.3%（機会損失削減）
+- 損切り後クールダウン機能追加（連続損失防止）
+- EMA5フィルター追加（短期反発でのSELL防止）
 """
 
 import logging
@@ -40,7 +42,7 @@ class OptimizedTradingLogic:
 
         # シンプルなTP/SL設定（固定%）
         self.take_profit_pct = 0.02   # 2%利確
-        self.stop_loss_pct = 0.015    # 1.5%損切り
+        self.stop_loss_pct = 0.020    # 2.0%損切り（1.5%→2.0%に緩和：短期ノイズ対策）
 
         # 取引履歴
         self.trade_history = []
@@ -48,6 +50,11 @@ class OptimizedTradingLogic:
 
         # MACD状態追跡
         self.last_macd_position = None  # 'above' or 'below'
+
+        # v3.3.0: 損切り後クールダウン機能（連続損失防止）
+        self.last_loss_time = None      # 最後の損切り時刻
+        self.last_loss_side = None      # 最後の損切りポジション（BUY/SELL）
+        self.cooldown_after_loss = 1800  # 損切り後30分間は同方向エントリー禁止
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
@@ -108,10 +115,17 @@ class OptimizedTradingLogic:
 
             # === EMAトレンド確認（トレンドフォロー専用モード） ===
             # v3.1.0: トレンド方向のみ取引を許可（逆方向は完全禁止）
+            # v3.3.0: EMA5追加（短期反発検出）
+            ema_5 = market_data.get('ema_5', current_price)
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
 
+            # v3.3.0: 短期反発検出（EMA5とEMA20の関係）
+            short_term_bounce = (ema_trend == 'down' and ema_5 > ema_20)  # 下降トレンド中の短期反発
+            short_term_pullback = (ema_trend == 'up' and ema_5 < ema_20)  # 上昇トレンド中の短期調整
+
             logger.info(f"   EMA Trend: {ema_trend} (EMA20-EMA50 diff: {ema_diff_pct:.2f}%)")
+            logger.info(f"   EMA5: ¥{ema_5:.3f}, Short-term bounce: {short_term_bounce}")
             logger.info(f"   🎯 TREND-FOLLOW MODE: Only {ema_trend.upper()}TREND trades allowed")
 
             # === 取引タイミングフィルター ===
@@ -120,11 +134,11 @@ class OptimizedTradingLogic:
                     logger.info(f"⏸️ Trade interval too short - waiting...")
                     return False, None, "Trade interval too short", 0.0, None, None
 
-                # 価格変動フィルター（0.5%以上動いたらOK）
+                # 価格変動フィルター（0.3%以上動いたらOK）- v3.3.0: 0.5%→0.3%に緩和
                 if self.last_trade_price is not None:
                     price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
-                    if price_change < 0.005:
-                        logger.info(f"⏸️ Price change too small ({price_change*100:.2f}% < 0.5%)")
+                    if price_change < 0.003:
+                        logger.info(f"⏸️ Price change too small ({price_change*100:.2f}% < 0.3%)")
                         return False, None, f"Price change too small", 0.0, None, None
 
             # === 売買判定（トレンドフォロー専用モード） ===
@@ -136,6 +150,9 @@ class OptimizedTradingLogic:
                 if ema_trend == 'down':
                     logger.info(f"🚫 Golden Cross BLOCKED - Downtrend active (EMA20 < EMA50)")
                     logger.info(f"   In downtrend, only SELL signals are allowed")
+                # v3.3.0: 損切り後クールダウン中は同方向エントリー禁止
+                elif self._is_in_cooldown('BUY'):
+                    logger.info(f"🚫 BUY BLOCKED - In cooldown after recent BUY stop loss")
                 else:
                     # 上昇トレンド中のみBUY許可
                     take_profit = current_price * (1 + self.take_profit_pct)
@@ -154,6 +171,13 @@ class OptimizedTradingLogic:
                 if ema_trend == 'up':
                     logger.info(f"🚫 Death Cross BLOCKED - Uptrend active (EMA20 > EMA50)")
                     logger.info(f"   In uptrend, only BUY signals are allowed")
+                # v3.3.0: 短期反発中はSELLを控える（損切り後の連続損失防止）
+                elif short_term_bounce:
+                    logger.info(f"🚫 Death Cross BLOCKED - Short-term bounce detected (EMA5 > EMA20)")
+                    logger.info(f"   Wait for bounce to end before SELL")
+                # v3.3.0: 損切り後クールダウン中は同方向エントリー禁止
+                elif self._is_in_cooldown('SELL'):
+                    logger.info(f"🚫 SELL BLOCKED - In cooldown after recent SELL stop loss")
                 else:
                     # 下降トレンド中のみSELL許可
                     take_profit = current_price * (1 - self.take_profit_pct)
@@ -175,27 +199,33 @@ class OptimizedTradingLogic:
 
             # BUY継続シグナル: MACD above + 強いヒストグラム + 上昇トレンド
             if macd_position == 'above' and macd_histogram > histogram_threshold:
-                if ema_trend == 'up':
+                if ema_trend == 'down':
+                    logger.info(f"🚫 BUY blocked - Downtrend active (EMA20 < EMA50)")
+                elif self._is_in_cooldown('BUY'):
+                    logger.info(f"🚫 BUY blocked - In cooldown after recent BUY stop loss")
+                else:
                     take_profit = current_price * (1 + self.take_profit_pct)
                     stop_loss = current_price * (1 - self.stop_loss_pct)
                     signal_type = "Reversal" if skip_price_filter else "Continuation"
                     logger.info(f"🟢 BUY SIGNAL ({signal_type}) - MACD Bullish + Uptrend")
                     logger.info(f"   Histogram: {macd_histogram:.4f} > {histogram_threshold}")
                     return True, 'BUY', f'MACD Bullish ({signal_type}) + Uptrend', confidence, stop_loss, take_profit
-                else:
-                    logger.info(f"🚫 BUY blocked - Downtrend active (EMA20 < EMA50)")
 
             # SELL継続シグナル: MACD below + 強いヒストグラム + 下降トレンド
             elif macd_position == 'below' and macd_histogram < -histogram_threshold:
-                if ema_trend == 'down':
+                if ema_trend == 'up':
+                    logger.info(f"🚫 SELL blocked - Uptrend active (EMA20 > EMA50)")
+                elif short_term_bounce:
+                    logger.info(f"🚫 SELL blocked - Short-term bounce detected (EMA5 > EMA20)")
+                elif self._is_in_cooldown('SELL'):
+                    logger.info(f"🚫 SELL blocked - In cooldown after recent SELL stop loss")
+                else:
                     take_profit = current_price * (1 - self.take_profit_pct)
                     stop_loss = current_price * (1 + self.stop_loss_pct)
                     signal_type = "Reversal" if skip_price_filter else "Continuation"
                     logger.info(f"🔴 SELL SIGNAL ({signal_type}) - MACD Bearish + Downtrend")
                     logger.info(f"   Histogram: {macd_histogram:.4f} < -{histogram_threshold}")
                     return True, 'SELL', f'MACD Bearish ({signal_type}) + Downtrend', confidence, stop_loss, take_profit
-                else:
-                    logger.info(f"🚫 SELL blocked - Uptrend active (EMA20 > EMA50)")
 
             # シグナルなし
             logger.info(f"⏸️ No valid signal - waiting...")
@@ -214,6 +244,35 @@ class OptimizedTradingLogic:
 
         elapsed = (datetime.now(timezone.utc) - self.last_trade_time).total_seconds()
         return elapsed >= self.min_trade_interval
+
+    def _is_in_cooldown(self, trade_type):
+        """
+        v3.3.0: 損切り後クールダウンチェック
+        損切り後30分間は同方向のエントリーを禁止（連続損失防止）
+        """
+        if not self.last_loss_time or not self.last_loss_side:
+            return False
+
+        # 同方向のみチェック
+        if self.last_loss_side != trade_type:
+            return False
+
+        elapsed = (datetime.now(timezone.utc) - self.last_loss_time).total_seconds()
+        remaining = self.cooldown_after_loss - elapsed
+
+        if remaining > 0:
+            logger.info(f"   ⏳ Cooldown remaining: {remaining/60:.1f} minutes for {trade_type}")
+            return True
+
+        return False
+
+    def record_stop_loss(self, side):
+        """
+        v3.3.0: 損切り記録（クールダウン用）
+        """
+        self.last_loss_time = datetime.now(timezone.utc)
+        self.last_loss_side = side
+        logger.info(f"📝 Stop loss recorded: {side} - Cooldown started for 30 minutes")
 
     def record_trade(self, trade_type, price, result=None, is_exit=False):
         """取引記録"""
