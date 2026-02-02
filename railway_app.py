@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.5.1"
+VERSION = "3.6.0"
 BUILD_DATE = "2026-02-02"
-COMMIT_HASH = "force-deploy-macd-only"
+COMMIT_HASH = "critical-data-fix"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
