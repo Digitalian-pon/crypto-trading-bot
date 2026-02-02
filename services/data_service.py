@@ -30,7 +30,7 @@ class DataService:
         self.api = GMOCoinAPI(api_key, api_secret)
         self.db_session = db_session
         self.cache = {}
-        self.cache_timeout = 60  # Cache timeout in seconds
+        self.cache_timeout = 30  # Cache timeout in seconds (60 -> 30 for fresher data)
     
     def _convert_interval_for_api(self, interval):
         """
@@ -195,8 +195,9 @@ class DataService:
         success = False
         response = None
         
-        # 現在から過去に向かって日付を遡る
-        for days_ago in range(1, max_days_to_try + 1):
+        # 現在から過去に向かって日付を遡る（今日から開始！）
+        # CRITICAL FIX: Start from 0 (today) to get the latest data
+        for days_ago in range(0, max_days_to_try + 1):
             target_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y%m%d')
             logger.info(f"Trying to fetch data for date: {target_date}")
             
