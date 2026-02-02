@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.3.1"
-BUILD_DATE = "2026-02-01"
-COMMIT_HASH = "lower-histogram-threshold-fix"
+VERSION = "3.4.0"
+BUILD_DATE = "2026-02-02"
+COMMIT_HASH = "ema-price-filter-fix"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -120,15 +120,16 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: MACD + EMA Trend Following, Dynamic SL/TP")
-            logger.info("🎯 MACD TREND-FOLLOW STRATEGY (v3.2.1):")
+            logger.info("Features: MACD + EMA Trend Following + Price vs EMA Filter")
+            logger.info("🎯 MACD TREND-FOLLOW STRATEGY (v3.4.0):")
             logger.info("   - 📈 エントリー: MACDクロス OR 継続シグナル")
-            logger.info("   - 🟢 BUY: 上昇トレンド中のみ（EMA20 > EMA50）")
-            logger.info("   - 🔴 SELL: 下降トレンド中のみ（EMA20 < EMA50）")
-            logger.info("   - 📊 継続シグナル: ヒストグラム > 0.015 でエントリー")
+            logger.info("   - 🟢 BUY: 上昇トレンド + 価格 > EMA20 + ヒストグラム増加中")
+            logger.info("   - 🔴 SELL: 下降トレンド + 価格 < EMA20 + ヒストグラム減少中")
+            logger.info("   - 📊 継続シグナル: ヒストグラム > 0.008 でエントリー")
             logger.info("   - 💰 利確: +2%")
-            logger.info("   - 🚨 損切り: -1.5%")
-            logger.info("   - 🎯 閾値緩和でより多くの取引機会を確保")
+            logger.info("   - 🚨 損切り: -1.5%（強化）")
+            logger.info("   - ⏳ クールダウン: 60分（延長）")
+            logger.info("   - 🎯 EMA遅れ対策で誤エントリーを防止")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 

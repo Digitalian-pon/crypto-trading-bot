@@ -1,12 +1,19 @@
 """
-MACD主体トレーディングロジック v3.3.1
+MACD主体トレーディングロジック v3.4.0
 シンプルなMACD売買戦略
 
 方針:
 - MACDクロス または 継続シグナルでエントリー判断
 - MACDゴールデンクロス or Bullish継続 → BUY（上昇トレンド中のみ）
 - MACDデッドクロス or Bearish継続 → SELL（下降トレンド中のみ）
-- シンプルな固定TP/SL（利確2%、損切り2.0%）
+- シンプルな固定TP/SL（利確2%、損切り1.5%）
+
+v3.4.0変更点:
+- 🎯 価格 vs EMA フィルター追加: 価格 > EMA20 のみBUY許可
+- 🎯 MACDヒストグラム方向確認: 増加中のみBUY、減少中のみSELL
+- 🎯 損切り強化: 2.0% → 1.5%（早めの損切りで損失最小化）
+- 🎯 クールダウン延長: 30分 → 60分（連続損失防止強化）
+- EMAの遅れによる誤エントリーを防止
 
 v3.3.1変更点:
 - MACDヒストグラム閾値を大幅緩和: 0.015 → 0.008（低ボラ対応）
@@ -47,7 +54,7 @@ class OptimizedTradingLogic:
 
         # シンプルなTP/SL設定（固定%）
         self.take_profit_pct = 0.02   # 2%利確
-        self.stop_loss_pct = 0.020    # 2.0%損切り（1.5%→2.0%に緩和：短期ノイズ対策）
+        self.stop_loss_pct = 0.015    # 1.5%損切り（v3.4.0: 2.0%→1.5%に強化：早めの損切り）
 
         # 取引履歴
         self.trade_history = []
@@ -55,11 +62,12 @@ class OptimizedTradingLogic:
 
         # MACD状態追跡
         self.last_macd_position = None  # 'above' or 'below'
+        self.last_macd_histogram = None  # v3.4.0: ヒストグラム方向追跡
 
-        # v3.3.0: 損切り後クールダウン機能（連続損失防止）
+        # v3.4.0: 損切り後クールダウン機能強化（連続損失防止）
         self.last_loss_time = None      # 最後の損切り時刻
         self.last_loss_side = None      # 最後の損切りポジション（BUY/SELL）
-        self.cooldown_after_loss = 1800  # 損切り後30分間は同方向エントリー禁止
+        self.cooldown_after_loss = 3600  # 損切り後60分間は同方向エントリー禁止（30分→60分）
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
@@ -121,9 +129,22 @@ class OptimizedTradingLogic:
             # === EMAトレンド確認（トレンドフォロー専用モード） ===
             # v3.1.0: トレンド方向のみ取引を許可（逆方向は完全禁止）
             # v3.3.0: EMA5追加（短期反発検出）
+            # v3.4.0: 価格 vs EMA フィルター追加
             ema_5 = market_data.get('ema_5', current_price)
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
+
+            # v3.4.0: 価格 vs EMA フィルター（EMAの遅れ対策）
+            price_above_ema20 = current_price > ema_20
+            price_below_ema20 = current_price < ema_20
+
+            # v3.4.0: MACDヒストグラム方向チェック
+            histogram_increasing = True  # デフォルト
+            histogram_decreasing = True  # デフォルト
+            if self.last_macd_histogram is not None:
+                histogram_increasing = macd_histogram > self.last_macd_histogram
+                histogram_decreasing = macd_histogram < self.last_macd_histogram
+            self.last_macd_histogram = macd_histogram  # 更新
 
             # v3.3.0: 短期反発検出（EMA5とEMA20の関係）
             short_term_bounce = (ema_trend == 'down' and ema_5 > ema_20)  # 下降トレンド中の短期反発
@@ -131,6 +152,8 @@ class OptimizedTradingLogic:
 
             logger.info(f"   EMA Trend: {ema_trend} (EMA20-EMA50 diff: {ema_diff_pct:.2f}%)")
             logger.info(f"   EMA5: ¥{ema_5:.3f}, Short-term bounce: {short_term_bounce}")
+            logger.info(f"   🎯 v3.4.0 Price vs EMA: Price {'>' if price_above_ema20 else '<'} EMA20")
+            logger.info(f"   🎯 v3.4.0 Histogram direction: {'↑' if histogram_increasing else '↓'}")
             logger.info(f"   🎯 TREND-FOLLOW MODE: Only {ema_trend.upper()}TREND trades allowed")
 
             # === 取引タイミングフィルター ===
@@ -158,17 +181,24 @@ class OptimizedTradingLogic:
                 # v3.3.0: 損切り後クールダウン中は同方向エントリー禁止
                 elif self._is_in_cooldown('BUY'):
                     logger.info(f"🚫 BUY BLOCKED - In cooldown after recent BUY stop loss")
+                # v3.4.0: 価格がEMA20を下回っている場合はBUY禁止
+                elif price_below_ema20:
+                    logger.info(f"🚫 BUY BLOCKED - Price below EMA20 (EMA lag detection)")
+                    logger.info(f"   Price ¥{current_price:.3f} < EMA20 ¥{ema_20:.3f}")
+                # v3.4.0: ヒストグラムが減少中はBUY禁止
+                elif not histogram_increasing and self.last_macd_histogram is not None:
+                    logger.info(f"🚫 BUY BLOCKED - MACD histogram decreasing (momentum fading)")
                 else:
-                    # 上昇トレンド中のみBUY許可
+                    # 上昇トレンド中 + 価格 > EMA20 + ヒストグラム増加中のみBUY許可
                     take_profit = current_price * (1 + self.take_profit_pct)
                     stop_loss = current_price * (1 - self.stop_loss_pct)
 
-                    logger.info(f"🟢 BUY SIGNAL - MACD Golden Cross + Uptrend confirmed")
+                    logger.info(f"🟢 BUY SIGNAL - MACD Golden Cross + Uptrend + Price>EMA20 confirmed")
                     logger.info(f"   Confidence: {confidence:.2f}")
                     logger.info(f"   TP: ¥{take_profit:.2f} (+{self.take_profit_pct*100:.1f}%)")
                     logger.info(f"   SL: ¥{stop_loss:.2f} (-{self.stop_loss_pct*100:.1f}%)")
 
-                    return True, 'BUY', 'MACD Golden Cross + Uptrend', confidence, stop_loss, take_profit
+                    return True, 'BUY', 'MACD Golden Cross + Uptrend + Price>EMA20', confidence, stop_loss, take_profit
 
             # SELL判定: MACDデッドクロス
             if is_death_cross:
@@ -183,17 +213,24 @@ class OptimizedTradingLogic:
                 # v3.3.0: 損切り後クールダウン中は同方向エントリー禁止
                 elif self._is_in_cooldown('SELL'):
                     logger.info(f"🚫 SELL BLOCKED - In cooldown after recent SELL stop loss")
+                # v3.4.0: 価格がEMA20を上回っている場合はSELL禁止
+                elif price_above_ema20:
+                    logger.info(f"🚫 SELL BLOCKED - Price above EMA20 (EMA lag detection)")
+                    logger.info(f"   Price ¥{current_price:.3f} > EMA20 ¥{ema_20:.3f}")
+                # v3.4.0: ヒストグラムが増加中はSELL禁止
+                elif not histogram_decreasing and self.last_macd_histogram is not None:
+                    logger.info(f"🚫 SELL BLOCKED - MACD histogram increasing (momentum rising)")
                 else:
-                    # 下降トレンド中のみSELL許可
+                    # 下降トレンド中 + 価格 < EMA20 + ヒストグラム減少中のみSELL許可
                     take_profit = current_price * (1 - self.take_profit_pct)
                     stop_loss = current_price * (1 + self.stop_loss_pct)
 
-                    logger.info(f"🔴 SELL SIGNAL - MACD Death Cross + Downtrend confirmed")
+                    logger.info(f"🔴 SELL SIGNAL - MACD Death Cross + Downtrend + Price<EMA20 confirmed")
                     logger.info(f"   Confidence: {confidence:.2f}")
                     logger.info(f"   TP: ¥{take_profit:.2f} (-{self.take_profit_pct*100:.1f}%)")
                     logger.info(f"   SL: ¥{stop_loss:.2f} (+{self.stop_loss_pct*100:.1f}%)")
 
-                    return True, 'SELL', 'MACD Death Cross + Downtrend', confidence, stop_loss, take_profit
+                    return True, 'SELL', 'MACD Death Cross + Downtrend + Price<EMA20', confidence, stop_loss, take_profit
 
             # === クロスなし: 継続シグナルチェック ===
             # v3.3.1: 閾値を大幅緩和（0.015→0.008）- 低ボラティリティ対応
@@ -208,13 +245,19 @@ class OptimizedTradingLogic:
                     logger.info(f"🚫 BUY blocked - Downtrend active (EMA20 < EMA50)")
                 elif self._is_in_cooldown('BUY'):
                     logger.info(f"🚫 BUY blocked - In cooldown after recent BUY stop loss")
+                # v3.4.0: 価格がEMA20を下回っている場合はBUY禁止
+                elif price_below_ema20:
+                    logger.info(f"🚫 BUY blocked - Price below EMA20 (¥{current_price:.3f} < ¥{ema_20:.3f})")
+                # v3.4.0: ヒストグラムが減少中はBUY禁止
+                elif not histogram_increasing and self.last_macd_histogram is not None:
+                    logger.info(f"🚫 BUY blocked - Histogram decreasing (momentum fading)")
                 else:
                     take_profit = current_price * (1 + self.take_profit_pct)
                     stop_loss = current_price * (1 - self.stop_loss_pct)
                     signal_type = "Reversal" if skip_price_filter else "Continuation"
-                    logger.info(f"🟢 BUY SIGNAL ({signal_type}) - MACD Bullish + Uptrend")
+                    logger.info(f"🟢 BUY SIGNAL ({signal_type}) - MACD Bullish + Uptrend + Price>EMA20")
                     logger.info(f"   Histogram: {macd_histogram:.4f} > {histogram_threshold}")
-                    return True, 'BUY', f'MACD Bullish ({signal_type}) + Uptrend', confidence, stop_loss, take_profit
+                    return True, 'BUY', f'MACD Bullish ({signal_type}) + Uptrend + Price>EMA20', confidence, stop_loss, take_profit
 
             # SELL継続シグナル: MACD below + 強いヒストグラム + 下降トレンド
             elif macd_position == 'below' and macd_histogram < -histogram_threshold:
@@ -224,13 +267,19 @@ class OptimizedTradingLogic:
                     logger.info(f"🚫 SELL blocked - Short-term bounce detected (EMA5 > EMA20)")
                 elif self._is_in_cooldown('SELL'):
                     logger.info(f"🚫 SELL blocked - In cooldown after recent SELL stop loss")
+                # v3.4.0: 価格がEMA20を上回っている場合はSELL禁止
+                elif price_above_ema20:
+                    logger.info(f"🚫 SELL blocked - Price above EMA20 (¥{current_price:.3f} > ¥{ema_20:.3f})")
+                # v3.4.0: ヒストグラムが増加中はSELL禁止
+                elif not histogram_decreasing and self.last_macd_histogram is not None:
+                    logger.info(f"🚫 SELL blocked - Histogram increasing (momentum rising)")
                 else:
                     take_profit = current_price * (1 - self.take_profit_pct)
                     stop_loss = current_price * (1 + self.stop_loss_pct)
                     signal_type = "Reversal" if skip_price_filter else "Continuation"
-                    logger.info(f"🔴 SELL SIGNAL ({signal_type}) - MACD Bearish + Downtrend")
+                    logger.info(f"🔴 SELL SIGNAL ({signal_type}) - MACD Bearish + Downtrend + Price<EMA20")
                     logger.info(f"   Histogram: {macd_histogram:.4f} < -{histogram_threshold}")
-                    return True, 'SELL', f'MACD Bearish ({signal_type}) + Downtrend', confidence, stop_loss, take_profit
+                    return True, 'SELL', f'MACD Bearish ({signal_type}) + Downtrend + Price<EMA20', confidence, stop_loss, take_profit
 
             # シグナルなし
             logger.info(f"⏸️ No valid signal - waiting...")
