@@ -1,20 +1,19 @@
 """
-MACD + レンジフィルター トレーディングロジック v3.6.0
-往復ビンタ（Whipsaw）防止機能付き
+MACD専用トレーディングロジック v3.8.0
+純粋なMACDクロス売買戦略（ヒストグラム強度フィルター付き）
 
 方針:
-- MACDゴールデンクロス → BUY（レンジ相場でない場合のみ）
-- MACDデッドクロス → SELL（レンジ相場でない場合のみ）
-- EMAトレンドフィルター復活（レンジ検出用）
-- MACDヒストグラム閾値強化（弱いクロスは無視）
+- MACDゴールデンクロス → BUY
+- MACDデッドクロス → SELL
+- EMA、SMA、RSI等は使用しない（MACD純粋戦略）
+- MACDヒストグラム閾値で弱いクロスは無視（往復ビンタ防止）
 - シンプルな固定TP/SL（利確2%、損切り1.5%）
 
-v3.6.0変更点（2026-02-04）:
-- 🛡️ レンジ相場フィルター追加（EMA差0.5%未満は取引しない）
-- 🛡️ MACDヒストグラム閾値強化（|histogram| < 0.02は弱いクロスとして無視）
-- 🛡️ クールダウン期間を60分→90分に延長
-- 🛡️ 継続シグナルの閾値を0.008→0.02に強化
-- 🎯 往復ビンタ（Whipsaw）による損失を防止
+v3.8.0変更点（2026-02-04）:
+- 🎯 MACD専用戦略を維持（ユーザー要望）
+- 🎯 EMAフィルター削除（MACDのみで判断）
+- 🛡️ MACDヒストグラム閾値（|histogram| < 0.02は弱いクロス）
+- 🛡️ クールダウン期間90分（連続損失防止）
 """
 
 import logging
@@ -53,54 +52,38 @@ class OptimizedTradingLogic:
         # MACD状態追跡
         self.last_macd_position = None  # 'above' or 'below'
 
-        # v3.6.0: 損切り後クールダウン機能（連続損失防止）
+        # v3.8.0: 損切り後クールダウン機能（連続損失防止）
         self.last_loss_time = None      # 最後の損切り時刻
         self.last_loss_side = None      # 最後の損切りポジション（BUY/SELL）
-        self.cooldown_after_loss = 5400  # 損切り後90分間は同方向エントリー禁止（60分→90分に延長）
+        self.cooldown_after_loss = 5400  # 損切り後90分間は同方向エントリー禁止
 
-        # v3.6.0: レンジ相場フィルター
-        self.min_ema_diff_pct = 0.5     # EMA20とEMA50の最小差（%）- これ以下はレンジと判断
+        # v3.8.0: MACDヒストグラム閾値（弱いクロスを無視）
         self.min_histogram_for_cross = 0.02  # クロス時の最小ヒストグラム強度
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - MACD + レンジフィルター v3.6.0
+        取引判定 - MACD専用版 v3.8.0
 
-        ルール:
+        ルール（シンプル）:
         1. MACDライン > シグナルライン（ゴールデンクロス）→ BUY
         2. MACDライン < シグナルライン（デッドクロス）→ SELL
-        3. 【重要】EMA差が0.5%未満はレンジと判断して取引しない
-        4. 【重要】ヒストグラムが0.02未満は弱いクロスとして無視
+        3. ヒストグラムが0.02未満は弱いクロスとして無視（往復ビンタ防止）
+        4. EMA、SMA、RSI等は使用しない
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
         """
         try:
-            # === 基本データ取得 ===
+            # === 基本データ取得（MACDのみ） ===
             current_price = market_data.get('close', 0)
             macd_line = market_data.get('macd_line', 0)
             macd_signal = market_data.get('macd_signal', 0)
             macd_histogram = market_data.get('macd_histogram', 0)
 
-            # v3.6.0: EMAデータ取得（レンジ検出用）
-            ema_20 = market_data.get('ema_20', 0)
-            ema_50 = market_data.get('ema_50', 0)
-
-            logger.info(f"📊 [MACD + RANGE FILTER v3.6.0] Price=¥{current_price:.3f}")
+            logger.info(f"📊 [MACD ONLY v3.8.0] Price=¥{current_price:.3f}")
             logger.info(f"   MACD Line: {macd_line:.6f}")
             logger.info(f"   MACD Signal: {macd_signal:.6f}")
             logger.info(f"   MACD Histogram: {macd_histogram:.6f}")
-
-            # === v3.6.0: レンジ相場フィルター（EMA差チェック） ===
-            is_ranging = False
-            ema_diff_pct = 0.0
-            if ema_20 and ema_50 and ema_50 != 0:
-                ema_diff_pct = abs((ema_20 - ema_50) / ema_50) * 100
-                is_ranging = ema_diff_pct < self.min_ema_diff_pct
-                logger.info(f"   EMA20: ¥{ema_20:.3f}, EMA50: ¥{ema_50:.3f}")
-                logger.info(f"   EMA Diff: {ema_diff_pct:.2f}% (Threshold: {self.min_ema_diff_pct}%)")
-                if is_ranging:
-                    logger.info(f"   ⚠️ RANGING MARKET DETECTED - EMA diff too small")
 
             # === MACDクロス判定（唯一のシグナル） ===
             macd_position = 'above' if macd_line > macd_signal else 'below'
@@ -147,15 +130,10 @@ class OptimizedTradingLogic:
                         logger.info(f"⏸️ Price change too small ({price_change*100:.2f}% < 0.3%)")
                         return False, None, f"Price change too small", 0.0, None, None
 
-            # === v3.6.0: レンジ相場での取引ブロック ===
-            if is_ranging and not skip_price_filter:
-                logger.info(f"🚫 TRADE BLOCKED - Ranging market (EMA diff {ema_diff_pct:.2f}% < {self.min_ema_diff_pct}%)")
-                logger.info(f"   往復ビンタ防止のため、明確なトレンドが出るまで待機")
-                return False, None, f"Ranging market - EMA diff too small ({ema_diff_pct:.2f}%)", confidence, None, None
-
-            # === v3.6.0: 弱いクロスのフィルタリング ===
+            # === v3.8.0: 弱いクロスのフィルタリング（MACDヒストグラムのみ） ===
             histogram_strength = abs(macd_histogram)
             is_weak_cross = histogram_strength < self.min_histogram_for_cross
+            logger.info(f"   Histogram Strength: {histogram_strength:.4f} (Threshold: {self.min_histogram_for_cross})")
 
             # === BUY判定: MACDゴールデンクロス ===
             if is_golden_cross:
@@ -198,38 +176,34 @@ class OptimizedTradingLogic:
                     return True, 'SELL', 'MACD Death Cross', confidence, stop_loss, take_profit
 
             # === クロスなし: 継続シグナルチェック ===
-            # v3.6.0: 継続シグナルの閾値を0.008→0.02に強化（往復ビンタ防止）
+            # v3.8.0: 継続シグナルの閾値（強いヒストグラムのみ）
             histogram_threshold = 0.02 if not skip_price_filter else 0.015
 
             logger.info(f"   📈 No cross - checking continuation (threshold: {histogram_threshold})")
 
-            # v3.6.0: レンジ相場では継続シグナルも無効
-            if is_ranging and not skip_price_filter:
-                logger.info(f"   ⏸️ Continuation signals disabled in ranging market")
-            else:
-                # BUY継続シグナル: MACD above + 強いヒストグラム
-                if macd_position == 'above' and macd_histogram > histogram_threshold:
-                    if self._is_in_cooldown('BUY'):
-                        logger.info(f"🚫 BUY blocked - In cooldown")
-                    else:
-                        take_profit = current_price * (1 + self.take_profit_pct)
-                        stop_loss = current_price * (1 - self.stop_loss_pct)
-                        signal_type = "Reversal" if skip_price_filter else "Continuation"
-                        logger.info(f"🟢 BUY SIGNAL ({signal_type}) - MACD Bullish")
-                        logger.info(f"   Histogram: {macd_histogram:.4f} > {histogram_threshold}")
-                        return True, 'BUY', f'MACD Bullish ({signal_type})', confidence, stop_loss, take_profit
+            # BUY継続シグナル: MACD above + 強いヒストグラム
+            if macd_position == 'above' and macd_histogram > histogram_threshold:
+                if self._is_in_cooldown('BUY'):
+                    logger.info(f"🚫 BUY blocked - In cooldown")
+                else:
+                    take_profit = current_price * (1 + self.take_profit_pct)
+                    stop_loss = current_price * (1 - self.stop_loss_pct)
+                    signal_type = "Reversal" if skip_price_filter else "Continuation"
+                    logger.info(f"🟢 BUY SIGNAL ({signal_type}) - MACD Bullish")
+                    logger.info(f"   Histogram: {macd_histogram:.4f} > {histogram_threshold}")
+                    return True, 'BUY', f'MACD Bullish ({signal_type})', confidence, stop_loss, take_profit
 
-                # SELL継続シグナル: MACD below + 強いヒストグラム
-                elif macd_position == 'below' and macd_histogram < -histogram_threshold:
-                    if self._is_in_cooldown('SELL'):
-                        logger.info(f"🚫 SELL blocked - In cooldown")
-                    else:
-                        take_profit = current_price * (1 - self.take_profit_pct)
-                        stop_loss = current_price * (1 + self.stop_loss_pct)
-                        signal_type = "Reversal" if skip_price_filter else "Continuation"
-                        logger.info(f"🔴 SELL SIGNAL ({signal_type}) - MACD Bearish")
-                        logger.info(f"   Histogram: {macd_histogram:.4f} < -{histogram_threshold}")
-                        return True, 'SELL', f'MACD Bearish ({signal_type})', confidence, stop_loss, take_profit
+            # SELL継続シグナル: MACD below + 強いヒストグラム
+            elif macd_position == 'below' and macd_histogram < -histogram_threshold:
+                if self._is_in_cooldown('SELL'):
+                    logger.info(f"🚫 SELL blocked - In cooldown")
+                else:
+                    take_profit = current_price * (1 - self.take_profit_pct)
+                    stop_loss = current_price * (1 + self.stop_loss_pct)
+                    signal_type = "Reversal" if skip_price_filter else "Continuation"
+                    logger.info(f"🔴 SELL SIGNAL ({signal_type}) - MACD Bearish")
+                    logger.info(f"   Histogram: {macd_histogram:.4f} < -{histogram_threshold}")
+                    return True, 'SELL', f'MACD Bearish ({signal_type})', confidence, stop_loss, take_profit
 
             # シグナルなし
             logger.info(f"⏸️ No valid signal - waiting for MACD cross...")
