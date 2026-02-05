@@ -38,9 +38,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.8.0"
-BUILD_DATE = "2026-02-04"
-COMMIT_HASH = "macd-only-histogram-filter"
+VERSION = "4.0.0"
+BUILD_DATE = "2026-02-05"
+COMMIT_HASH = "pure-macd-cross"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
