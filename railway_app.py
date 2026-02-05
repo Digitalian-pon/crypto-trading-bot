@@ -92,6 +92,7 @@ clear_python_cache()
 # これによりRailway環境でも確実にAPI認証が動作する
 os.environ['GMO_API_KEY'] = 'FXhblJAz9Ql0G3pCo5p/+S9zkFw6r2VC'
 os.environ['GMO_API_SECRET'] = '/YiZoJlRybHnKAO78go6Jt9LKQOS/EwEEe47UyEl6YbXo7XA84fL+Q/k3AEJeCBo'
+os.environ['BOT_VERSION'] = VERSION
 
 print("[RAILWAY] ========================================")
 print(f"[RAILWAY] VERSION: {VERSION}")

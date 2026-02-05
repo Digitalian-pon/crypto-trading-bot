@@ -496,7 +496,7 @@ class FinalDashboard:
         <div class="header">
             <h1>🐕 DOGE/JPY レバレッジ取引ダッシュボード</h1>
             <div class="price">¥{self.current_price:.2f}</div>
-            <p>最終更新: {current_time} | 自動更新: 10秒間隔</p>
+            <p>最終更新: {current_time} | 自動更新: 10秒間隔 | Bot v{os.environ.get('BOT_VERSION', '3.8.0')}</p>
         </div>
 
         <div class="status-grid">

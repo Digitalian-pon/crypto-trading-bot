@@ -5,6 +5,7 @@ OptimizedTradingLogicを使用した改良版
 
 import logging
 import time
+import os
 from datetime import datetime
 import sys
 from services.gmo_api import GMOCoinAPI
@@ -83,9 +84,11 @@ class OptimizedLeverageTradingBot:
         # ボット稼働状況をログファイルに記録（ダッシュボードで表示可能）
         try:
             log_file = 'bot_execution_log.txt'
+            bot_version = os.environ.get('BOT_VERSION', 'unknown')
             with open(log_file, 'a') as f:
                 f.write(f"\n{'='*70}\n")
                 f.write(f"CYCLE_START: {cycle_time.isoformat()}\n")
+                f.write(f"BOT_VERSION: {bot_version}\n")
                 f.write(f"INTERVAL: {self.interval}s\n")
         except Exception as e:
             logger.error(f"Failed to write log file: {e}")
