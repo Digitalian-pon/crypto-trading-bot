@@ -1,11 +1,11 @@
 """
-MACD専用トレーディングロジック v4.0.0
-純粋なMACDクロスのみ - シンプル
+MACD専用トレーディングロジック v4.1.0
+純粋なMACD位置ベース - シンプル
 
 ルール:
-- MACDゴールデンクロス → BUY
-- MACDデッドクロス → SELL
-- それ以外のフィルターなし
+- MACD Line > Signal Line → BUY（継続的にシグナル発生）
+- MACD Line < Signal Line → SELL（継続的にシグナル発生）
+- クロスを待たず、位置に基づいて常にシグナルを出す
 """
 
 import logging
@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    純粋なMACDクロスのみのトレーディングロジック v4.0.0
+    純粋なMACD位置ベースのトレーディングロジック v4.1.0
+    - MACD Line > Signal Line → BUY
+    - MACD Line < Signal Line → SELL
     """
 
     def __init__(self, config=None):
@@ -40,12 +42,12 @@ class OptimizedTradingLogic:
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - 純粋MACDクロスのみ v4.0.0
+        取引判定 - MACD位置ベース v4.1.0
 
         ルール:
-        - MACDゴールデンクロス（MACD Line > Signal Line に変化）→ BUY
-        - MACDデッドクロス（MACD Line < Signal Line に変化）→ SELL
-        - フィルターなし
+        - MACD Line > Signal Line → BUY（継続的にシグナル発生）
+        - MACD Line < Signal Line → SELL（継続的にシグナル発生）
+        - クロスを待たない、位置に基づいて常にシグナルを出す
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -56,53 +58,39 @@ class OptimizedTradingLogic:
             macd_signal = market_data.get('macd_signal', 0)
             macd_histogram = market_data.get('macd_histogram', 0)
 
-            logger.info(f"📊 [MACD PURE v4.0.0] Price=¥{current_price:.3f}")
+            logger.info(f"📊 [MACD POSITION v4.1.0] Price=¥{current_price:.3f}")
             logger.info(f"   MACD Line: {macd_line:.6f}")
             logger.info(f"   MACD Signal: {macd_signal:.6f}")
             logger.info(f"   Histogram: {macd_histogram:.6f}")
 
-            # MACDクロス判定
-            macd_position = 'above' if macd_line > macd_signal else 'below'
-
-            is_golden_cross = False
-            is_death_cross = False
-
-            if self.last_macd_position is not None:
-                if self.last_macd_position == 'below' and macd_position == 'above':
-                    is_golden_cross = True
-                    logger.info(f"🟢 GOLDEN CROSS detected!")
-                elif self.last_macd_position == 'above' and macd_position == 'below':
-                    is_death_cross = True
-                    logger.info(f"🔴 DEATH CROSS detected!")
-
-            self.last_macd_position = macd_position
-
-            # 信頼度（ログ用）
+            # 信頼度（ヒストグラムの大きさに基づく）
             confidence = min(abs(macd_histogram) * 50, 3.0)
             if confidence < 0.5:
                 confidence = 0.5
 
-            # BUY: ゴールデンクロス
-            if is_golden_cross:
+            # MACD位置ベースのシグナル判定
+            if macd_line > macd_signal:
+                # MACD Line > Signal Line → BUY
                 take_profit = current_price * (1 + self.take_profit_pct)
                 stop_loss = current_price * (1 - self.stop_loss_pct)
-                logger.info(f"🟢 BUY SIGNAL - MACD Golden Cross")
+                logger.info(f"🟢 BUY SIGNAL - MACD ABOVE Signal")
                 logger.info(f"   TP: ¥{take_profit:.2f} (+{self.take_profit_pct*100:.1f}%)")
                 logger.info(f"   SL: ¥{stop_loss:.2f} (-{self.stop_loss_pct*100:.1f}%)")
-                return True, 'BUY', 'MACD Golden Cross', confidence, stop_loss, take_profit
+                return True, 'BUY', 'MACD Above Signal', confidence, stop_loss, take_profit
 
-            # SELL: デッドクロス
-            if is_death_cross:
+            elif macd_line < macd_signal:
+                # MACD Line < Signal Line → SELL
                 take_profit = current_price * (1 - self.take_profit_pct)
                 stop_loss = current_price * (1 + self.stop_loss_pct)
-                logger.info(f"🔴 SELL SIGNAL - MACD Death Cross")
+                logger.info(f"🔴 SELL SIGNAL - MACD BELOW Signal")
                 logger.info(f"   TP: ¥{take_profit:.2f} (-{self.take_profit_pct*100:.1f}%)")
                 logger.info(f"   SL: ¥{stop_loss:.2f} (+{self.stop_loss_pct*100:.1f}%)")
-                return True, 'SELL', 'MACD Death Cross', confidence, stop_loss, take_profit
+                return True, 'SELL', 'MACD Below Signal', confidence, stop_loss, take_profit
 
-            # クロスなし
-            logger.info(f"⏸️ No cross - MACD {macd_position.upper()}, waiting...")
-            return False, None, "Waiting for MACD cross", confidence, None, None
+            else:
+                # MACD Line == Signal Line（稀なケース）
+                logger.info(f"⏸️ MACD equal to Signal - no signal")
+                return False, None, "MACD equal to Signal", confidence, None, None
 
         except Exception as e:
             logger.error(f"Error in MACD trading logic: {e}", exc_info=True)

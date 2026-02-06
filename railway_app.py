@@ -2,31 +2,29 @@
 Railway用統合アプリケーション - 最適化版
 - 最適化されたDOGE_JPYレバレッジ取引ボットとダッシュボードを同時起動
 - 24時間稼働対応
-- 市場レジーム検出、動的SL/TP、ATRベースリスク管理
+- 純粋なMACD位置ベースシグナル
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 2.6.0 - 5min Timeframe Switch (2026-01-14)
+VERSION: 4.1.0 - MACD Position-Based (2026-02-07)
 Changes:
-⚡ **5分足トレードに変更** - 短期スキャルピング戦略で素早い利確を狙う
+🎯 **MACD位置ベースシグナル** - クロスを待たず、位置で判断
 
 【修正内容】
-- タイムフレーム: 4hour → 5min（短期トレードに変更）
-- 5分足データを直接使用（リサンプリング不要）
-- インジケーター: MACD + RSI + Bollinger Bands（短期向け）
-- チェック間隔: 300秒（5分）- 5分足1本ごとに判断
+- MACD Line > Signal Line → BUY（継続的にシグナル発生）
+- MACD Line < Signal Line → SELL（継続的にシグナル発生）
+- クロス検出を廃止、常にMACDの位置でシグナルを出す
+- フィルターなし、シンプルな判断ルール
 
 【変更の理由】
-- v2.5.1（4時間足）では損失が継続（¥730 → ¥212、-71%）
-- 4時間足戦略と5分チェック間隔のミスマッチ
-- 手数料負けを防ぐため、より明確なシグナルでエントリー
-- 5分足で素早い利確を狙い、損失を最小化
+- v4.0.0ではクロスの瞬間のみシグナルが出ていた
+- ユーザーのチャートと一致するように、MACD位置でシグナルを出す
+- よりシンプルで理解しやすいロジック
 
 【期待される効果】
-- ✅ 短期トレンドを素早く捉える
-- ✅ 利確¥3.0を達成しやすい（5分足での変動を活用）
-- ✅ 明確なシグナルでエントリー精度向上
-- ✅ 損失を早期に切る（-0.8%損切り）
-- ✅ 残高回復を目指す（¥212 → ¥300以上）
+- ✅ ダッシュボードとユーザーのチャートが一致
+- ✅ MACDがシグナルの下にある間ずっとSELLシグナル
+- ✅ MACDがシグナルの上にある間ずっとBUYシグナル
+- ✅ シンプルで明確なルール
 """
 
 import os
@@ -38,9 +36,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "4.0.0"
-BUILD_DATE = "2026-02-05"
-COMMIT_HASH = "pure-macd-cross"
+VERSION = "4.1.0"
+BUILD_DATE = "2026-02-07"
+COMMIT_HASH = "macd-position-based"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -121,15 +119,14 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: MACD ONLY - Pure Cross Strategy")
-            logger.info("🎯 MACD ONLY STRATEGY (v3.5.0):")
-            logger.info("   - 🟢 BUY: MACDゴールデンクロス（Line > Signal）")
-            logger.info("   - 🔴 SELL: MACDデッドクロス（Line < Signal）")
-            logger.info("   - ❌ EMA、SMA、RSI等は使用しない")
-            logger.info("   - 📊 継続シグナル: ヒストグラム > 0.008")
+            logger.info("Features: MACD POSITION-BASED STRATEGY")
+            logger.info("🎯 MACD POSITION STRATEGY (v4.1.0):")
+            logger.info("   - 🟢 BUY: MACD Line > Signal Line（継続的にシグナル）")
+            logger.info("   - 🔴 SELL: MACD Line < Signal Line（継続的にシグナル）")
+            logger.info("   - ❌ クロス検出不要、位置で常に判断")
+            logger.info("   - ❌ EMA、RSI等のフィルターなし")
             logger.info("   - 💰 利確: +2%")
             logger.info("   - 🚨 損切り: -1.5%")
-            logger.info("   - ⏳ クールダウン: 60分")
             logger.info("   - 🎯 シンプルで明確なルール")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
@@ -179,16 +176,16 @@ def run_dashboard():
 
 if __name__ == "__main__":
     logger.info("="*60)
-    logger.info("🚀 Railway Deployment - Optimized DOGE_JPY Trading System")
+    logger.info("🚀 Railway Deployment - DOGE_JPY Trading System v4.1.0")
     logger.info(f"Started at: {datetime.now()}")
     logger.info("Trading Pair: DOGE_JPY")
     logger.info("Trading Type: Leverage (Long & Short)")
-    logger.info("Timeframe: 5min (short-term scalping)")
+    logger.info("Timeframe: 5min")
     logger.info("Check Interval: 300s (5min)")
-    logger.info("Primary Indicator: MACD + EMA Trend Following")
-    logger.info("Strategy: TREND-FOLLOW + CONTINUATION SIGNAL 🎯")
-    logger.info("Entry: MACD Cross OR Continuation (histogram > 0.02)")
-    logger.info("BUY = Uptrend only | SELL = Downtrend only")
+    logger.info("Primary Indicator: MACD ONLY")
+    logger.info("Strategy: MACD POSITION-BASED 🎯")
+    logger.info("BUY = MACD > Signal | SELL = MACD < Signal")
+    logger.info("No cross detection - continuous signal based on position")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
