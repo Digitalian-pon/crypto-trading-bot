@@ -51,6 +51,9 @@ class OptimizedLeverageTradingBot:
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
 
+        # MACDクロス検出用（決済判定）- v3.1.1: position-based → cross-based
+        self.last_close_macd_position = None
+
     def run(self):
         """メインループ"""
         logger.info("="*70)
@@ -335,14 +338,15 @@ class OptimizedLeverageTradingBot:
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
         """
-        ポジション決済判定 - MACD v3.0.1 修正版
+        ポジション決済判定 - MACD v3.1.1 クロスベース決済
 
         ルール:
         1. 利確: +2%
         2. 損切り: -1.5%
-        3. MACDの「現在位置」で決済判定（クロスの瞬間だけでなく）
-           - BUYポジション: MACD Line < Signal Line → 決済
-           - SELLポジション: MACD Line > Signal Line → 決済
+        3. MACDクロスベース決済（v3.1.1修正: 位置ベース→クロスベース）
+           - BUYポジション: MACDデッドクロス（上→下に遷移）→ 決済
+           - SELLポジション: MACDゴールデンクロス（下→上に遷移）→ 決済
+           - クロスなし: ポジション保持継続（利益を伸ばす）
 
         Returns:
             (should_close: bool, reason: str, trade_type: str or None)
@@ -356,11 +360,17 @@ class OptimizedLeverageTradingBot:
         macd_signal = indicators.get('macd_signal', 0)
         macd_histogram = indicators.get('macd_histogram', 0)
 
-        logger.info(f"   📊 [MACD v3.0.1] Position Check:")
+        # EMAデータ取得（反転方向のトレンドフィルター用）
+        ema_20 = indicators.get('ema_20', current_price)
+        ema_50 = indicators.get('ema_50', current_price)
+        ema_trend = 'up' if ema_20 > ema_50 else 'down'
+
+        logger.info(f"   📊 [MACD v3.1.1 Cross-Close] Position Check:")
         logger.info(f"      {side} {size} DOGE @ ¥{entry_price:.3f}")
         logger.info(f"      Current: ¥{current_price:.3f}, P/L: {pl_ratio*100:.2f}%")
         logger.info(f"      MACD Line: {macd_line:.6f}, Signal: {macd_signal:.6f}")
-        logger.info(f"      MACD Position: {'BULLISH (Line > Signal)' if macd_line > macd_signal else 'BEARISH (Line < Signal)'}")
+        logger.info(f"      MACD State: {'ABOVE (Bullish)' if macd_line > macd_signal else 'BELOW (Bearish)'}")
+        logger.info(f"      EMA Trend: {ema_trend} (EMA20={ema_20:.3f}, EMA50={ema_50:.3f})")
 
         # ログファイルに記録
         try:
@@ -369,7 +379,7 @@ class OptimizedLeverageTradingBot:
                 f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
                 f.write(f"MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}\n")
-                f.write(f"THRESHOLD: TP +2% / SL -1.5% | MACD Position Check v3.4.0\n")
+                f.write(f"THRESHOLD: TP +2% / SL -1.5% | MACD Cross-Based Close v3.1.1\n")
         except:
             pass
 
@@ -388,24 +398,46 @@ class OptimizedLeverageTradingBot:
                 return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bullish", 'BUY'
             return True, f"Stop Loss: {pl_ratio*100:.2f}%", None
 
-        # === 3. MACDの「現在位置」で決済判定（重要な修正！） ===
-        # クロスの瞬間だけでなく、MACDが反対側にある限り決済シグナル
+        # === 3. MACDクロスベース決済判定（v3.1.1: position-based → cross-based） ===
+        # クロスの「瞬間」のみで決済判定（位置ベースでは利益が伸びない問題を解決）
+        macd_close_pos = 'above' if macd_line > macd_signal else 'below'
 
-        # BUYポジション: MACD Line < Signal Line（ベアリッシュ）→ 決済してSELLへ
-        if side == 'BUY' and macd_line < macd_signal:
-            logger.info(f"   🔴 MACD BEARISH POSITION: Line({macd_line:.6f}) < Signal({macd_signal:.6f})")
-            logger.info(f"   🔄 Closing BUY position - MACD is bearish")
-            return True, f"MACD Bearish (Line < Signal)", 'SELL'
+        # クロス検出（前回の状態と比較）
+        is_close_death_cross = False
+        is_close_golden_cross = False
 
-        # SELLポジション: MACD Line > Signal Line（ブリッシュ）→ 決済してBUYへ
-        if side == 'SELL' and macd_line > macd_signal:
-            logger.info(f"   🟢 MACD BULLISH POSITION: Line({macd_line:.6f}) > Signal({macd_signal:.6f})")
-            logger.info(f"   🔄 Closing SELL position - MACD is bullish")
-            return True, f"MACD Bullish (Line > Signal)", 'BUY'
+        if self.last_close_macd_position is not None:
+            if self.last_close_macd_position == 'above' and macd_close_pos == 'below':
+                is_close_death_cross = True
+                logger.info(f"   🔴 MACD DEATH CROSS detected (close decision)")
+            elif self.last_close_macd_position == 'below' and macd_close_pos == 'above':
+                is_close_golden_cross = True
+                logger.info(f"   🟢 MACD GOLDEN CROSS detected (close decision)")
 
-        # MACDがポジションと同じ方向 → 保持継続
-        logger.info(f"   ✅ MACD confirms position direction - holding")
-        return False, "MACD confirms direction", None
+        # 状態を更新
+        self.last_close_macd_position = macd_close_pos
+
+        # BUYポジション: MACDデッドクロス → 決済
+        if side == 'BUY' and is_close_death_cross:
+            # EMAトレンドに基づく反転注文判定（下降トレンド時のみSELLへ反転）
+            reversal_type = 'SELL' if ema_trend == 'down' else None
+            logger.info(f"   🔴 Closing BUY - MACD Death Cross")
+            if reversal_type:
+                logger.info(f"   🔄 Will reverse to SELL (downtrend confirmed)")
+            return True, f"MACD Death Cross (Reversal)", reversal_type
+
+        # SELLポジション: MACDゴールデンクロス → 決済
+        if side == 'SELL' and is_close_golden_cross:
+            # EMAトレンドに基づく反転注文判定（上昇トレンド時のみBUYへ反転）
+            reversal_type = 'BUY' if ema_trend == 'up' else None
+            logger.info(f"   🟢 Closing SELL - MACD Golden Cross")
+            if reversal_type:
+                logger.info(f"   🔄 Will reverse to BUY (uptrend confirmed)")
+            return True, f"MACD Golden Cross (Reversal)", reversal_type
+
+        # クロスなし: ポジション保持継続
+        logger.info(f"   ✅ No MACD cross - holding position (state: {macd_close_pos})")
+        return False, "No MACD cross - holding", None
 
     def _close_position(self, position, current_price, reason):
         """

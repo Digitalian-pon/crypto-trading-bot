@@ -5,20 +5,22 @@ Railway用統合アプリケーション - 最適化版
 - MACD Cross + EMAトレンドフォロー専用モード
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 3.1.0-restored (2026-02-07)
+VERSION: 3.1.1-cross-close (2026-02-10)
 Changes:
-🎯 **v3.1.0に復元** - MACD Cross + EMAトレンドフィルター
+🎯 **v3.1.1** - 決済ロジックもMACDクロスベースに統一
 
-【復元の理由】
-- v4.x系（MACD位置ベース）はレンジ相場で往復ビンタ損失が深刻
-- v3.1.0は残高¥1,288まで回復した最も成功したバージョン
-- MACDクロス検出 + EMAトレンドフィルターが最も安定した戦略
+【v3.1.1の修正内容】
+- エントリー: MACDクロス + EMAトレンドフィルター（v3.1.0と同じ）
+- 決済: MACD「位置ベース」→「クロスベース」に変更（重要な修正）
+- 旧: MACDが反対側にあるだけで即決済 → 利益が伸びない問題
+- 新: MACDクロスの瞬間のみ決済 → 利益を最大化
+- 反転注文: EMAトレンドフィルター適用（トレンド方向のみ）
 
-【v3.1.0の主要ルール】
-- MACDゴールデンクロス + 上昇トレンド(EMA20>EMA50) → BUY
-- MACDデッドクロス + 下降トレンド(EMA20<EMA50) → SELL
-- トレンドに逆らう取引は完全禁止
-- クロスの瞬間のみシグナル（位置ベースではない）
+【v3.1.1の主要ルール】
+- エントリー: ゴールデンクロス+上昇トレンド→BUY / デッドクロス+下降トレンド→SELL
+- 決済: MACDデッドクロス→BUY決済 / MACDゴールデンクロス→SELL決済
+- TP: +2% / SL: -1.5%（変更なし）
+- クロスの瞬間のみ（エントリーも決済も位置ベースではない）
 """
 
 import os
@@ -30,9 +32,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.1.0-restored"
-BUILD_DATE = "2026-02-07"
-COMMIT_HASH = "restore-v310-trend-follow"
+VERSION = "3.1.1-cross-close"
+BUILD_DATE = "2026-02-10"
+COMMIT_HASH = "fix-close-logic-cross-based"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -113,13 +115,14 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: MACD CROSS + EMA TREND-FOLLOW (v3.1.0 restored)")
-            logger.info("🎯 TREND-FOLLOW ONLY MODE (v3.1.0):")
+            logger.info("Features: MACD CROSS + EMA TREND-FOLLOW (v3.1.1 cross-close)")
+            logger.info("🎯 TREND-FOLLOW ONLY MODE (v3.1.1):")
             logger.info("   - 🟢 BUY: MACD Golden Cross + Uptrend(EMA20>EMA50)")
             logger.info("   - 🔴 SELL: MACD Death Cross + Downtrend(EMA20<EMA50)")
             logger.info("   - 🚫 Downtrend: BUY blocked | Uptrend: SELL blocked")
             logger.info("   - 💰 TP: +2% | SL: -1.5%")
-            logger.info("   - 🎯 Cross-based signals only (no position-based)")
+            logger.info("   - 🎯 Entry AND Close: cross-based only (no position-based)")
+            logger.info("   - 🔧 FIX: Close logic changed from position-based to cross-based")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
@@ -168,16 +171,16 @@ def run_dashboard():
 
 if __name__ == "__main__":
     logger.info("="*60)
-    logger.info("🚀 Railway Deployment - DOGE_JPY Trading System v3.1.0-restored")
+    logger.info("🚀 Railway Deployment - DOGE_JPY Trading System v3.1.1-cross-close")
     logger.info(f"Started at: {datetime.now()}")
     logger.info("Trading Pair: DOGE_JPY")
     logger.info("Trading Type: Leverage (Long & Short)")
     logger.info("Timeframe: 5min")
     logger.info("Check Interval: 300s (5min)")
     logger.info("Primary Indicator: MACD Cross + EMA Trend Filter")
-    logger.info("Strategy: TREND-FOLLOW ONLY MODE (v3.1.0)")
+    logger.info("Strategy: TREND-FOLLOW ONLY MODE (v3.1.1)")
     logger.info("BUY = Golden Cross + Uptrend | SELL = Death Cross + Downtrend")
-    logger.info("Cross-based signals only - trend direction enforced by EMA")
+    logger.info("Entry AND Close: cross-based only - no position-based closing")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
