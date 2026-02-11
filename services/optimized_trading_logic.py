@@ -95,11 +95,11 @@ class OptimizedTradingLogic:
             # ヒストグラムの大きさで信頼度を決定
             histogram_strength = abs(macd_histogram)
 
-            if histogram_strength > 0.05:
+            if histogram_strength > 0.03:
                 confidence = 2.5  # 強いシグナル
-            elif histogram_strength > 0.02:
-                confidence = 2.0  # 中程度
             elif histogram_strength > 0.01:
+                confidence = 2.0  # 中程度
+            elif histogram_strength > 0.005:
                 confidence = 1.5  # 弱め
             else:
                 confidence = 1.0  # 最小
@@ -112,27 +112,30 @@ class OptimizedTradingLogic:
             logger.info(f"   EMA Trend: {ema_trend} (EMA20-EMA50 diff: {ema_diff_pct:.2f}%)")
             logger.info(f"   🎯 TREND-FOLLOW MODE: Only {ema_trend.upper()}TREND trades allowed")
 
-            # === レンジ相場フィルター（v3.1.2: レンジ相場での損失防止） ===
+            # === レンジ相場フィルター（v3.1.3: 30min足用に閾値調整） ===
 
-            # フィルター1: EMAスプレッド最低閾値（0.2%未満 = トレンドなし）
-            if ema_diff_pct < 0.2:
-                logger.info(f"🚫 RANGING: EMA spread too narrow ({ema_diff_pct:.3f}% < 0.2%)")
+            # フィルター1: EMAスプレッド最低閾値（0.1%未満 = トレンドなし）
+            # 30min足はEMAが滑らかで差が出にくいため、0.2% → 0.1%に緩和
+            if ema_diff_pct < 0.1:
+                logger.info(f"🚫 RANGING: EMA spread too narrow ({ema_diff_pct:.3f}% < 0.1%)")
                 logger.info(f"   EMA20={ema_20:.3f}, EMA50={ema_50:.3f} - No clear trend")
                 return False, None, f"Ranging market (EMA spread {ema_diff_pct:.3f}%)", confidence, None, None
 
-            # フィルター2: 最低信頼度（histogram < 0.01 = シグナル弱すぎ）
+            # フィルター2: 最低信頼度（histogram < 0.005 = シグナル弱すぎ）
+            # 30min足はヒストグラムが小さくなるため、1.5 → 1.5維持（信頼度計算側を調整済み）
             if confidence < 1.5:
                 logger.info(f"🚫 WEAK SIGNAL: confidence {confidence:.1f} < 1.5 (histogram={histogram_strength:.6f})")
                 return False, None, f"Weak signal (confidence {confidence:.1f})", confidence, None, None
 
-            # フィルター3: BB幅フィルター（1%未満 = 低ボラティリティ）
+            # フィルター3: BB幅フィルター（0.7%未満 = 低ボラティリティ）
+            # 30min足はBBが収束しやすいため、1.0% → 0.7%に緩和
             bb_upper = market_data.get('bb_upper', 0)
             bb_lower = market_data.get('bb_lower', 0)
             if bb_upper > 0 and bb_lower > 0 and current_price > 0:
                 bb_width_pct = (bb_upper - bb_lower) / current_price * 100
                 logger.info(f"   BB Width: {bb_width_pct:.2f}% (Upper={bb_upper:.3f}, Lower={bb_lower:.3f})")
-                if bb_width_pct < 1.0:
-                    logger.info(f"🚫 LOW VOLATILITY: BB width {bb_width_pct:.2f}% < 1.0%")
+                if bb_width_pct < 0.7:
+                    logger.info(f"🚫 LOW VOLATILITY: BB width {bb_width_pct:.2f}% < 0.7%")
                     return False, None, f"Low volatility (BB width {bb_width_pct:.2f}%)", confidence, None, None
 
             # === 取引タイミングフィルター ===

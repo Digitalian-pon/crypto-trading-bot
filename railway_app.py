@@ -5,20 +5,19 @@ Railway用統合アプリケーション - 最適化版
 - MACD Cross + EMAトレンドフォロー専用モード
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 3.1.2-range-filter (2026-02-10)
+VERSION: 3.1.3-30min-tuned (2026-02-11)
 Changes:
-🎯 **v3.1.2** - レンジ相場フィルター追加（損失の根本原因を解決）
+🎯 **v3.1.3** - 30min足用にレンジフィルター閾値を調整
 
-【v3.1.2の修正内容】
-- v3.1.1の決済ロジック（クロスベース）はそのまま維持
-- レンジ相場で取引を繰り返して損失が累積する問題を解決
-- 3つのフィルターを追加:
-  1. EMAスプレッドフィルター: EMA20-EMA50差 < 0.2% → 取引禁止
-  2. 最低信頼度フィルター: MACD histogram < 0.01 → 取引禁止
-  3. BB幅フィルター: ボリンジャーバンド幅 < 1.0% → 取引禁止
+【v3.1.3の修正内容】
+- v3.1.2のレンジフィルターを30min足に最適化
+- 30min足はEMA/BBが滑らかで値が小さくなるため閾値を調整:
+  1. EMAスプレッドフィルター: 0.2% → 0.1%（30minはEMA差が出にくい）
+  2. 信頼度計算: histogram 0.01→0.005で confidence 1.5判定（30minはhistogram小さい）
+  3. BB幅フィルター: 1.0% → 0.7%（30minはBBが収束しやすい）
 
-【v3.1.2の主要ルール】
-- レンジ相場では一切取引しない（3重フィルター）
+【v3.1.3の主要ルール】
+- レンジ相場では一切取引しない（3重フィルター、30min用閾値）
 - トレンド相場でのみMACDクロス + EMAトレンドフォロー
 - 決済: クロスベース（v3.1.1） / TP +2% / SL -1.5%
 """
@@ -32,9 +31,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.1.2-range-filter"
-BUILD_DATE = "2026-02-10"
-COMMIT_HASH = "add-ranging-market-filter"
+VERSION = "3.1.3-30min-tuned"
+BUILD_DATE = "2026-02-11"
+COMMIT_HASH = "tune-filters-for-30min"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -115,11 +114,11 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: MACD CROSS + EMA TREND-FOLLOW + RANGE FILTER (v3.1.2)")
-            logger.info("🎯 TREND-FOLLOW ONLY MODE (v3.1.2):")
+            logger.info("Features: MACD CROSS + EMA TREND-FOLLOW + RANGE FILTER (v3.1.3)")
+            logger.info("🎯 TREND-FOLLOW ONLY MODE (v3.1.3 - 30min tuned):")
             logger.info("   - 🟢 BUY: MACD Golden Cross + Uptrend(EMA20>EMA50)")
             logger.info("   - 🔴 SELL: MACD Death Cross + Downtrend(EMA20<EMA50)")
-            logger.info("   - 🚫 RANGE FILTER: EMA spread<0.2% OR BB width<1% OR histogram<0.01 → NO TRADE")
+            logger.info("   - 🚫 RANGE FILTER: EMA spread<0.1% OR BB width<0.7% OR histogram<0.005 → NO TRADE")
             logger.info("   - 💰 TP: +2% | SL: -1.5%")
             logger.info("   - 🎯 Entry AND Close: cross-based only")
             logger.info("="*70)
@@ -170,16 +169,16 @@ def run_dashboard():
 
 if __name__ == "__main__":
     logger.info("="*60)
-    logger.info("🚀 Railway Deployment - DOGE_JPY Trading System v3.1.2-range-filter")
+    logger.info("🚀 Railway Deployment - DOGE_JPY Trading System v3.1.3-30min-tuned")
     logger.info(f"Started at: {datetime.now()}")
     logger.info("Trading Pair: DOGE_JPY")
     logger.info("Trading Type: Leverage (Long & Short)")
     logger.info("Timeframe: 30min")
     logger.info("Check Interval: 300s (5min check, 30min candles)")
     logger.info("Primary Indicator: MACD Cross + EMA Trend Filter")
-    logger.info("Strategy: TREND-FOLLOW + RANGE FILTER (v3.1.2)")
+    logger.info("Strategy: TREND-FOLLOW + RANGE FILTER (v3.1.3 - 30min tuned)")
     logger.info("BUY = Golden Cross + Uptrend | SELL = Death Cross + Downtrend")
-    logger.info("RANGE FILTER: EMA spread<0.2% OR BB<1% OR histogram<0.01 → SKIP")
+    logger.info("RANGE FILTER: EMA spread<0.1% OR BB<0.7% OR histogram<0.005 → SKIP")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
