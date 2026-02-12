@@ -32,8 +32,8 @@ import glob
 
 # バージョン情報
 VERSION = "3.1.3-30min-tuned"
-BUILD_DATE = "2026-02-11"
-COMMIT_HASH = "tune-filters-for-30min"
+BUILD_DATE = "2026-02-12"
+COMMIT_HASH = "force-redeploy-v3.1.3"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
