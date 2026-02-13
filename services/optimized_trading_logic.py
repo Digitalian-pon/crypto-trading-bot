@@ -1,12 +1,13 @@
 """
-MACD主体トレーディングロジック v3.2.0
+MACD主体トレーディングロジック v3.3.0
 MACDポジションベースエントリー + クロスベース決済
 
 方針:
 - エントリー: MACDの位置で判断（Line > Signal → BUY、Line < Signal → SELL）
 - 決済: MACDクロスで判断（反対クロス発生時に決済）
 - EMAトレンドフィルター: トレンド方向の取引のみ許可
-- シンプルな固定TP/SL（利確2%、損切り1.5%）
+- レンジフィルター撤去（v3.3.0）
+- リスクリワード比 2:1（利確3%、損切り1.5%）
 """
 
 import logging
@@ -18,13 +19,14 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.2.0
+    MACD主体トレーディングロジック v3.3.0
 
     設計思想:
     - エントリー: MACDポジションベース（Line > Signal → BUY、Line < Signal → SELL）
     - 決済: MACDクロスベース（反対クロスで決済）
     - EMAトレンドフィルターでトレンド方向の取引のみ許可
-    - シンプルな固定TP/SL
+    - レンジフィルター撤去（シグナルがあれば取引実行）
+    - リスクリワード比 2:1（TP +3% / SL -1.5%）
     """
 
     def __init__(self, config=None):
@@ -35,8 +37,8 @@ class OptimizedTradingLogic:
         self.last_exit_price = None
         self.min_trade_interval = 300  # 5分
 
-        # シンプルなTP/SL設定（固定%）
-        self.take_profit_pct = 0.02   # 2%利確
+        # シンプルなTP/SL設定（固定%）- リスクリワード比 2:1
+        self.take_profit_pct = 0.03   # 3%利確
         self.stop_loss_pct = 0.015    # 1.5%損切り
 
         # 取引履歴
@@ -104,26 +106,9 @@ class OptimizedTradingLogic:
 
             logger.info(f"   MACD Position: {macd_position.upper()} | EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%)")
 
-            # === レンジ相場フィルター（30min足用） ===
-
-            # EMAスプレッド（0.1%未満 = トレンドなし）
-            if ema_diff_pct < 0.1:
-                logger.info(f"🚫 RANGING: EMA spread {ema_diff_pct:.3f}% < 0.1%")
-                return False, None, f"Ranging market (EMA spread {ema_diff_pct:.3f}%)", confidence, None, None
-
-            # 最低信頼度（histogram弱すぎ）
-            if confidence < 1.5:
-                logger.info(f"🚫 WEAK: confidence {confidence:.1f} < 1.5 (histogram={histogram_strength:.6f})")
-                return False, None, f"Weak signal (confidence {confidence:.1f})", confidence, None, None
-
-            # BB幅（0.7%未満 = 低ボラ）
-            bb_upper = market_data.get('bb_upper', 0)
-            bb_lower = market_data.get('bb_lower', 0)
-            if bb_upper > 0 and bb_lower > 0 and current_price > 0:
-                bb_width_pct = (bb_upper - bb_lower) / current_price * 100
-                if bb_width_pct < 0.7:
-                    logger.info(f"🚫 LOW VOL: BB width {bb_width_pct:.2f}% < 0.7%")
-                    return False, None, f"Low volatility (BB width {bb_width_pct:.2f}%)", confidence, None, None
+            # === レンジ相場フィルター無効化（v3.3.0） ===
+            # フィルターを撤去し、シグナルがあれば取引を実行
+            logger.info(f"   EMA spread: {ema_diff_pct:.3f}% | Confidence: {confidence:.1f} (filters disabled)")
 
             # === 取引タイミングフィルター ===
             if not skip_price_filter:
