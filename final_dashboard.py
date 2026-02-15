@@ -129,7 +129,11 @@ class FinalDashboard:
                     self.data_service = DataService()
 
                 # Get market data with indicators
-                market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval='5m')
+                # setting.iniからタイムフレームを取得（ボットと統一）
+                from config import load_config
+                _cfg = load_config()
+                _tf = _cfg.get('trading', 'default_timeframe', fallback='15min')
+                market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval=_tf)
                 if market_data_response is not None and not market_data_response.empty:
                     # Convert DataFrame to dictionary for the last row (most recent data)
                     self.market_data = market_data_response.iloc[-1].to_dict()
