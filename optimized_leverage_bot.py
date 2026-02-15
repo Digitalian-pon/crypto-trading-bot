@@ -282,16 +282,39 @@ class OptimizedLeverageTradingBot:
 
             logger.info(f"Position {position_id} ({side}): Entry=¥{entry_price:.2f}, P/L={pl_ratio*100:.2f}%")
 
-            # 動的SL/TP取得
-            if position_id in self.active_positions_stops:
-                stop_loss = self.active_positions_stops[position_id]['stop_loss']
-                take_profit = self.active_positions_stops[position_id]['take_profit']
-                logger.info(f"   Dynamic SL=¥{stop_loss:.2f}, TP=¥{take_profit:.2f}")
-            else:
-                # SL/TPが記録されていない場合はデフォルト値を使用
-                stop_loss = entry_price * 0.98 if side == 'BUY' else entry_price * 1.02
-                take_profit = entry_price * 1.03 if side == 'BUY' else entry_price * 0.97
-                logger.warning(f"   No recorded SL/TP, using defaults: SL=¥{stop_loss:.2f}, TP=¥{take_profit:.2f}")
+            # === トレーリングストップ管理 (v3.4.0) ===
+            if position_id not in self.active_positions_stops:
+                # 既存ポジション（再起動後など）の初期化
+                stop_loss = entry_price * (1 - 0.015) if side == 'BUY' else entry_price * (1 + 0.015)
+                self.active_positions_stops[position_id] = {
+                    'stop_loss': stop_loss,
+                    'take_profit': None,
+                    'peak_pl_ratio': max(0.0, pl_ratio),
+                    'trailing_sl_ratio': -0.015,
+                }
+                logger.warning(f"   Initialized trailing stop for existing position: SL=-1.5%")
+
+            stops = self.active_positions_stops[position_id]
+            peak_pl = stops.get('peak_pl_ratio', 0.0)
+
+            # ピークP/L更新
+            if pl_ratio > peak_pl:
+                stops['peak_pl_ratio'] = pl_ratio
+                peak_pl = pl_ratio
+
+            # トレーリングストップレベル更新
+            if peak_pl >= 0.03:
+                stops['trailing_sl_ratio'] = 0.02   # +3%到達 → SL=+2%
+            elif peak_pl >= 0.02:
+                stops['trailing_sl_ratio'] = 0.01   # +2%到達 → SL=+1%
+            elif peak_pl >= 0.01:
+                stops['trailing_sl_ratio'] = 0.0    # +1%到達 → SL=建値
+            # else: -0.015のまま
+
+            stop_loss = stops.get('stop_loss', entry_price * 0.985)
+            take_profit = stops.get('take_profit')
+            trailing_sl = stops.get('trailing_sl_ratio', -0.015)
+            logger.info(f"   📈 Trailing Stop: Peak={peak_pl*100:.2f}%, SL={trailing_sl*100:.1f}%")
 
             # 決済条件チェック
             should_close, reason, close_trade_type = self._should_close_position(
@@ -338,15 +361,18 @@ class OptimizedLeverageTradingBot:
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
         """
-        ポジション決済判定 - MACD v3.1.1 クロスベース決済
+        ポジション決済判定 - v3.4.0 トレーリングストップ + MACDクロス確認決済
 
         ルール:
-        1. 利確: +2%
-        2. 損切り: -1.5%
-        3. MACDクロスベース決済（v3.1.1修正: 位置ベース→クロスベース）
-           - BUYポジション: MACDデッドクロス（上→下に遷移）→ 決済
-           - SELLポジション: MACDゴールデンクロス（下→上に遷移）→ 決済
-           - クロスなし: ポジション保持継続（利益を伸ばす）
+        1. トレーリングストップ（含み益に応じてSLを自動引き上げ）
+           - 含み益 0〜+1%: SL -1.5%（通常の損切り）
+           - 含み益 +1%到達: SL 0%（建値 = 損失ゼロ保証）
+           - 含み益 +2%到達: SL +1%（最低+1%の利益確定）
+           - 含み益 +3%到達: SL +2%（利益を追従）
+           ※固定TPなし - トレーリングストップが自動的に利益を追従
+        2. MACDクロス確認決済
+           - クロス検出 + ヒストグラム強い(>0.003) → 決済
+           - クロス検出 + ヒストグラム弱い → 保持継続（トレーリングが保護）
 
         Returns:
             (should_close: bool, reason: str, trade_type: str or None)
@@ -354,22 +380,31 @@ class OptimizedLeverageTradingBot:
         side = position.get('side')
         size = float(position.get('size', 0))
         entry_price = float(position.get('price', 0))
+        position_id = position.get('positionId')
 
-        # MACDデータを直接取得
+        # MACDデータ
         macd_line = indicators.get('macd_line', 0)
         macd_signal = indicators.get('macd_signal', 0)
         macd_histogram = indicators.get('macd_histogram', 0)
 
-        # EMAデータ取得（反転方向のトレンドフィルター用）
+        # EMAデータ
         ema_20 = indicators.get('ema_20', current_price)
         ema_50 = indicators.get('ema_50', current_price)
         ema_trend = 'up' if ema_20 > ema_50 else 'down'
 
-        logger.info(f"   📊 [MACD v3.1.1 Cross-Close] Position Check:")
+        # トレーリングストップ情報取得
+        trailing_sl_ratio = -0.015
+        peak_pl = 0.0
+        if position_id and position_id in self.active_positions_stops:
+            stops = self.active_positions_stops[position_id]
+            trailing_sl_ratio = stops.get('trailing_sl_ratio', -0.015)
+            peak_pl = stops.get('peak_pl_ratio', 0.0)
+
+        logger.info(f"   📊 [v3.4.0 Trailing Stop] Position Check:")
         logger.info(f"      {side} {size} DOGE @ ¥{entry_price:.3f}")
         logger.info(f"      Current: ¥{current_price:.3f}, P/L: {pl_ratio*100:.2f}%")
-        logger.info(f"      MACD Line: {macd_line:.6f}, Signal: {macd_signal:.6f}")
-        logger.info(f"      MACD State: {'ABOVE (Bullish)' if macd_line > macd_signal else 'BELOW (Bearish)'}")
+        logger.info(f"      Peak P/L: {peak_pl*100:.2f}%, Trailing SL: {trailing_sl_ratio*100:.1f}%")
+        logger.info(f"      MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}")
         logger.info(f"      EMA Trend: {ema_trend} (EMA20={ema_20:.3f}, EMA50={ema_50:.3f})")
 
         # ログファイルに記録
@@ -378,28 +413,28 @@ class OptimizedLeverageTradingBot:
                 f.write(f"POSITION_CHECK: {side} {size} @ ¥{entry_price:.3f}\n")
                 f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
-                f.write(f"MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}\n")
-                f.write(f"THRESHOLD: TP +3% / SL -1.5% (RR 2:1) | MACD Cross-Based Close v3.3.0\n")
+                f.write(f"TRAILING_STOP: SL={trailing_sl_ratio*100:.1f}%, Peak={peak_pl*100:.2f}%\n")
+                f.write(f"MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}\n")
         except:
             pass
 
-        # === 1. 利確チェック（+3%） v3.3.0: リスクリワード比 2:1 ===
-        if pl_ratio >= 0.03:
-            logger.info(f"   ✅ TAKE PROFIT: {pl_ratio*100:.2f}% >= 3%")
-            return True, f"Take Profit: {pl_ratio*100:.2f}%", None
+        # === 1. トレーリングストップチェック ===
+        if pl_ratio <= trailing_sl_ratio:
+            if trailing_sl_ratio >= 0:
+                # 利益ロック状態でのストップ（利益を確保して決済）
+                logger.info(f"   ✅ TRAILING STOP HIT: P/L {pl_ratio*100:.2f}% <= lock {trailing_sl_ratio*100:.1f}%")
+                return True, f"Trailing Stop: {pl_ratio*100:.2f}% (locked at {trailing_sl_ratio*100:.1f}%)", None
+            else:
+                # 通常の損切り（初期SL -1.5%）
+                logger.info(f"   🚨 STOP LOSS: {pl_ratio*100:.2f}% <= {trailing_sl_ratio*100:.1f}%")
+                # MACDの位置で反対注文を判断
+                if side == 'BUY' and macd_line < macd_signal:
+                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bearish", 'SELL'
+                elif side == 'SELL' and macd_line > macd_signal:
+                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bullish", 'BUY'
+                return True, f"Stop Loss: {pl_ratio*100:.2f}%", None
 
-        # === 2. 損切りチェック（-1.5%） v3.4.0: 2.0%→1.5%に強化（早めの損切りで損失最小化） ===
-        if pl_ratio <= -0.015:
-            logger.info(f"   🚨 STOP LOSS: {pl_ratio*100:.2f}% <= -1.5%")
-            # MACDの位置で反対注文を判断
-            if side == 'BUY' and macd_line < macd_signal:
-                return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bearish", 'SELL'
-            elif side == 'SELL' and macd_line > macd_signal:
-                return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bullish", 'BUY'
-            return True, f"Stop Loss: {pl_ratio*100:.2f}%", None
-
-        # === 3. MACDクロスベース決済判定（v3.1.1: position-based → cross-based） ===
-        # クロスの「瞬間」のみで決済判定（位置ベースでは利益が伸びない問題を解決）
+        # === 2. MACDクロス確認決済 ===
         macd_close_pos = 'above' if macd_line > macd_signal else 'below'
 
         # クロス検出（前回の状態と比較）
@@ -409,35 +444,39 @@ class OptimizedLeverageTradingBot:
         if self.last_close_macd_position is not None:
             if self.last_close_macd_position == 'above' and macd_close_pos == 'below':
                 is_close_death_cross = True
-                logger.info(f"   🔴 MACD DEATH CROSS detected (close decision)")
+                logger.info(f"   🔴 MACD DEATH CROSS detected")
             elif self.last_close_macd_position == 'below' and macd_close_pos == 'above':
                 is_close_golden_cross = True
-                logger.info(f"   🟢 MACD GOLDEN CROSS detected (close decision)")
+                logger.info(f"   🟢 MACD GOLDEN CROSS detected")
 
         # 状態を更新
         self.last_close_macd_position = macd_close_pos
 
-        # BUYポジション: MACDデッドクロス → 決済
+        # BUYポジション: MACDデッドクロス + ヒストグラム確認
         if side == 'BUY' and is_close_death_cross:
-            # EMAトレンドに基づく反転注文判定（下降トレンド時のみSELLへ反転）
-            reversal_type = 'SELL' if ema_trend == 'down' else None
-            logger.info(f"   🔴 Closing BUY - MACD Death Cross")
-            if reversal_type:
-                logger.info(f"   🔄 Will reverse to SELL (downtrend confirmed)")
-            return True, f"MACD Death Cross (Reversal)", reversal_type
+            if abs(macd_histogram) > 0.003:
+                reversal_type = 'SELL' if ema_trend == 'down' else None
+                logger.info(f"   🔴 Closing BUY - Death Cross CONFIRMED (hist={macd_histogram:.6f})")
+                if reversal_type:
+                    logger.info(f"   🔄 Will reverse to SELL (downtrend)")
+                return True, f"MACD Death Cross (Confirmed)", reversal_type
+            else:
+                logger.info(f"   ⏸️ Death Cross but histogram weak ({macd_histogram:.6f}) - HOLDING (trailing stop protects)")
 
-        # SELLポジション: MACDゴールデンクロス → 決済
+        # SELLポジション: MACDゴールデンクロス + ヒストグラム確認
         if side == 'SELL' and is_close_golden_cross:
-            # EMAトレンドに基づく反転注文判定（上昇トレンド時のみBUYへ反転）
-            reversal_type = 'BUY' if ema_trend == 'up' else None
-            logger.info(f"   🟢 Closing SELL - MACD Golden Cross")
-            if reversal_type:
-                logger.info(f"   🔄 Will reverse to BUY (uptrend confirmed)")
-            return True, f"MACD Golden Cross (Reversal)", reversal_type
+            if abs(macd_histogram) > 0.003:
+                reversal_type = 'BUY' if ema_trend == 'up' else None
+                logger.info(f"   🟢 Closing SELL - Golden Cross CONFIRMED (hist={macd_histogram:.6f})")
+                if reversal_type:
+                    logger.info(f"   🔄 Will reverse to BUY (uptrend)")
+                return True, f"MACD Golden Cross (Confirmed)", reversal_type
+            else:
+                logger.info(f"   ⏸️ Golden Cross but histogram weak ({macd_histogram:.6f}) - HOLDING (trailing stop protects)")
 
-        # クロスなし: ポジション保持継続
-        logger.info(f"   ✅ No MACD cross - holding position (state: {macd_close_pos})")
-        return False, "No MACD cross - holding", None
+        # 保持継続
+        logger.info(f"   ✅ Holding position (P/L: {pl_ratio*100:.2f}%, SL: {trailing_sl_ratio*100:.1f}%, Peak: {peak_pl*100:.2f}%)")
+        return False, "Holding position", None
 
     def _close_position(self, position, current_price, reason):
         """
@@ -796,16 +835,16 @@ class OptimizedLeverageTradingBot:
                     latest_position = positions[-1]
                     position_id = latest_position.get('positionId')
 
-                    # SL/TP記録（トレーリングストップ用のフィールドも初期化）
+                    # v3.4.0: トレーリングストップ初期化
                     self.active_positions_stops[position_id] = {
                         'stop_loss': stop_loss,
-                        'take_profit': take_profit,
-                        'original_stop_loss': None  # トレーリングストップ未発動状態
+                        'take_profit': None,  # 固定TPなし（トレーリングストップで管理）
+                        'peak_pl_ratio': 0.0,
+                        'trailing_sl_ratio': -0.015,  # 初期SL -1.5%
                     }
 
-                    logger.info(f"📝 Recorded SL/TP for position {position_id}")
-                    logger.info(f"   SL: ¥{stop_loss:.2f}, TP: ¥{take_profit:.2f}")
-                    logger.info(f"   Trailing stop: Ready (activates at ¥2+ profit)")
+                    logger.info(f"📝 Trailing stop initialized for position {position_id}")
+                    logger.info(f"   Initial SL: -1.5% | +1%→0% | +2%→+1% | +3%→+2%")
                     logger.info(f"📊 Active positions: {len(positions)}")
 
                     # ファイルログにポジションID記録
