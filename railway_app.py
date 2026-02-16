@@ -5,22 +5,23 @@ Railway用統合アプリケーション - 最適化版
 - MACD Cross + EMAトレンドフォロー専用モード
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 3.4.0-trailing-stop (2026-02-15)
+VERSION: 3.5.0-cross-entry (2026-02-17)
 Changes:
-🎯 **v3.4.0** - トレーリングストップ導入
+🎯 **v3.5.0** - クロスベースエントリー + EMAソフトフィルター
 
-【v3.4.0の修正内容】
-- 固定TP +3%を撤去 → トレーリングストップで利益を追従
-- 含み益 +1%到達: SLを建値(±0%)に引き上げ（損失ゼロ保証）
-- 含み益 +2%到達: SLを+1%に引き上げ（最低+1%確定）
-- 含み益 +3%到達: SLを+2%に引き上げ（利益追従）
-- MACDクロス決済: ヒストグラム確認付き（弱いクロスは無視）
-- エントリー: MACDポジションベース（v3.2.0のまま維持）
+【v3.5.0の修正内容】
+- エントリー: ポジションベース → クロスベースに変更
+  - ゴールデンクロス（below→above遷移）の瞬間のみBUY
+  - デッドクロス（above→below遷移）の瞬間のみSELL
+- EMAフィルター: ハードブロック → confidence調整に変更
+  - 順方向: confidence +30%（シグナル強化）
+  - 逆方向: confidence -30%（弱めるがブロックしない）
+- 決済: トレーリングストップ + MACDクロス確認（v3.4.0維持）
 
-【v3.4.0の主要ルール】
-- エントリー: MACDの位置でシグナル（フィルターなし）
+【v3.5.0の主要ルール】
+- エントリー: MACDクロスの瞬間のみ（初動を捉える）
 - 決済: トレーリングストップ / MACDクロス(確認付き) / SL -1.5%
-- トレンドフォロー: EMAトレンド方向のみ取引許可
+- EMA: ブロックしない（confidence調整のみ）
 """
 
 import os
@@ -32,9 +33,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.4.0-trailing-stop"
-BUILD_DATE = "2026-02-15"
-COMMIT_HASH = "trailing-stop-system"
+VERSION = "3.5.0-cross-entry"
+BUILD_DATE = "2026-02-17"
+COMMIT_HASH = "cross-based-entry-ema-soft"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -115,14 +116,14 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: TRAILING STOP + MACD CONFIRMED EXIT (v3.4.0)")
-            logger.info("🎯 v3.4.0 TRAILING STOP MODE:")
-            logger.info("   - 🟢 BUY: MACD Line > Signal + Uptrend(EMA20>EMA50)")
-            logger.info("   - 🔴 SELL: MACD Line < Signal + Downtrend(EMA20<EMA50)")
+            logger.info("Features: CROSS-BASED ENTRY + TRAILING STOP (v3.5.0)")
+            logger.info("🎯 v3.5.0 CROSS-BASED ENTRY MODE:")
+            logger.info("   - 🟢 BUY: MACD Golden Cross (below→above)")
+            logger.info("   - 🔴 SELL: MACD Death Cross (above→below)")
+            logger.info("   - 📊 EMA: confidence adjustment only (no block)")
             logger.info("   - 📈 TRAILING STOP: +1%→SL=0%, +2%→SL=+1%, +3%→SL=+2%")
-            logger.info("   - 🔄 EXIT: MACD Cross + Histogram confirmation")
+            logger.info("   - 🔄 EXIT: MACD Cross + Histogram confirm / Trailing Stop")
             logger.info("   - 🛡️ SL: -1.5% (initial)")
-            logger.info("   - ✅ NO FIXED TP (trailing stop manages exit)")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
@@ -178,8 +179,8 @@ if __name__ == "__main__":
     logger.info("Timeframe: 15min")
     logger.info("Check Interval: 300s (5min check, 15min candles)")
     logger.info("Primary Indicator: MACD Cross + EMA Trend Filter")
-    logger.info("Strategy: TRAILING STOP + MACD CONFIRMED EXIT (v3.4.0)")
-    logger.info("BUY = MACD above signal + Uptrend | SELL = MACD below signal + Downtrend")
+    logger.info("Strategy: CROSS-BASED ENTRY + TRAILING STOP (v3.5.0)")
+    logger.info("BUY = MACD Golden Cross | SELL = MACD Death Cross | EMA = confidence only")
     logger.info("EXIT = Trailing Stop (+1%→0%, +2%→+1%, +3%→+2%) | MACD Cross+Confirm | SL -1.5%")
     logger.info("="*60)
 

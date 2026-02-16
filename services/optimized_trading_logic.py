@@ -1,13 +1,12 @@
 """
-MACD主体トレーディングロジック v3.3.0
-MACDポジションベースエントリー + クロスベース決済
+MACD主体トレーディングロジック v3.5.0
+MACDクロスベースエントリー + トレーリングストップ決済
 
 方針:
-- エントリー: MACDの位置で判断（Line > Signal → BUY、Line < Signal → SELL）
-- 決済: MACDクロスで判断（反対クロス発生時に決済）
-- EMAトレンドフィルター: トレンド方向の取引のみ許可
-- レンジフィルター撤去（v3.3.0）
-- リスクリワード比 2:1（利確3%、損切り1.5%）
+- エントリー: MACDクロスの瞬間のみ（ゴールデンクロス→BUY、デッドクロス→SELL）
+- EMAはブロックではなくconfidence調整（順方向+30%、逆方向-30%）
+- 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
+- リスクリワード比: トレーリングストップで自動管理
 """
 
 import logging
@@ -19,14 +18,12 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.3.0
+    MACD主体トレーディングロジック v3.5.0
 
     設計思想:
-    - エントリー: MACDポジションベース（Line > Signal → BUY、Line < Signal → SELL）
-    - 決済: MACDクロスベース（反対クロスで決済）
-    - EMAトレンドフィルターでトレンド方向の取引のみ許可
-    - レンジフィルター撤去（シグナルがあれば取引実行）
-    - リスクリワード比 2:1（TP +3% / SL -1.5%）
+    - エントリー: MACDクロスベース（クロスの瞬間のみ取引）
+    - EMAはconfidence調整のみ（ブロックしない）
+    - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
     """
 
     def __init__(self, config=None):
@@ -50,13 +47,14 @@ class OptimizedTradingLogic:
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - v3.2.0 MACDポジションベースエントリー
+        取引判定 - v3.5.0 MACDクロスベースエントリー
 
         ルール:
-        1. MACD Line > Signal + 上昇トレンド → BUY
-        2. MACD Line < Signal + 下降トレンド → SELL
-        3. EMAフィルター: 上昇トレンド=BUYのみ、下降トレンド=SELLのみ
-        4. 決済はクロスベース（bot側で処理）
+        1. MACDゴールデンクロス（below→above遷移）→ BUY
+        2. MACDデッドクロス（above→below遷移）→ SELL
+        3. クロスなし → 取引なし（ポジションベースの常時シグナルを廃止）
+        4. EMAトレンドはconfidence調整のみ（順方向+30%、逆方向-30%）
+           → ブロックしない、シグナルが出れば必ず取引
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -70,23 +68,31 @@ class OptimizedTradingLogic:
             ema_20 = market_data.get('ema_20', current_price)
             ema_50 = market_data.get('ema_50', current_price)
 
-            logger.info(f"📊 [MACD v3.2.0 Position-Based] Price=¥{current_price:.3f}")
-            logger.info(f"   MACD Line: {macd_line:.6f}")
-            logger.info(f"   MACD Signal: {macd_signal:.6f}")
-            logger.info(f"   MACD Histogram: {macd_histogram:.6f}")
+            logger.info(f"📊 [MACD v3.5.0 Cross-Based] Price=¥{current_price:.3f}")
+            logger.info(f"   MACD Line: {macd_line:.6f}, Signal: {macd_signal:.6f}, Hist: {macd_histogram:.6f}")
 
             # === MACDポジション判定 ===
             macd_position = 'above' if macd_line > macd_signal else 'below'
 
-            # クロス検出（ログ用・決済判定のstate追跡用）
+            # === クロス検出（エントリーの核心） ===
+            is_golden_cross = False
+            is_death_cross = False
+
             if self.last_macd_position is not None:
                 if self.last_macd_position == 'below' and macd_position == 'above':
+                    is_golden_cross = True
                     logger.info(f"🟢 MACD GOLDEN CROSS detected!")
                 elif self.last_macd_position == 'above' and macd_position == 'below':
+                    is_death_cross = True
                     logger.info(f"🔴 MACD DEATH CROSS detected!")
 
             # 状態を更新
             self.last_macd_position = macd_position
+
+            # === クロスなし → 取引なし ===
+            if not is_golden_cross and not is_death_cross:
+                logger.info(f"   No MACD cross - waiting (state: {macd_position})")
+                return False, None, "No MACD cross", 0.0, None, None
 
             # === シグナル強度計算 ===
             histogram_strength = abs(macd_histogram)
@@ -100,15 +106,11 @@ class OptimizedTradingLogic:
             else:
                 confidence = 1.0
 
-            # === EMAトレンド確認 ===
+            # === EMAトレンド確認（confidence調整のみ、ブロックしない） ===
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
 
-            logger.info(f"   MACD Position: {macd_position.upper()} | EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%)")
-
-            # === レンジ相場フィルター無効化（v3.3.0） ===
-            # フィルターを撤去し、シグナルがあれば取引を実行
-            logger.info(f"   EMA spread: {ema_diff_pct:.3f}% | Confidence: {confidence:.1f} (filters disabled)")
+            logger.info(f"   EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%)")
 
             # === 取引タイミングフィルター ===
             if not skip_price_filter:
@@ -117,37 +119,38 @@ class OptimizedTradingLogic:
 
                 if self.last_trade_price is not None:
                     price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
-                    if price_change < 0.005:
-                        return False, None, f"Price change too small", 0.0, None, None
+                    if price_change < 0.003:
+                        return False, None, "Price change too small", 0.0, None, None
 
-            # === 売買判定（MACDポジションベース + EMAトレンドフォロー） ===
-            # v3.2.0: MACDの位置でシグナル、クロスを待たない
-
-            if macd_position == 'above':
-                # MACD Line > Signal → BUY候補
-                if ema_trend == 'down':
-                    logger.info(f"🚫 MACD Bullish BLOCKED - Downtrend (EMA20 < EMA50)")
-                    return False, None, "MACD bullish but downtrend", confidence, None, None
-                else:
-                    take_profit = current_price * (1 + self.take_profit_pct)
-                    stop_loss = current_price * (1 - self.stop_loss_pct)
-                    logger.info(f"🟢 BUY SIGNAL - MACD above signal + Uptrend")
-                    logger.info(f"   Confidence: {confidence:.2f} | TP: ¥{take_profit:.2f} | SL: ¥{stop_loss:.2f}")
-                    return True, 'BUY', 'MACD Bullish + Uptrend', confidence, stop_loss, take_profit
-
-            elif macd_position == 'below':
-                # MACD Line < Signal → SELL候補
+            # === 売買判定（MACDクロスベース + EMA confidence調整） ===
+            if is_golden_cross:
+                # EMAでconfidence調整（ブロックはしない）
                 if ema_trend == 'up':
-                    logger.info(f"🚫 MACD Bearish BLOCKED - Uptrend (EMA20 > EMA50)")
-                    return False, None, "MACD bearish but uptrend", confidence, None, None
+                    confidence *= 1.3
+                    reason = 'MACD Golden Cross + Uptrend'
                 else:
-                    take_profit = current_price * (1 - self.take_profit_pct)
-                    stop_loss = current_price * (1 + self.stop_loss_pct)
-                    logger.info(f"🔴 SELL SIGNAL - MACD below signal + Downtrend")
-                    logger.info(f"   Confidence: {confidence:.2f} | TP: ¥{take_profit:.2f} | SL: ¥{stop_loss:.2f}")
-                    return True, 'SELL', 'MACD Bearish + Downtrend', confidence, stop_loss, take_profit
+                    confidence *= 0.7
+                    reason = 'MACD Golden Cross (counter-trend)'
 
-            return False, None, "No signal", confidence, None, None
+                stop_loss = current_price * (1 - self.stop_loss_pct)
+                take_profit = current_price * (1 + self.take_profit_pct)
+                logger.info(f"🟢 BUY SIGNAL: {reason} (confidence={confidence:.2f})")
+                return True, 'BUY', reason, confidence, stop_loss, take_profit
+
+            elif is_death_cross:
+                if ema_trend == 'down':
+                    confidence *= 1.3
+                    reason = 'MACD Death Cross + Downtrend'
+                else:
+                    confidence *= 0.7
+                    reason = 'MACD Death Cross (counter-trend)'
+
+                stop_loss = current_price * (1 + self.stop_loss_pct)
+                take_profit = current_price * (1 - self.take_profit_pct)
+                logger.info(f"🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
+                return True, 'SELL', reason, confidence, stop_loss, take_profit
+
+            return False, None, "No signal", 0.0, None, None
 
         except Exception as e:
             logger.error(f"Error in MACD trading logic: {e}", exc_info=True)
