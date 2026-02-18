@@ -5,23 +5,25 @@ Railway用統合アプリケーション - 最適化版
 - MACD Cross + EMAトレンドフォロー専用モード
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 3.5.0-cross-entry (2026-02-17)
+VERSION: 3.6.0-hybrid-filter (2026-02-18)
 Changes:
-🎯 **v3.5.0** - クロスベースエントリー + EMAソフトフィルター
+🎯 **v3.6.0** - EMAハイブリッドフィルター + ヒストグラムノイズ除去 + トレーリング細分化
 
-【v3.5.0の修正内容】
-- エントリー: ポジションベース → クロスベースに変更
-  - ゴールデンクロス（below→above遷移）の瞬間のみBUY
-  - デッドクロス（above→below遷移）の瞬間のみSELL
-- EMAフィルター: ハードブロック → confidence調整に変更
-  - 順方向: confidence +30%（シグナル強化）
-  - 逆方向: confidence -30%（弱めるがブロックしない）
-- 決済: トレーリングストップ + MACDクロス確認（v3.4.0維持）
+【v3.6.0の修正内容】
+1. ヒストグラムフィルター追加:
+   - |histogram| < 0.005 のクロスはノイズとして無視
+   - 弱いクロスによる無駄なエントリーを防止
+2. EMAハイブリッドフィルター:
+   - EMA差 > 0.3% で逆方向 → エントリー禁止（強トレンドに逆らわない）
+   - EMA差 <= 0.3% → confidence調整のみ（±30%）
+3. トレーリングストップ細分化:
+   - +0.5%→SL=0% / +1%→SL=+0.5% / +1.5%→SL=+1% / +2%→SL=+1.5%
+   - 早期に利益確保しやすくなる
 
-【v3.5.0の主要ルール】
-- エントリー: MACDクロスの瞬間のみ（初動を捉える）
+【v3.6.0の主要ルール】
+- エントリー: MACDクロス + histogram>=0.005 + EMAフィルター
 - 決済: トレーリングストップ / MACDクロス(確認付き) / SL -1.5%
-- EMA: ブロックしない（confidence調整のみ）
+- EMA: 強トレンド逆方向はブロック、弱い場合はconfidence調整
 """
 
 import os
@@ -33,9 +35,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.5.0-cross-entry"
-BUILD_DATE = "2026-02-17"
-COMMIT_HASH = "cross-based-entry-ema-soft"
+VERSION = "3.6.0-hybrid-filter"
+BUILD_DATE = "2026-02-18"
+COMMIT_HASH = "histogram-filter-ema-hybrid-trailing-fine"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -116,12 +118,13 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: CROSS-BASED ENTRY + TRAILING STOP (v3.5.0)")
-            logger.info("🎯 v3.5.0 CROSS-BASED ENTRY MODE:")
-            logger.info("   - 🟢 BUY: MACD Golden Cross (below→above)")
-            logger.info("   - 🔴 SELL: MACD Death Cross (above→below)")
-            logger.info("   - 📊 EMA: confidence adjustment only (no block)")
-            logger.info("   - 📈 TRAILING STOP: +1%→SL=0%, +2%→SL=+1%, +3%→SL=+2%")
+            logger.info("Features: HYBRID FILTER + FINE TRAILING (v3.6.0)")
+            logger.info("🎯 v3.6.0 HYBRID FILTER MODE:")
+            logger.info("   - 🟢 BUY: MACD Golden Cross (histogram>=0.005)")
+            logger.info("   - 🔴 SELL: MACD Death Cross (histogram>=0.005)")
+            logger.info("   - 🚫 FILTER: EMA diff>0.3% counter-trend → BLOCK")
+            logger.info("   - 📊 EMA: weak trend → confidence ±30% only")
+            logger.info("   - 📈 TRAILING: +0.5%→0% / +1%→+0.5% / +1.5%→+1% / +2%→+1.5%")
             logger.info("   - 🔄 EXIT: MACD Cross + Histogram confirm / Trailing Stop")
             logger.info("   - 🛡️ SL: -1.5% (initial)")
             logger.info("="*70)
@@ -179,9 +182,10 @@ if __name__ == "__main__":
     logger.info("Timeframe: 15min")
     logger.info("Check Interval: 300s (5min check, 15min candles)")
     logger.info("Primary Indicator: MACD Cross + EMA Trend Filter")
-    logger.info("Strategy: CROSS-BASED ENTRY + TRAILING STOP (v3.5.0)")
-    logger.info("BUY = MACD Golden Cross | SELL = MACD Death Cross | EMA = confidence only")
-    logger.info("EXIT = Trailing Stop (+1%→0%, +2%→+1%, +3%→+2%) | MACD Cross+Confirm | SL -1.5%")
+    logger.info("Strategy: HYBRID FILTER + FINE TRAILING (v3.6.0)")
+    logger.info("BUY = Golden Cross (hist>=0.005) | SELL = Death Cross (hist>=0.005)")
+    logger.info("FILTER = EMA diff>0.3% counter → BLOCK | weak → confidence ±30%")
+    logger.info("TRAILING = +0.5%→0% | +1%→+0.5% | +1.5%→+1% | +2%→+1.5% | SL -1.5%")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
