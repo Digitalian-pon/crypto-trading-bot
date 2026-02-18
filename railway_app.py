@@ -5,25 +5,29 @@ Railway用統合アプリケーション - 最適化版
 - MACD Cross + EMAトレンドフォロー専用モード
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 3.6.0-hybrid-filter (2026-02-18)
+VERSION: 3.6.1-reversal-order (2026-02-18)
 Changes:
-🎯 **v3.6.0** - EMAハイブリッドフィルター + ヒストグラムノイズ除去 + トレーリング細分化
+🎯 **v3.6.1** - トレンド転換時の即座反対注文 + EMA非ブロック化
 
-【v3.6.0の修正内容】
-1. ヒストグラムフィルター追加:
-   - |histogram| < 0.005 のクロスはノイズとして無視
-   - 弱いクロスによる無駄なエントリーを防止
-2. EMAハイブリッドフィルター:
-   - EMA差 > 0.3% で逆方向 → エントリー禁止（強トレンドに逆らわない）
-   - EMA差 <= 0.3% → confidence調整のみ（±30%）
-3. トレーリングストップ細分化:
+【v3.6.1の修正内容】
+1. ヒストグラムフィルター削除:
+   - クロス直後はhistogramが小さいため、フィルターは逆効果
+   - 全てのMACDクロスでエントリー（トレンド転換の初動を逃さない）
+2. EMAフィルター: ブロック → confidence調整のみに変更
+   - 順方向: confidence +30%
+   - 逆方向: confidence -50%（慎重だがブロックしない）
+   - トレンド転換時にEMAが遅れても取引可能
+3. MACDクロス決済 → 常に反対注文:
+   - BUY保持中にDeath Cross → 決済 + 即SELL注文
+   - SELL保持中にGolden Cross → 決済 + 即BUY注文
+   - EMA条件なし（常に反対注文を出す）
+4. トレーリングストップ細分化（v3.6.0維持）:
    - +0.5%→SL=0% / +1%→SL=+0.5% / +1.5%→SL=+1% / +2%→SL=+1.5%
-   - 早期に利益確保しやすくなる
 
-【v3.6.0の主要ルール】
-- エントリー: MACDクロス + histogram>=0.005 + EMAフィルター
-- 決済: トレーリングストップ / MACDクロス(確認付き) / SL -1.5%
-- EMA: 強トレンド逆方向はブロック、弱い場合はconfidence調整
+【v3.6.1の主要ルール】
+- エントリー: MACDクロスの瞬間（EMAはconfidence調整のみ）
+- 決済: トレーリングストップ / MACDクロス(確認付き)→反対注文 / SL -1.5%
+- トレンド転換: 決済と同時に反対方向の新規注文を即座に実行
 """
 
 import os
@@ -35,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.6.0-hybrid-filter"
+VERSION = "3.6.1-reversal-order"
 BUILD_DATE = "2026-02-18"
-COMMIT_HASH = "histogram-filter-ema-hybrid-trailing-fine"
+COMMIT_HASH = "always-reversal-ema-no-block"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -118,14 +122,13 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: HYBRID FILTER + FINE TRAILING (v3.6.0)")
-            logger.info("🎯 v3.6.0 HYBRID FILTER MODE:")
-            logger.info("   - 🟢 BUY: MACD Golden Cross (histogram>=0.005)")
-            logger.info("   - 🔴 SELL: MACD Death Cross (histogram>=0.005)")
-            logger.info("   - 🚫 FILTER: EMA diff>0.3% counter-trend → BLOCK")
-            logger.info("   - 📊 EMA: weak trend → confidence ±30% only")
+            logger.info("Features: REVERSAL ORDER + FINE TRAILING (v3.6.1)")
+            logger.info("🎯 v3.6.1 REVERSAL ORDER MODE:")
+            logger.info("   - 🟢 BUY: MACD Golden Cross (no histogram filter)")
+            logger.info("   - 🔴 SELL: MACD Death Cross (no histogram filter)")
+            logger.info("   - 📊 EMA: confidence only (+30% / -50%, NO block)")
+            logger.info("   - 🔄 REVERSAL: MACD Cross close → ALWAYS open opposite")
             logger.info("   - 📈 TRAILING: +0.5%→0% / +1%→+0.5% / +1.5%→+1% / +2%→+1.5%")
-            logger.info("   - 🔄 EXIT: MACD Cross + Histogram confirm / Trailing Stop")
             logger.info("   - 🛡️ SL: -1.5% (initial)")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
@@ -182,9 +185,9 @@ if __name__ == "__main__":
     logger.info("Timeframe: 15min")
     logger.info("Check Interval: 300s (5min check, 15min candles)")
     logger.info("Primary Indicator: MACD Cross + EMA Trend Filter")
-    logger.info("Strategy: HYBRID FILTER + FINE TRAILING (v3.6.0)")
-    logger.info("BUY = Golden Cross (hist>=0.005) | SELL = Death Cross (hist>=0.005)")
-    logger.info("FILTER = EMA diff>0.3% counter → BLOCK | weak → confidence ±30%")
+    logger.info("Strategy: REVERSAL ORDER + FINE TRAILING (v3.6.1)")
+    logger.info("BUY = Golden Cross | SELL = Death Cross | EMA = confidence only (no block)")
+    logger.info("REVERSAL = MACD Cross close → ALWAYS open opposite order")
     logger.info("TRAILING = +0.5%→0% | +1%→+0.5% | +1.5%→+1% | +2%→+1.5% | SL -1.5%")
     logger.info("="*60)
 

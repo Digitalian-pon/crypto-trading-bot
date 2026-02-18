@@ -458,22 +458,22 @@ class OptimizedLeverageTradingBot:
         # BUYポジション: MACDデッドクロス + ヒストグラム確認
         if side == 'BUY' and is_close_death_cross:
             if abs(macd_histogram) > 0.003:
-                reversal_type = 'SELL' if ema_trend == 'down' else None
+                # v3.6.1: 常に反対注文を出す（EMA条件を削除）
+                reversal_type = 'SELL'
                 logger.info(f"   🔴 Closing BUY - Death Cross CONFIRMED (hist={macd_histogram:.6f})")
-                if reversal_type:
-                    logger.info(f"   🔄 Will reverse to SELL (downtrend)")
-                return True, f"MACD Death Cross (Confirmed)", reversal_type
+                logger.info(f"   🔄 Will reverse to SELL (trend reversal)")
+                return True, f"MACD Death Cross (Confirmed) → Reversal SELL", reversal_type
             else:
                 logger.info(f"   ⏸️ Death Cross but histogram weak ({macd_histogram:.6f}) - HOLDING (trailing stop protects)")
 
         # SELLポジション: MACDゴールデンクロス + ヒストグラム確認
         if side == 'SELL' and is_close_golden_cross:
             if abs(macd_histogram) > 0.003:
-                reversal_type = 'BUY' if ema_trend == 'up' else None
+                # v3.6.1: 常に反対注文を出す（EMA条件を削除）
+                reversal_type = 'BUY'
                 logger.info(f"   🟢 Closing SELL - Golden Cross CONFIRMED (hist={macd_histogram:.6f})")
-                if reversal_type:
-                    logger.info(f"   🔄 Will reverse to BUY (uptrend)")
-                return True, f"MACD Golden Cross (Confirmed)", reversal_type
+                logger.info(f"   🔄 Will reverse to BUY (trend reversal)")
+                return True, f"MACD Golden Cross (Confirmed) → Reversal BUY", reversal_type
             else:
                 logger.info(f"   ⏸️ Golden Cross but histogram weak ({macd_histogram:.6f}) - HOLDING (trailing stop protects)")
 

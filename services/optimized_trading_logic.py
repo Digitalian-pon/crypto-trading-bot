@@ -1,15 +1,13 @@
 """
-MACD主体トレーディングロジック v3.6.0
-MACDクロスベースエントリー + EMAハイブリッドフィルター + トレーリングストップ決済
+MACD主体トレーディングロジック v3.6.1
+MACDクロスベースエントリー + EMA confidence調整 + トレーリングストップ決済
 
 方針:
 - エントリー: MACDクロスの瞬間のみ（ゴールデンクロス→BUY、デッドクロス→SELL）
-- ヒストグラムフィルター: |histogram| < 0.005 のクロスは無視（ノイズ除去）
-- EMAハイブリッドフィルター:
-  - EMA差 > 0.3% で逆方向 → エントリー禁止（強いトレンドに逆らわない）
-  - EMA差 <= 0.3% → confidence調整のみ（順方向+30%、逆方向-30%）
+- ヒストグラムフィルターなし（クロス直後はhistogramが小さいため）
+- EMAはconfidence調整のみ（順方向+30%、逆方向-50%）→ ブロックしない
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
-- リスクリワード比: トレーリングストップで自動管理
+- 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
 """
 
 import logging
@@ -21,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.6.0
+    MACD主体トレーディングロジック v3.6.1
 
     設計思想:
     - エントリー: MACDクロスベース（クロスの瞬間のみ取引）
-    - ヒストグラムフィルター: |histogram| < 0.005 → ノイズとして無視
-    - EMAハイブリッドフィルター: 強トレンド逆方向はブロック、弱い場合はconfidence調整
-    - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
+    - EMAはconfidence調整のみ（ブロックしない）
+      - 順方向: +30% / 逆方向: -50%（慎重だが取引は許可）
+    - 決済: トレーリングストップ + MACDクロス確認 → 反対注文
     """
 
     def __init__(self, config=None):
@@ -51,14 +49,14 @@ class OptimizedTradingLogic:
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - v3.5.0 MACDクロスベースエントリー
+        取引判定 - v3.6.1 MACDクロスベースエントリー
 
         ルール:
         1. MACDゴールデンクロス（below→above遷移）→ BUY
         2. MACDデッドクロス（above→below遷移）→ SELL
-        3. クロスなし → 取引なし（ポジションベースの常時シグナルを廃止）
-        4. EMAトレンドはconfidence調整のみ（順方向+30%、逆方向-30%）
-           → ブロックしない、シグナルが出れば必ず取引
+        3. クロスなし → 取引なし
+        4. EMAトレンド: confidence調整のみ（順方向+30%、逆方向-50%）
+           → ブロックしない（トレンド転換の初動を逃さない）
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -72,7 +70,7 @@ class OptimizedTradingLogic:
             ema_20 = market_data.get('ema_20', current_price)
             ema_50 = market_data.get('ema_50', current_price)
 
-            logger.info(f"📊 [MACD v3.5.0 Cross-Based] Price=¥{current_price:.3f}")
+            logger.info(f"📊 [MACD v3.6.1 Cross-Based] Price=¥{current_price:.3f}")
             logger.info(f"   MACD Line: {macd_line:.6f}, Signal: {macd_signal:.6f}, Hist: {macd_histogram:.6f}")
 
             # === MACDポジション判定 ===
@@ -98,23 +96,19 @@ class OptimizedTradingLogic:
                 logger.info(f"   No MACD cross - waiting (state: {macd_position})")
                 return False, None, "No MACD cross", 0.0, None, None
 
-            # === ヒストグラム強度フィルター（ノイズ除去） ===
+            # === シグナル強度計算 ===
             histogram_strength = abs(macd_histogram)
 
-            if histogram_strength < 0.005:
-                cross_type = "Golden Cross" if is_golden_cross else "Death Cross"
-                logger.info(f"   🚫 {cross_type} IGNORED - histogram too weak ({macd_histogram:.6f}, threshold: 0.005)")
-                return False, None, f"Weak {cross_type} (histogram={macd_histogram:.6f})", 0.0, None, None
-
-            # === シグナル強度計算 ===
             if histogram_strength > 0.03:
                 confidence = 2.5
             elif histogram_strength > 0.01:
                 confidence = 2.0
-            else:
+            elif histogram_strength > 0.005:
                 confidence = 1.5
+            else:
+                confidence = 1.0
 
-            # === EMAトレンド確認（ハイブリッドフィルター） ===
+            # === EMAトレンド確認（confidence調整のみ、ブロックしない） ===
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
 
@@ -130,20 +124,15 @@ class OptimizedTradingLogic:
                     if price_change < 0.003:
                         return False, None, "Price change too small", 0.0, None, None
 
-            # === 売買判定（MACDクロス + EMAハイブリッドフィルター） ===
+            # === 売買判定（MACDクロス + EMA confidence調整） ===
             if is_golden_cross:
-                # EMAフィルター: 強い下降トレンドではBUYをブロック
-                if ema_trend == 'down' and ema_diff_pct > 0.3:
-                    logger.info(f"   🚫 Golden Cross BLOCKED - Strong downtrend (EMA diff: {ema_diff_pct:.2f}% > 0.3%)")
-                    return False, None, f"Golden Cross blocked by downtrend ({ema_diff_pct:.2f}%)", 0.0, None, None
-
-                # EMAでconfidence調整
                 if ema_trend == 'up':
                     confidence *= 1.3
                     reason = 'MACD Golden Cross + Uptrend'
                 else:
-                    confidence *= 0.7
-                    reason = 'MACD Golden Cross (weak trend)'
+                    # 逆方向: confidenceを大きく減少させるがブロックしない
+                    confidence *= 0.5
+                    reason = 'MACD Golden Cross (counter-trend, reduced confidence)'
 
                 stop_loss = current_price * (1 - self.stop_loss_pct)
                 take_profit = current_price * (1 + self.take_profit_pct)
@@ -151,18 +140,12 @@ class OptimizedTradingLogic:
                 return True, 'BUY', reason, confidence, stop_loss, take_profit
 
             elif is_death_cross:
-                # EMAフィルター: 強い上昇トレンドではSELLをブロック
-                if ema_trend == 'up' and ema_diff_pct > 0.3:
-                    logger.info(f"   🚫 Death Cross BLOCKED - Strong uptrend (EMA diff: {ema_diff_pct:.2f}% > 0.3%)")
-                    return False, None, f"Death Cross blocked by uptrend ({ema_diff_pct:.2f}%)", 0.0, None, None
-
-                # EMAでconfidence調整
                 if ema_trend == 'down':
                     confidence *= 1.3
                     reason = 'MACD Death Cross + Downtrend'
                 else:
-                    confidence *= 0.7
-                    reason = 'MACD Death Cross (weak trend)'
+                    confidence *= 0.5
+                    reason = 'MACD Death Cross (counter-trend, reduced confidence)'
 
                 stop_loss = current_price * (1 + self.stop_loss_pct)
                 take_profit = current_price * (1 - self.take_profit_pct)
