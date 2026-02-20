@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.6.1-reversal-order"
-BUILD_DATE = "2026-02-18"
-COMMIT_HASH = "always-reversal-ema-no-block"
+VERSION = "3.7.0-cross-persist"
+BUILD_DATE = "2026-02-20"
+COMMIT_HASH = "fix-cross-consumed-by-filter"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

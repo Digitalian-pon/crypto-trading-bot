@@ -1,10 +1,10 @@
 """
-MACD主体トレーディングロジック v3.6.1
-MACDクロスベースエントリー + EMA confidence調整 + トレーリングストップ決済
+MACD主体トレーディングロジック v3.7.0
+MACDクロスベースエントリー + クロス保持機能 + トレーリングストップ決済
 
 方針:
 - エントリー: MACDクロスの瞬間のみ（ゴールデンクロス→BUY、デッドクロス→SELL）
-- ヒストグラムフィルターなし（クロス直後はhistogramが小さいため）
+- クロス保持: フィルターで拒否されてもクロス状態を保持（次回再試行）
 - EMAはconfidence調整のみ（順方向+30%、逆方向-50%）→ ブロックしない
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
 - 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.6.1
+    MACD主体トレーディングロジック v3.7.0
 
     設計思想:
     - エントリー: MACDクロスベース（クロスの瞬間のみ取引）
+    - クロス保持: フィルター拒否時もクロスを消滅させない（致命的バグ修正）
     - EMAはconfidence調整のみ（ブロックしない）
-      - 順方向: +30% / 逆方向: -50%（慎重だが取引は許可）
     - 決済: トレーリングストップ + MACDクロス確認 → 反対注文
     """
 
@@ -46,17 +46,18 @@ class OptimizedTradingLogic:
 
         # MACD状態追跡
         self.last_macd_position = None  # 'above' or 'below'
+        self.pending_cross = None       # フィルター拒否されたクロスを保持
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - v3.6.1 MACDクロスベースエントリー
+        取引判定 - v3.7.0 MACDクロスベースエントリー（クロス保持機能付き）
 
         ルール:
         1. MACDゴールデンクロス（below→above遷移）→ BUY
         2. MACDデッドクロス（above→below遷移）→ SELL
         3. クロスなし → 取引なし
-        4. EMAトレンド: confidence調整のみ（順方向+30%、逆方向-50%）
-           → ブロックしない（トレンド転換の初動を逃さない）
+        4. フィルターで拒否 → クロスを保持し次回再試行（消滅させない）
+        5. EMAトレンド: confidence調整のみ（ブロックしない）
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -70,25 +71,42 @@ class OptimizedTradingLogic:
             ema_20 = market_data.get('ema_20', current_price)
             ema_50 = market_data.get('ema_50', current_price)
 
-            logger.info(f"📊 [MACD v3.6.1 Cross-Based] Price=¥{current_price:.3f}")
+            logger.info(f"📊 [MACD v3.7.0 Cross-Based] Price=¥{current_price:.3f}")
             logger.info(f"   MACD Line: {macd_line:.6f}, Signal: {macd_signal:.6f}, Hist: {macd_histogram:.6f}")
 
             # === MACDポジション判定 ===
             macd_position = 'above' if macd_line > macd_signal else 'below'
 
-            # === クロス検出（エントリーの核心） ===
+            # === クロス検出 ===
             is_golden_cross = False
             is_death_cross = False
 
+            # 1. 新しいクロスを検出
             if self.last_macd_position is not None:
                 if self.last_macd_position == 'below' and macd_position == 'above':
                     is_golden_cross = True
+                    self.pending_cross = None  # 新クロスで古いpendingをクリア
                     logger.info(f"🟢 MACD GOLDEN CROSS detected!")
                 elif self.last_macd_position == 'above' and macd_position == 'below':
                     is_death_cross = True
+                    self.pending_cross = None
                     logger.info(f"🔴 MACD DEATH CROSS detected!")
 
-            # 状態を更新
+            # 2. 保留中のクロスがあれば復元
+            if not is_golden_cross and not is_death_cross and self.pending_cross is not None:
+                # 保留中のクロスがまだ有効か確認（MACDの方向が変わっていないこと）
+                if self.pending_cross == 'golden' and macd_position == 'above':
+                    is_golden_cross = True
+                    logger.info(f"🟢 PENDING Golden Cross RESTORED (filter blocked last time)")
+                elif self.pending_cross == 'death' and macd_position == 'below':
+                    is_death_cross = True
+                    logger.info(f"🔴 PENDING Death Cross RESTORED (filter blocked last time)")
+                else:
+                    # MACDが反転した → 保留クロスは無効
+                    logger.info(f"   Pending cross '{self.pending_cross}' expired (MACD reversed)")
+                    self.pending_cross = None
+
+            # 状態を更新（常に最新の状態を追跡）
             self.last_macd_position = macd_position
 
             # === クロスなし → 取引なし ===
@@ -117,12 +135,22 @@ class OptimizedTradingLogic:
             # === 取引タイミングフィルター ===
             if not skip_price_filter:
                 if not self._check_trade_timing():
-                    return False, None, "Trade interval too short", 0.0, None, None
+                    # クロスを保留状態にする（消滅させない）
+                    cross_type = 'golden' if is_golden_cross else 'death'
+                    self.pending_cross = cross_type
+                    logger.info(f"   ⏳ Cross PENDING (trade interval too short) - will retry next cycle")
+                    return False, None, "Trade interval too short (cross pending)", 0.0, None, None
 
                 if self.last_trade_price is not None:
                     price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
                     if price_change < 0.003:
-                        return False, None, "Price change too small", 0.0, None, None
+                        cross_type = 'golden' if is_golden_cross else 'death'
+                        self.pending_cross = cross_type
+                        logger.info(f"   ⏳ Cross PENDING (price change too small: {price_change*100:.2f}%) - will retry")
+                        return False, None, "Price change too small (cross pending)", 0.0, None, None
+
+            # === クロスが実行される → pending をクリア ===
+            self.pending_cross = None
 
             # === 売買判定（MACDクロス + EMA confidence調整） ===
             if is_golden_cross:
@@ -130,7 +158,6 @@ class OptimizedTradingLogic:
                     confidence *= 1.3
                     reason = 'MACD Golden Cross + Uptrend'
                 else:
-                    # 逆方向: confidenceを大きく減少させるがブロックしない
                     confidence *= 0.5
                     reason = 'MACD Golden Cross (counter-trend, reduced confidence)'
 
