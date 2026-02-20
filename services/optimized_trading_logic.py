@@ -111,6 +111,12 @@ class OptimizedTradingLogic:
             # 状態を更新（常に最新の状態を追跡）
             self.last_macd_position = macd_position
 
+            # === ヒストグラム強度・EMAトレンド（クロス/ポジション両方で使用） ===
+            histogram_strength = abs(macd_histogram)
+            ema_trend = 'up' if ema_20 > ema_50 else 'down'
+            ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
+            logger.info(f"   EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%), Hist strength: {histogram_strength:.6f}")
+
             # === クロスなし → ポジションベースエントリー ===
             if not is_golden_cross and not is_death_cross:
                 logger.info(f"   No MACD cross - checking position-based entry (state: {macd_position})")
@@ -178,9 +184,7 @@ class OptimizedTradingLogic:
 
                 return False, None, "No signal", 0.0, None, None
 
-            # === シグナル強度計算 ===
-            histogram_strength = abs(macd_histogram)
-
+            # === シグナル強度計算（クロスベースエントリー用） ===
             if histogram_strength > 0.03:
                 confidence = 2.5
             elif histogram_strength > 0.01:
@@ -189,12 +193,6 @@ class OptimizedTradingLogic:
                 confidence = 1.5
             else:
                 confidence = 1.0
-
-            # === EMAトレンド確認（confidence調整のみ、ブロックしない） ===
-            ema_trend = 'up' if ema_20 > ema_50 else 'down'
-            ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
-
-            logger.info(f"   EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%)")
 
             # === 取引タイミングフィルター ===
             if not skip_price_filter:
