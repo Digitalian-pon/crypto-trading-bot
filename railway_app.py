@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.7.0-cross-persist"
+VERSION = "3.8.0-position-entry"
 BUILD_DATE = "2026-02-20"
-COMMIT_HASH = "fix-cross-consumed-by-filter"
+COMMIT_HASH = "macd-position-based-entry"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -122,10 +122,10 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: REVERSAL ORDER + FINE TRAILING (v3.6.1)")
-            logger.info("🎯 v3.6.1 REVERSAL ORDER MODE:")
-            logger.info("   - 🟢 BUY: MACD Golden Cross (no histogram filter)")
-            logger.info("   - 🔴 SELL: MACD Death Cross (no histogram filter)")
+            logger.info("Features: CROSS + POSITION ENTRY + FINE TRAILING (v3.8.0)")
+            logger.info("🎯 v3.8.0 CROSS + POSITION ENTRY MODE:")
+            logger.info("   - 🟢 BUY: MACD Cross (high conf) OR Line > Signal (mid conf)")
+            logger.info("   - 🔴 SELL: MACD Cross (high conf) OR Line < Signal (mid conf)")
             logger.info("   - 📊 EMA: confidence only (+30% / -50%, NO block)")
             logger.info("   - 🔄 REVERSAL: MACD Cross close → ALWAYS open opposite")
             logger.info("   - 📈 TRAILING: +0.5%→0% / +1%→+0.5% / +1.5%→+1% / +2%→+1.5%")
@@ -185,8 +185,8 @@ if __name__ == "__main__":
     logger.info("Timeframe: 15min")
     logger.info("Check Interval: 300s (5min check, 15min candles)")
     logger.info("Primary Indicator: MACD Cross + EMA Trend Filter")
-    logger.info("Strategy: REVERSAL ORDER + FINE TRAILING (v3.6.1)")
-    logger.info("BUY = Golden Cross | SELL = Death Cross | EMA = confidence only (no block)")
+    logger.info("Strategy: CROSS + POSITION ENTRY + FINE TRAILING (v3.8.0)")
+    logger.info("BUY = Cross(high) OR Line>Signal(mid) | SELL = Cross(high) OR Line<Signal(mid)")
     logger.info("REVERSAL = MACD Cross close → ALWAYS open opposite order")
     logger.info("TRAILING = +0.5%→0% | +1%→+0.5% | +1.5%→+1% | +2%→+1.5% | SL -1.5%")
     logger.info("="*60)

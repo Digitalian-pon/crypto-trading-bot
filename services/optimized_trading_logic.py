@@ -1,9 +1,10 @@
 """
-MACD主体トレーディングロジック v3.7.0
-MACDクロスベースエントリー + クロス保持機能 + トレーリングストップ決済
+MACD主体トレーディングロジック v3.8.0
+MACDクロス + ポジションベースエントリー + トレーリングストップ決済
 
 方針:
-- エントリー: MACDクロスの瞬間のみ（ゴールデンクロス→BUY、デッドクロス→SELL）
+- エントリー1: MACDクロスの瞬間（ゴールデンクロス→BUY、デッドクロス→SELL）→ 高confidence
+- エントリー2: MACDポジション（Line > Signal → BUY、Line < Signal → SELL）→ 中confidence
 - クロス保持: フィルターで拒否されてもクロス状態を保持（次回再試行）
 - EMAはconfidence調整のみ（順方向+30%、逆方向-50%）→ ブロックしない
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
@@ -19,11 +20,12 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.7.0
+    MACD主体トレーディングロジック v3.8.0
 
     設計思想:
-    - エントリー: MACDクロスベース（クロスの瞬間のみ取引）
-    - クロス保持: フィルター拒否時もクロスを消滅させない（致命的バグ修正）
+    - エントリー1: MACDクロス（高confidence） - クロスの瞬間
+    - エントリー2: MACDポジション（中confidence） - Line > Signal → BUY、Line < Signal → SELL
+    - クロス保持: フィルター拒否時もクロスを消滅させない
     - EMAはconfidence調整のみ（ブロックしない）
     - 決済: トレーリングストップ + MACDクロス確認 → 反対注文
     """
@@ -71,7 +73,7 @@ class OptimizedTradingLogic:
             ema_20 = market_data.get('ema_20', current_price)
             ema_50 = market_data.get('ema_50', current_price)
 
-            logger.info(f"📊 [MACD v3.7.0 Cross-Based] Price=¥{current_price:.3f}")
+            logger.info(f"📊 [MACD v3.8.0 Cross+Position] Price=¥{current_price:.3f}")
             logger.info(f"   MACD Line: {macd_line:.6f}, Signal: {macd_signal:.6f}, Hist: {macd_histogram:.6f}")
 
             # === MACDポジション判定 ===
@@ -109,10 +111,72 @@ class OptimizedTradingLogic:
             # 状態を更新（常に最新の状態を追跡）
             self.last_macd_position = macd_position
 
-            # === クロスなし → 取引なし ===
+            # === クロスなし → ポジションベースエントリー ===
             if not is_golden_cross and not is_death_cross:
-                logger.info(f"   No MACD cross - waiting (state: {macd_position})")
-                return False, None, "No MACD cross", 0.0, None, None
+                logger.info(f"   No MACD cross - checking position-based entry (state: {macd_position})")
+
+                # ポジションベースエントリー: MACDの位置に基づいてシグナル生成
+                # クロスほど強くないが、トレンド継続中の機会を逃さない
+                position_confidence = 0.8  # クロスより低い基本confidence
+
+                # ヒストグラムの強さでconfidence調整
+                if histogram_strength > 0.03:
+                    position_confidence = 1.5
+                elif histogram_strength > 0.01:
+                    position_confidence = 1.2
+                elif histogram_strength > 0.005:
+                    position_confidence = 1.0
+
+                # EMAトレンド確認（confidence調整）
+                if macd_position == 'above':
+                    if ema_trend == 'up':
+                        position_confidence *= 1.3
+                        reason = 'MACD Position BUY (Line > Signal + Uptrend)'
+                    else:
+                        position_confidence *= 0.5
+                        reason = 'MACD Position BUY (Line > Signal, counter-trend)'
+
+                    # タイミングフィルター（ポジションベースにも適用）
+                    if not skip_price_filter:
+                        if not self._check_trade_timing():
+                            logger.info(f"   ⏳ Position-based BUY blocked (trade interval too short)")
+                            return False, None, "Trade interval too short", 0.0, None, None
+                        if self.last_trade_price is not None:
+                            price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
+                            if price_change < 0.003:
+                                logger.info(f"   ⏳ Position-based BUY blocked (price change too small: {price_change*100:.2f}%)")
+                                return False, None, "Price change too small", 0.0, None, None
+
+                    stop_loss = current_price * (1 - self.stop_loss_pct)
+                    take_profit = current_price * (1 + self.take_profit_pct)
+                    logger.info(f"🟢 POSITION-BASED BUY: {reason} (confidence={position_confidence:.2f})")
+                    return True, 'BUY', reason, position_confidence, stop_loss, take_profit
+
+                elif macd_position == 'below':
+                    if ema_trend == 'down':
+                        position_confidence *= 1.3
+                        reason = 'MACD Position SELL (Line < Signal + Downtrend)'
+                    else:
+                        position_confidence *= 0.5
+                        reason = 'MACD Position SELL (Line < Signal, counter-trend)'
+
+                    # タイミングフィルター
+                    if not skip_price_filter:
+                        if not self._check_trade_timing():
+                            logger.info(f"   ⏳ Position-based SELL blocked (trade interval too short)")
+                            return False, None, "Trade interval too short", 0.0, None, None
+                        if self.last_trade_price is not None:
+                            price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
+                            if price_change < 0.003:
+                                logger.info(f"   ⏳ Position-based SELL blocked (price change too small: {price_change*100:.2f}%)")
+                                return False, None, "Price change too small", 0.0, None, None
+
+                    stop_loss = current_price * (1 + self.stop_loss_pct)
+                    take_profit = current_price * (1 - self.take_profit_pct)
+                    logger.info(f"🔴 POSITION-BASED SELL: {reason} (confidence={position_confidence:.2f})")
+                    return True, 'SELL', reason, position_confidence, stop_loss, take_profit
+
+                return False, None, "No signal", 0.0, None, None
 
             # === シグナル強度計算 ===
             histogram_strength = abs(macd_histogram)
