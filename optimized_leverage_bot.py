@@ -443,8 +443,19 @@ class OptimizedLeverageTradingBot:
         # クロス検出（前回の状態と比較）
         is_close_death_cross = False
         is_close_golden_cross = False
+        is_startup_check = False
 
-        if self.last_close_macd_position is not None:
+        if self.last_close_macd_position is None:
+            # ★ FIX: Bot再起動後の初回サイクル - 現在のMACDポジションで状態初期化
+            self.last_close_macd_position = macd_close_pos
+            is_startup_check = True
+            logger.info(f"   🔄 [STARTUP] MACD close state initialized: {macd_close_pos} (hist={macd_histogram:.6f})")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"MACD_STARTUP_INIT: side={side}, macd_pos={macd_close_pos}, hist={macd_histogram:.6f}\n")
+            except:
+                pass
+        else:
             if self.last_close_macd_position == 'above' and macd_close_pos == 'below':
                 is_close_death_cross = True
                 logger.info(f"   🔴 MACD DEATH CROSS detected")
@@ -454,6 +465,28 @@ class OptimizedLeverageTradingBot:
 
         # 状態を更新
         self.last_close_macd_position = macd_close_pos
+
+        # ★ FIX: 起動時の特別チェック - MACDがすでにポジションと逆方向なら即決済
+        if is_startup_check:
+            if side == 'BUY' and macd_close_pos == 'below' and abs(macd_histogram) > 0.003:
+                logger.info(f"   ⚠️ [STARTUP] BUY pos + bearish MACD → immediate close")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"STARTUP_CLOSE: BUY+bearish MACD (hist={macd_histogram:.4f}) → Reversal SELL\n")
+                except:
+                    pass
+                return True, f"Startup Check: MACD Bearish (hist={macd_histogram:.4f}) → Reversal SELL", 'SELL'
+            elif side == 'SELL' and macd_close_pos == 'above' and abs(macd_histogram) > 0.003:
+                logger.info(f"   ⚠️ [STARTUP] SELL pos + bullish MACD → immediate close")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"STARTUP_CLOSE: SELL+bullish MACD (hist={macd_histogram:.4f}) → Reversal BUY\n")
+                except:
+                    pass
+                return True, f"Startup Check: MACD Bullish (hist={macd_histogram:.4f}) → Reversal BUY", 'BUY'
+            else:
+                logger.info(f"   ✅ [STARTUP] MACD direction consistent with position - holding")
+                return False, "Holding position (startup check passed)", None
 
         # BUYポジション: MACDデッドクロス + ヒストグラム確認
         if side == 'BUY' and is_close_death_cross:

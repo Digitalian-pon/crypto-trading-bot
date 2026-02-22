@@ -82,9 +82,15 @@ class OptimizedTradingLogic:
             # === クロス検出 ===
             is_golden_cross = False
             is_death_cross = False
+            is_entry_startup = False
 
-            # 1. 新しいクロスを検出
-            if self.last_macd_position is not None:
+            # ★ FIX: Bot再起動後の初回サイクル - 現在のMACDポジションで状態初期化
+            if self.last_macd_position is None:
+                self.last_macd_position = macd_position
+                is_entry_startup = True
+                logger.info(f"🔄 [STARTUP] MACD entry state initialized: {macd_position}")
+            else:
+                # 1. 新しいクロスを検出
                 if self.last_macd_position == 'below' and macd_position == 'above':
                     is_golden_cross = True
                     self.pending_cross = None  # 新クロスで古いpendingをクリア
@@ -94,8 +100,8 @@ class OptimizedTradingLogic:
                     self.pending_cross = None
                     logger.info(f"🔴 MACD DEATH CROSS detected!")
 
-            # 2. 保留中のクロスがあれば復元
-            if not is_golden_cross and not is_death_cross and self.pending_cross is not None:
+            # 2. 保留中のクロスがあれば復元（起動時は除く）
+            if not is_entry_startup and not is_golden_cross and not is_death_cross and self.pending_cross is not None:
                 # 保留中のクロスがまだ有効か確認（MACDの方向が変わっていないこと）
                 if self.pending_cross == 'golden' and macd_position == 'above':
                     is_golden_cross = True
