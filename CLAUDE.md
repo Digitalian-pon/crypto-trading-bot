@@ -2855,30 +2855,79 @@ if ema_trend == 'up':
 
 ---
 
-**最終更新**: 2026年1月29日
-**ステータス**: 24時間完全稼働中 ✅ (TREND-FOLLOW ONLY MODE)
-**バージョン**: 3.1.0 - Trend-Follow Only Mode ⭐**最新**
-**現在の残高**: JPY ¥1,263
-**時間足**: **5分足（短期スキャルピング）**
+#### 34. **Bot再起動後のMACDクロス状態リセット問題修正** (2026年2月22日)
+**問題**: Bot再起動後、MACDクロスが検出できず既存ポジションが決済されない
+
+**症状**:
+- ダッシュボード: "BUY決済シグナル 信頼度: 1.56/1.0" を表示
+- Bot実際の動作: "should_close=False, reason='Holding position'" で保持し続ける
+- ダッシュボードとBotの判定ロジックが乖離（根本原因はMACDクロス状態リセット）
+
+**根本原因**:
+1. `optimized_leverage_bot.py`: `self.last_close_macd_position = None` で初期化
+2. `_should_close_position` で `if self.last_close_macd_position is not None:` → スキップ
+3. 結果: 最初のサイクルでは前回状態なし → クロス未検出 → 決済されない
+4. 同様に `optimized_trading_logic.py` の `self.last_macd_position = None` も同じ問題
+
+**修正内容** (`optimized_leverage_bot.py`):
+```python
+# 起動時: MACDポジションを現在値で初期化 + 逆方向なら即決済
+if self.last_close_macd_position is None:
+    self.last_close_macd_position = macd_close_pos
+    is_startup_check = True
+    if side == 'BUY' and macd_close_pos == 'below' and abs(macd_histogram) > 0.003:
+        return True, "Startup Check: MACD Bearish → Reversal SELL", 'SELL'
+    elif side == 'SELL' and macd_close_pos == 'above' and abs(macd_histogram) > 0.003:
+        return True, "Startup Check: MACD Bullish → Reversal BUY", 'BUY'
+    else:
+        return False, "Holding position (startup check passed)", None
+```
+
+**修正内容** (`services/optimized_trading_logic.py`):
+```python
+# 起動時: last_macd_positionを現在値で初期化（誤クロス検出防止）
+if self.last_macd_position is None:
+    self.last_macd_position = macd_position
+    is_entry_startup = True
+```
+
+**動作確認 (Railway v3.8.1)**:
+```
+MACD_STARTUP_INIT: side=SELL, macd_pos=below, hist=-0.009161
+DEBUG_CLOSE_CHECK: should_close=False, reason='Holding position (startup check passed)'
+→ SELLポジション + MACDベアリッシュ = 方向一致 → 正常に保持 ✅
+```
+
+**GitHubコミット**:
+- 6331281 - 🐛 v3.8.1 - Fix MACD state reset on bot restart
+
+**解決**: Bot再起動後のMACDクロス状態リセット問題を完全修正 ✅ **CRITICAL FIX**
+
+---
+
+**最終更新**: 2026年2月22日
+**ステータス**: 24時間完全稼働中 ✅ (MACD Cross + Position-based Entry)
+**バージョン**: **3.8.1-macd-startup-fix** ⭐**最新**
+**現在の残高**: JPY ¥1,007（2026年2月22日時点）
+**時間足**: **15分足**
 **チェック間隔**: **300秒（5分）**
-**主要指標**: **MACD + EMAトレンド確認** ⭐**重要変更**
+**主要指標**: **MACD Cross + Position-based + EMA confidence調整 (v3.8.1)**
 **トレードルール**:
-- 上昇トレンド（EMA20 > EMA50）: **BUYのみ許可**
-- 下降トレンド（EMA20 < EMA50）: **SELLのみ許可**
-**MACD設定**: 12, 26, 9（標準設定、全レジーム統一）
-**ボット**: optimized-bot (Railway環境で自動稼働中)
+- MACDゴールデンクロス → BUY（高confidence）
+- MACDデッドクロス → SELL（高confidence）
+- MACDポジションベース → BUY/SELL（中confidence、クロスなし時）
+- 決済: トレーリングストップ + MACDクロス確認 + 起動時チェック（v3.8.1 NEW）
+**MACD設定**: 12, 26, 9（標準設定）
+**ボット**: Railway環境で自動稼働中
 **ダッシュボード**:
-- ✅ **ローカル**: http://localhost:8082/
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
-- ✅ **ログ監視（改善版）**: https://web-production-1f4ce.up.railway.app/logs
-**最新修正**: トレンドフォロー専用モード（逆方向取引完全禁止）✅ **CRITICAL FIX**
+- ✅ **ログ監視**: https://web-production-1f4ce.up.railway.app/logs
+**最新修正**: Bot再起動後のMACDクロス状態リセット問題修正 ✅ **CRITICAL FIX**
 **GitHubコミット履歴**:
-- b97689e - 🎯 v3.1.0 - TREND-FOLLOW ONLY MODE ⭐**最新**
-- c23a81a - 🔧 v3.0.4 - EMAトレンドフィルター強化
-- 60b322d - 📊 v3.0.3 - P&L表示を取引履歴に追加
-- a3d1681 - 🔧 v3.0.2 - MACD標準化 (12,26,9)
+- 6331281 - 🐛 v3.8.1 - Fix MACD state reset on bot restart ⭐**最新**
+- f363171 - 🐛 Fix histogram_strength/ema_trend undefined error
+- cd54497 - 🎯 v3.8.0 - Add MACD position-based entry (not just cross)
+- 2bd28b0 - 🐛 v3.7.0 CRITICAL FIX: Cross consumed by filter
+- b97689e - 🎯 v3.1.0 - TREND-FOLLOW ONLY MODE
 - 2873eb5 - 🎯 v3.0.0 - MACD Simple Strategy
-- 7a551c4 - 🚨 v2.7.3 - 重複ポジション修正
-- c6dca71 - 🛡️ v2.7.0 - 保守的リスク管理戦略
-- 6326f77 - ⚡ v2.6.0 - 5分足トレードへの変更
 - b64b079 - 🎯 v2.4.0 - 本物の4時間足 + MACD主体ロジック実装
