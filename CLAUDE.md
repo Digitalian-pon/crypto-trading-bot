@@ -2905,26 +2905,96 @@ DEBUG_CLOSE_CHECK: should_close=False, reason='Holding position (startup check p
 
 ---
 
-**最終更新**: 2026年2月22日
-**ステータス**: 24時間完全稼働中 ✅ (MACD Cross + Position-based Entry)
-**バージョン**: **3.8.1-macd-startup-fix** ⭐**最新**
-**現在の残高**: JPY ¥1,007（2026年2月22日時点）
+---
+
+#### 35. **重複ポジション + 逆張りエントリーバグ修正** (2026年2月23日)
+**問題**: 損失が継続（¥1,012 → ¥965、-4.6%/日）
+
+**ログ分析による3つの問題特定**:
+
+**問題1: 重複ポジション作成**
+```
+証拠: 12:49:21-22 同時BUY×2、10:08:33 同時SELL×2
+  → _place_forced_reversal_order()に既存ポジションチェックなし
+  → 反転注文のたびに2ポジションが作成される → 手数料二重損失
+```
+
+**問題2: 逆張りMACDポジションベースエントリー**
+```
+証拠: MACD Line=-0.089, Signal=-0.101（両方マイナス）なのにBUY発動
+  → ポジションベース(Line > Signal)はEMA方向を無視
+  → EMA下降中でもBUYが中confidenceで実行 → 下降トレンドで逆張り
+```
+
+**問題3: SL -1.5%が-3.1%まで貫通**
+```
+証拠: BUY@¥14.735 → 決済@¥14.279（-3.1%）、-¥28損失
+  → 5分サイクルの間に急落でSL貫通（根本修正不可）
+```
+
+**修正1: 重複ポジション防止** (`optimized_leverage_bot.py`):
+```python
+# _place_forced_reversal_order()の残高確認前に追加
+existing_positions = self.api.get_positions(symbol=self.symbol)
+if existing_positions and len(existing_positions) > 0:
+    logger.warning("⚠️ Already have positions - skipping reversal order")
+    # ログ: REVERSAL_DUPLICATE_PREVENTION
+    return
+```
+
+**修正2: 逆張りポジションベースエントリーブロック** (`services/optimized_trading_logic.py`):
+```python
+# Before: EMA逆方向でもconfidence*0.5でTrue返却（取引実行）
+if ema_trend != 'up':
+    position_confidence *= 0.5  # 実行されてしまう ❌
+
+# After: EMA逆方向は完全ブロック
+if macd_position == 'above' and ema_trend != 'up':
+    return False, None, "Position BUY blocked (counter-trend EMA)", 0.0, None, None
+    # ログ: POSITION_BUY_BLOCKED
+
+if macd_position == 'below' and ema_trend != 'down':
+    return False, None, "Position SELL blocked (counter-trend EMA)", 0.0, None, None
+    # ログ: POSITION_SELL_BLOCKED
+```
+
+**動作確認 (Railway v3.8.2)**:
+```
+POSITION_BUY_BLOCKED: Counter-trend (EMA=down, MACD=above) × 2件 ✅
+MACD_STARTUP_INIT: side=BUY, macd_pos=above, hist=0.047145 ✅
+現在: BUY 60 DOGE ×2 @ ¥14.351, P/L=+1.71%, TrailingSL=1.0% 保護中
+```
+
+**GitHubコミット**:
+- 9da03a7 - 🐛 v3.8.2 - Fix duplicate positions + counter-trend entry
+- fd1c2d2 - 🔄 Force Railway redeploy - v3.8.2 duplicate position fix
+
+**解決**: 重複ポジション防止 + 逆張りエントリーブロック完全実装 ✅ **CRITICAL FIX**
+
+---
+
+**最終更新**: 2026年2月23日
+**ステータス**: 24時間完全稼働中 ✅ (MACD Cross + EMA-confirmed Position Entry)
+**バージョン**: **3.8.2-fix-duplicate-positions** ⭐**最新**
+**現在の残高**: JPY ¥965（2026年2月23日時点）
 **時間足**: **15分足**
 **チェック間隔**: **300秒（5分）**
-**主要指標**: **MACD Cross + Position-based + EMA confidence調整 (v3.8.1)**
+**主要指標**: **MACD Cross + EMA確認済みPosition-based + トレーリングストップ (v3.8.2)**
 **トレードルール**:
 - MACDゴールデンクロス → BUY（高confidence）
 - MACDデッドクロス → SELL（高confidence）
-- MACDポジションベース → BUY/SELL（中confidence、クロスなし時）
-- 決済: トレーリングストップ + MACDクロス確認 + 起動時チェック（v3.8.1 NEW）
+- MACDポジションベース + EMA同方向 → BUY/SELL（中confidence）← v3.8.2: EMA逆方向はブロック
+- 反転注文: 既存ポジションチェック必須 ← v3.8.2: 重複防止
+- 決済: トレーリングストップ + MACDクロス確認 + 起動時チェック
 **MACD設定**: 12, 26, 9（標準設定）
 **ボット**: Railway環境で自動稼働中
 **ダッシュボード**:
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
 - ✅ **ログ監視**: https://web-production-1f4ce.up.railway.app/logs
-**最新修正**: Bot再起動後のMACDクロス状態リセット問題修正 ✅ **CRITICAL FIX**
+**最新修正**: 重複ポジション防止 + 逆張りエントリーブロック ✅ **CRITICAL FIX**
 **GitHubコミット履歴**:
-- 6331281 - 🐛 v3.8.1 - Fix MACD state reset on bot restart ⭐**最新**
+- 9da03a7 - 🐛 v3.8.2 - Fix duplicate positions + counter-trend entry ⭐**最新**
+- 6331281 - 🐛 v3.8.1 - Fix MACD state reset on bot restart
 - f363171 - 🐛 Fix histogram_strength/ema_trend undefined error
 - cd54497 - 🎯 v3.8.0 - Add MACD position-based entry (not just cross)
 - 2bd28b0 - 🐛 v3.7.0 CRITICAL FIX: Cross consumed by filter
