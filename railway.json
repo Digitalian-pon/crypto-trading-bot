@@ -10,5 +10,5 @@
     "healthcheckPath": "/",
     "healthcheckTimeout": 300
   },
-  "_comment": "Deployment trigger: 2026-01-20 22:00 - CRITICAL: Force v2.7.3 deploy - duplicate position bug causing losses"
+  "_comment": "Deployment trigger: 2026-02-23 - v3.8.2 fix duplicate positions + counter-trend entry"
 }
