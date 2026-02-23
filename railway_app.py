@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.8.1-macd-startup-fix"
-BUILD_DATE = "2026-02-22"
-COMMIT_HASH = "fix-macd-state-reset-on-restart"
+VERSION = "3.8.2-fix-duplicate-positions"
+BUILD_DATE = "2026-02-23"
+COMMIT_HASH = "fix-duplicate-pos-and-counter-trend-entry"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

@@ -661,6 +661,19 @@ class OptimizedLeverageTradingBot:
         except:
             pass
 
+        # 【重複ポジション防止】注文前に既存ポジションを確認 (v3.8.2)
+        existing_positions = self.api.get_positions(symbol=self.symbol)
+        if existing_positions and len(existing_positions) > 0:
+            logger.warning(f"⚠️ [REVERSAL] Already have {len(existing_positions)} position(s) - skipping reversal order to prevent duplicates")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"REVERSAL_DUPLICATE_PREVENTION: Skipped {trade_type} order - already have {len(existing_positions)} position(s)\n")
+                    for p in existing_positions:
+                        f.write(f"  - Existing: {p.get('positionId')} {p.get('side')} {p.get('size')} @ {p.get('price')}\n")
+            except:
+                pass
+            return
+
         # 残高確認
         balance = self.api.get_account_balance()
         available_jpy = 0

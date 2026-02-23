@@ -139,14 +139,21 @@ class OptimizedTradingLogic:
                 elif histogram_strength > 0.005:
                     position_confidence = 1.0
 
-                # EMAトレンド確認（confidence調整）
+                # EMAトレンド確認 - 逆張りは完全ブロック (v3.8.2)
+                # MACDポジションがEMAトレンドと逆方向の場合は取引禁止
                 if macd_position == 'above':
-                    if ema_trend == 'up':
-                        position_confidence *= 1.3
-                        reason = 'MACD Position BUY (Line > Signal + Uptrend)'
-                    else:
-                        position_confidence *= 0.5
-                        reason = 'MACD Position BUY (Line > Signal, counter-trend)'
+                    if ema_trend != 'up':
+                        # 下降トレンド中のBUYを完全ブロック
+                        logger.info(f"   🚫 Position-based BUY BLOCKED (counter-trend: EMA={ema_trend}, MACD above)")
+                        try:
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"POSITION_BUY_BLOCKED: Counter-trend (EMA={ema_trend}, MACD=above)\n")
+                        except:
+                            pass
+                        return False, None, "Position BUY blocked (counter-trend EMA)", 0.0, None, None
+
+                    position_confidence *= 1.3
+                    reason = 'MACD Position BUY (Line > Signal + Uptrend)'
 
                     # タイミングフィルター（ポジションベースにも適用）
                     if not skip_price_filter:
@@ -165,12 +172,18 @@ class OptimizedTradingLogic:
                     return True, 'BUY', reason, position_confidence, stop_loss, take_profit
 
                 elif macd_position == 'below':
-                    if ema_trend == 'down':
-                        position_confidence *= 1.3
-                        reason = 'MACD Position SELL (Line < Signal + Downtrend)'
-                    else:
-                        position_confidence *= 0.5
-                        reason = 'MACD Position SELL (Line < Signal, counter-trend)'
+                    if ema_trend != 'down':
+                        # 上昇トレンド中のSELLを完全ブロック
+                        logger.info(f"   🚫 Position-based SELL BLOCKED (counter-trend: EMA={ema_trend}, MACD below)")
+                        try:
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"POSITION_SELL_BLOCKED: Counter-trend (EMA={ema_trend}, MACD=below)\n")
+                        except:
+                            pass
+                        return False, None, "Position SELL blocked (counter-trend EMA)", 0.0, None, None
+
+                    position_confidence *= 1.3
+                    reason = 'MACD Position SELL (Line < Signal + Downtrend)'
 
                     # タイミングフィルター
                     if not skip_price_filter:
