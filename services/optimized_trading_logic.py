@@ -40,7 +40,7 @@ class OptimizedTradingLogic:
 
         # シンプルなTP/SL設定（固定%）- リスクリワード比 2:1
         self.take_profit_pct = 0.03   # 3%利確
-        self.stop_loss_pct = 0.015    # 1.5%損切り
+        self.stop_loss_pct = 0.010    # 1.0%損切り
 
         # 取引履歴
         self.trade_history = []

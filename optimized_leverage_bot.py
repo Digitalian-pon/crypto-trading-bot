@@ -285,14 +285,14 @@ class OptimizedLeverageTradingBot:
             # === トレーリングストップ管理 (v3.4.0) ===
             if position_id not in self.active_positions_stops:
                 # 既存ポジション（再起動後など）の初期化
-                stop_loss = entry_price * (1 - 0.015) if side == 'BUY' else entry_price * (1 + 0.015)
+                stop_loss = entry_price * (1 - 0.010) if side == 'BUY' else entry_price * (1 + 0.010)
                 self.active_positions_stops[position_id] = {
                     'stop_loss': stop_loss,
                     'take_profit': None,
                     'peak_pl_ratio': max(0.0, pl_ratio),
-                    'trailing_sl_ratio': -0.015,
+                    'trailing_sl_ratio': -0.010,
                 }
-                logger.warning(f"   Initialized trailing stop for existing position: SL=-1.5%")
+                logger.warning(f"   Initialized trailing stop for existing position: SL=-1.0%")
 
             stops = self.active_positions_stops[position_id]
             peak_pl = stops.get('peak_pl_ratio', 0.0)
@@ -309,13 +309,13 @@ class OptimizedLeverageTradingBot:
                 stops['trailing_sl_ratio'] = 0.01   # +1.5%到達 → SL=+1%
             elif peak_pl >= 0.01:
                 stops['trailing_sl_ratio'] = 0.005  # +1%到達 → SL=+0.5%
-            elif peak_pl >= 0.005:
-                stops['trailing_sl_ratio'] = 0.0    # +0.5%到達 → SL=建値（損失ゼロ保証）
-            # else: -0.015のまま
+            elif peak_pl >= 0.003:
+                stops['trailing_sl_ratio'] = 0.0    # +0.3%到達 → SL=建値（損失ゼロ保証）
+            # else: -0.010のまま
 
             stop_loss = stops.get('stop_loss', entry_price * 0.985)
             take_profit = stops.get('take_profit')
-            trailing_sl = stops.get('trailing_sl_ratio', -0.015)
+            trailing_sl = stops.get('trailing_sl_ratio', -0.010)
             logger.info(f"   📈 Trailing Stop: Peak={peak_pl*100:.2f}%, SL={trailing_sl*100:.1f}%")
 
             # 決済条件チェック
@@ -396,11 +396,11 @@ class OptimizedLeverageTradingBot:
         ema_trend = 'up' if ema_20 > ema_50 else 'down'
 
         # トレーリングストップ情報取得
-        trailing_sl_ratio = -0.015
+        trailing_sl_ratio = -0.010
         peak_pl = 0.0
         if position_id and position_id in self.active_positions_stops:
             stops = self.active_positions_stops[position_id]
-            trailing_sl_ratio = stops.get('trailing_sl_ratio', -0.015)
+            trailing_sl_ratio = stops.get('trailing_sl_ratio', -0.010)
             peak_pl = stops.get('peak_pl_ratio', 0.0)
 
         logger.info(f"   📊 [v3.4.0 Trailing Stop] Position Check:")
@@ -889,11 +889,11 @@ class OptimizedLeverageTradingBot:
                         'stop_loss': stop_loss,
                         'take_profit': None,  # 固定TPなし（トレーリングストップで管理）
                         'peak_pl_ratio': 0.0,
-                        'trailing_sl_ratio': -0.015,  # 初期SL -1.5%
+                        'trailing_sl_ratio': -0.010,  # 初期SL -1.0%
                     }
 
                     logger.info(f"📝 Trailing stop initialized for position {position_id}")
-                    logger.info(f"   Initial SL: -1.5% | +0.5%→0% | +1%→+0.5% | +1.5%→+1% | +2%→+1.5%")
+                    logger.info(f"   Initial SL: -1.0% | +0.3%→0% | +1%→+0.5% | +1.5%→+1% | +2%→+1.5%")
                     logger.info(f"📊 Active positions: {len(positions)}")
 
                     # ファイルログにポジションID記録
