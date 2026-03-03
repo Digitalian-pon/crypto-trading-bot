@@ -158,6 +158,7 @@ class OptimizedLeverageTradingBot:
         reversal_signal = False
         tp_sl_closed = False
         reversal_trade_type = None
+        loss_close = False  # v3.10.2: MACDクロス損失クローズフラグ
 
         # デバッグログ
         try:
@@ -175,7 +176,7 @@ class OptimizedLeverageTradingBot:
             except:
                 pass
 
-            any_closed, reversal_signal, tp_sl_closed, reversal_trade_type = self._check_positions_for_closing(positions, current_price, df)
+            any_closed, reversal_signal, tp_sl_closed, reversal_trade_type, loss_close = self._check_positions_for_closing(positions, current_price, df)
 
             # 決済後、ポジションを再取得
             positions = self.api.get_positions(symbol=self.symbol)
@@ -184,7 +185,7 @@ class OptimizedLeverageTradingBot:
             # ファイルログにも記録
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"CLOSE_CHECK_RESULT: any_closed={any_closed}, reversal={reversal_signal}, tp_sl={tp_sl_closed}\n")
+                    f.write(f"CLOSE_CHECK_RESULT: any_closed={any_closed}, reversal={reversal_signal}, tp_sl={tp_sl_closed}, loss_close={loss_close}\n")
                     f.write(f"POSITIONS_REMAINING: {len(positions)}\n")
             except:
                 pass
@@ -204,6 +205,16 @@ class OptimizedLeverageTradingBot:
         # - TP/SL決済の場合は継続チェック（中程度の閾値）
         # - 全ポジション決済された場合もチェック
         # - ポジションがない場合もチェック
+        # - v3.10.2: MACDクロスで損失クローズの場合は同サイクルの新規エントリーを禁止（往復ビンタ防止）
+        if loss_close:
+            logger.info("⛔ Loss Close this cycle - skipping new trade check (往復ビンタ防止)")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"NEW_TRADE_ACTION: SKIPPED (loss_close=True, 往復ビンタ防止)\n")
+            except:
+                pass
+            return
+
         should_check_new_trade = (
             reversal_signal or                    # 反転シグナル決済
             tp_sl_closed or                       # TP/SL決済（継続機会）
@@ -261,12 +272,13 @@ class OptimizedLeverageTradingBot:
         ポジション決済チェック（動的SL/TP使用）
 
         Returns:
-            (any_closed: bool, reversal_signal: bool, tp_sl_closed: bool, reversal_trade_type: str or None)
+            (any_closed: bool, reversal_signal: bool, tp_sl_closed: bool, reversal_trade_type: str or None, loss_close: bool)
         """
         any_closed = False
         reversal_signal = False
         tp_sl_closed = False
         reversal_trade_type = None  # 反転シグナルのタイプ（BUY/SELL）
+        loss_close = False  # v3.10.2: MACDクロスで損失中のポジションをクローズした場合
 
         for position in positions:
             side = position.get('side')
@@ -342,6 +354,15 @@ class OptimizedLeverageTradingBot:
                     reversal_signal = True
                     reversal_trade_type = close_trade_type  # 反転シグナルのタイプを記録
                     logger.info(f"🔄 REVERSAL DETECTED - Will place {close_trade_type} order immediately")
+                elif "Loss Close" in reason:
+                    # v3.10.2: MACDクロスで損失中のポジションをクローズ → 同サイクルの新規エントリー禁止
+                    loss_close = True
+                    logger.info(f"⛔ LOSS CLOSE - Skipping new trade check this cycle (防往復ビンタ)")
+                    try:
+                        with open('bot_execution_log.txt', 'a') as f:
+                            f.write(f"LOSS_CLOSE_DETECTED: Suppressing new trade check this cycle\n")
+                    except:
+                        pass
                 elif "Take Profit" in reason or "Stop Loss" in reason or "Loss Limit" in reason:
                     # TP/SL/絶対損失リミットで決済された場合
                     tp_sl_closed = True
@@ -359,7 +380,7 @@ class OptimizedLeverageTradingBot:
                 # 取引結果を記録（決済時はis_exit=True、決済価格を記録）
                 self.trading_logic.record_trade(side, current_price, pl_ratio, is_exit=True)
 
-        return any_closed, reversal_signal, tp_sl_closed, reversal_trade_type
+        return any_closed, reversal_signal, tp_sl_closed, reversal_trade_type, loss_close
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
         """
