@@ -1,12 +1,12 @@
 """
-MACD主体トレーディングロジック v3.8.0
+MACD単体トレーディングロジック v3.11.0
 MACDクロス + ポジションベースエントリー + トレーリングストップ決済
 
 方針:
 - エントリー1: MACDクロスの瞬間（ゴールデンクロス→BUY、デッドクロス→SELL）→ 高confidence
 - エントリー2: MACDポジション（Line > Signal → BUY、Line < Signal → SELL）→ 中confidence
 - クロス保持: フィルターで拒否されてもクロス状態を保持（次回再試行）
-- EMAはconfidence調整のみ（順方向+30%、逆方向-50%）→ ブロックしない
+- EMA: 参考情報としてログに表示するのみ（取引判断には使用しない）← v3.11.0変更
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
 - 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
 """
@@ -31,7 +31,7 @@ class OptimizedTradingLogic:
     """
 
     def __init__(self, config=None):
-        """初期化"""
+        """初期化 v3.11.0 - EMA削除・MACD単体化"""
         self.config = config or {}
         self.last_trade_time = None
         self.last_trade_price = None
@@ -139,34 +139,10 @@ class OptimizedTradingLogic:
                 elif histogram_strength > 0.005:
                     position_confidence = 1.0
 
-                # EMAトレンド確認 - 逆張りブロック (v3.8.2) + 中立相場解放 (v3.10.0 案B)
-                # EMA差が0.3%未満 → 中立相場 → ブロックせずペナルティのみ適用
-                EMA_NEUTRAL_THRESHOLD = 0.3
-
+                # v3.11.0: EMA削除 - MACDポジションのみでシグナル判定（EMAは参考表示のみ）
                 if macd_position == 'above':
-                    if ema_trend != 'up':
-                        if ema_diff_pct >= EMA_NEUTRAL_THRESHOLD:
-                            # 強い下降トレンド中のBUYを完全ブロック
-                            logger.info(f"   🚫 Position-based BUY BLOCKED (counter-trend: EMA={ema_trend} {ema_diff_pct:.2f}%, MACD above)")
-                            try:
-                                with open('bot_execution_log.txt', 'a') as f:
-                                    f.write(f"POSITION_BUY_BLOCKED: Counter-trend (EMA={ema_trend} {ema_diff_pct:.2f}%, MACD=above)\n")
-                            except:
-                                pass
-                            return False, None, "Position BUY blocked (counter-trend EMA)", 0.0, None, None
-                        else:
-                            # EMA差が小さい → 中立相場 → 許可（ペナルティ付き）
-                            position_confidence *= 0.7
-                            reason = f'MACD Position BUY (Line > Signal, EMA neutral {ema_diff_pct:.2f}%)'
-                            logger.info(f"   ⚠️ EMA neutral ({ema_diff_pct:.2f}% < {EMA_NEUTRAL_THRESHOLD}%) - BUY allowed with penalty")
-                            try:
-                                with open('bot_execution_log.txt', 'a') as f:
-                                    f.write(f"POSITION_BUY_NEUTRAL: EMA diff {ema_diff_pct:.2f}% < threshold, allowed with penalty\n")
-                            except:
-                                pass
-                    else:
-                        position_confidence *= 1.3
-                        reason = 'MACD Position BUY (Line > Signal + Uptrend)'
+                    reason = f'MACD Position BUY (Line > Signal, EMA: {ema_trend} {ema_diff_pct:.2f}%)'
+                    logger.info(f"   ✅ Position-based BUY (MACD above signal, EMA info: {ema_trend} {ema_diff_pct:.2f}%)")
 
                     # タイミングフィルター（ポジションベースにも適用）
                     if not skip_price_filter:
@@ -185,29 +161,8 @@ class OptimizedTradingLogic:
                     return True, 'BUY', reason, position_confidence, stop_loss, take_profit
 
                 elif macd_position == 'below':
-                    if ema_trend != 'down':
-                        if ema_diff_pct >= EMA_NEUTRAL_THRESHOLD:
-                            # 強い上昇トレンド中のSELLを完全ブロック
-                            logger.info(f"   🚫 Position-based SELL BLOCKED (counter-trend: EMA={ema_trend} {ema_diff_pct:.2f}%, MACD below)")
-                            try:
-                                with open('bot_execution_log.txt', 'a') as f:
-                                    f.write(f"POSITION_SELL_BLOCKED: Counter-trend (EMA={ema_trend} {ema_diff_pct:.2f}%, MACD=below)\n")
-                            except:
-                                pass
-                            return False, None, "Position SELL blocked (counter-trend EMA)", 0.0, None, None
-                        else:
-                            # EMA差が小さい → 中立相場 → 許可（ペナルティ付き）
-                            position_confidence *= 0.7
-                            reason = f'MACD Position SELL (Line < Signal, EMA neutral {ema_diff_pct:.2f}%)'
-                            logger.info(f"   ⚠️ EMA neutral ({ema_diff_pct:.2f}% < {EMA_NEUTRAL_THRESHOLD}%) - SELL allowed with penalty")
-                            try:
-                                with open('bot_execution_log.txt', 'a') as f:
-                                    f.write(f"POSITION_SELL_NEUTRAL: EMA diff {ema_diff_pct:.2f}% < threshold, allowed with penalty\n")
-                            except:
-                                pass
-                    else:
-                        position_confidence *= 1.3
-                        reason = 'MACD Position SELL (Line < Signal + Downtrend)'
+                    reason = f'MACD Position SELL (Line < Signal, EMA: {ema_trend} {ema_diff_pct:.2f}%)'
+                    logger.info(f"   ✅ Position-based SELL (MACD below signal, EMA info: {ema_trend} {ema_diff_pct:.2f}%)")
 
                     # タイミングフィルター
                     if not skip_price_filter:
@@ -257,28 +212,16 @@ class OptimizedTradingLogic:
             # === クロスが実行される → pending をクリア ===
             self.pending_cross = None
 
-            # === 売買判定（MACDクロス + EMA confidence調整） ===
+            # === 売買判定（MACDクロスのみ - v3.11.0 EMA削除） ===
             if is_golden_cross:
-                if ema_trend == 'up':
-                    confidence *= 1.3
-                    reason = 'MACD Golden Cross + Uptrend'
-                else:
-                    confidence *= 0.5
-                    reason = 'MACD Golden Cross (counter-trend, reduced confidence)'
-
+                reason = f'MACD Golden Cross (EMA: {ema_trend} {ema_diff_pct:.2f}%)'
                 stop_loss = current_price * (1 - self.stop_loss_pct)
                 take_profit = current_price * (1 + self.take_profit_pct)
                 logger.info(f"🟢 BUY SIGNAL: {reason} (confidence={confidence:.2f})")
                 return True, 'BUY', reason, confidence, stop_loss, take_profit
 
             elif is_death_cross:
-                if ema_trend == 'down':
-                    confidence *= 1.3
-                    reason = 'MACD Death Cross + Downtrend'
-                else:
-                    confidence *= 0.5
-                    reason = 'MACD Death Cross (counter-trend, reduced confidence)'
-
+                reason = f'MACD Death Cross (EMA: {ema_trend} {ema_diff_pct:.2f}%)'
                 stop_loss = current_price * (1 + self.stop_loss_pct)
                 take_profit = current_price * (1 - self.take_profit_pct)
                 logger.info(f"🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
