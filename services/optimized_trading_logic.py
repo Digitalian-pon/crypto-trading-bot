@@ -1,12 +1,12 @@
 """
-MACD単体トレーディングロジック v3.11.0
-MACDクロス + ポジションベースエントリー + トレーリングストップ決済
+MACD単体トレーディングロジック v3.12.0
+MACDクロスのみエントリー + トレーリングストップ決済
 
 方針:
-- エントリー1: MACDクロスの瞬間（ゴールデンクロス→BUY、デッドクロス→SELL）→ 高confidence
-- エントリー2: MACDポジション（Line > Signal → BUY、Line < Signal → SELL）→ 中confidence
+- エントリー: MACDクロスの瞬間のみ（ゴールデンクロス→BUY、デッドクロス→SELL）
+- ポジションベースエントリー: 無効化（v3.12.0 - 低品質シグナルによる損失防止）
 - クロス保持: フィルターで拒否されてもクロス状態を保持（次回再試行）
-- EMA: 参考情報としてログに表示するのみ（取引判断には使用しない）← v3.11.0変更
+- EMA: 参考情報としてログに表示するのみ（取引判断には使用しない）
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
 - 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
 """
@@ -123,64 +123,10 @@ class OptimizedTradingLogic:
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
             logger.info(f"   EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%), Hist strength: {histogram_strength:.6f}")
 
-            # === クロスなし → ポジションベースエントリー ===
+            # === クロスなし → 待機（v3.12.0: ポジションベースエントリー無効化） ===
             if not is_golden_cross and not is_death_cross:
-                logger.info(f"   No MACD cross - checking position-based entry (state: {macd_position})")
-
-                # ポジションベースエントリー: MACDの位置に基づいてシグナル生成
-                # クロスほど強くないが、トレンド継続中の機会を逃さない
-                position_confidence = 0.8  # クロスより低い基本confidence
-
-                # ヒストグラムの強さでconfidence調整
-                if histogram_strength > 0.03:
-                    position_confidence = 1.5
-                elif histogram_strength > 0.01:
-                    position_confidence = 1.2
-                elif histogram_strength > 0.005:
-                    position_confidence = 1.0
-
-                # v3.11.0: EMA削除 - MACDポジションのみでシグナル判定（EMAは参考表示のみ）
-                if macd_position == 'above':
-                    reason = f'MACD Position BUY (Line > Signal, EMA: {ema_trend} {ema_diff_pct:.2f}%)'
-                    logger.info(f"   ✅ Position-based BUY (MACD above signal, EMA info: {ema_trend} {ema_diff_pct:.2f}%)")
-
-                    # タイミングフィルター（ポジションベースにも適用）
-                    if not skip_price_filter:
-                        if not self._check_trade_timing():
-                            logger.info(f"   ⏳ Position-based BUY blocked (trade interval too short)")
-                            return False, None, "Trade interval too short", 0.0, None, None
-                        if self.last_trade_price is not None:
-                            price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
-                            if price_change < 0.003:
-                                logger.info(f"   ⏳ Position-based BUY blocked (price change too small: {price_change*100:.2f}%)")
-                                return False, None, "Price change too small", 0.0, None, None
-
-                    stop_loss = current_price * (1 - self.stop_loss_pct)
-                    take_profit = current_price * (1 + self.take_profit_pct)
-                    logger.info(f"🟢 POSITION-BASED BUY: {reason} (confidence={position_confidence:.2f})")
-                    return True, 'BUY', reason, position_confidence, stop_loss, take_profit
-
-                elif macd_position == 'below':
-                    reason = f'MACD Position SELL (Line < Signal, EMA: {ema_trend} {ema_diff_pct:.2f}%)'
-                    logger.info(f"   ✅ Position-based SELL (MACD below signal, EMA info: {ema_trend} {ema_diff_pct:.2f}%)")
-
-                    # タイミングフィルター
-                    if not skip_price_filter:
-                        if not self._check_trade_timing():
-                            logger.info(f"   ⏳ Position-based SELL blocked (trade interval too short)")
-                            return False, None, "Trade interval too short", 0.0, None, None
-                        if self.last_trade_price is not None:
-                            price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
-                            if price_change < 0.003:
-                                logger.info(f"   ⏳ Position-based SELL blocked (price change too small: {price_change*100:.2f}%)")
-                                return False, None, "Price change too small", 0.0, None, None
-
-                    stop_loss = current_price * (1 + self.stop_loss_pct)
-                    take_profit = current_price * (1 - self.take_profit_pct)
-                    logger.info(f"🔴 POSITION-BASED SELL: {reason} (confidence={position_confidence:.2f})")
-                    return True, 'SELL', reason, position_confidence, stop_loss, take_profit
-
-                return False, None, "No signal", 0.0, None, None
+                logger.info(f"   No MACD cross - waiting for cross signal (position-based DISABLED v3.12.0)")
+                return False, None, "No MACD cross - waiting", 0.0, None, None
 
             # === シグナル強度計算（クロスベースエントリー用） ===
             if histogram_strength > 0.03:

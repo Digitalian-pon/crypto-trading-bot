@@ -5,7 +5,7 @@ Railway用統合アプリケーション - 最適化版
 - MACD Cross + EMAトレンドフォロー専用モード
 - 空売り（SELL）とロング（BUY）の両方に対応
 
-VERSION: 3.6.1-reversal-order (2026-02-18)
+VERSION: 3.12.0-cross-only (2026-03-09)
 Changes:
 🎯 **v3.6.1** - トレンド転換時の即座反対注文 + EMA非ブロック化
 
