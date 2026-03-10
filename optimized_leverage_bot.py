@@ -51,6 +51,9 @@ class OptimizedLeverageTradingBot:
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
 
+        # v3.12.1: 重複注文防止 - 最後の注文時刻を記録
+        self.last_order_time = None
+
         # MACDクロス検出用（決済判定）- v3.1.1: position-based → cross-based
         self.last_close_macd_position = None
 
@@ -899,7 +902,20 @@ class OptimizedLeverageTradingBot:
             self.trading_logic.record_trade(trade_type, current_price)
 
     def _place_order(self, trade_type, size, price, reason, stop_loss, take_profit):
-        """注文実行（SL/TP記録付き）"""
+        """注文実行（SL/TP記録付き・重複防止付き v3.12.1）"""
+        # v3.12.1: 時間ベースの重複注文防止（10秒以内の連続注文をブロック）
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if self.last_order_time is not None:
+            elapsed = (now - self.last_order_time).total_seconds()
+            if elapsed < 10:
+                logger.warning(f"⚠️ [DUPLICATE_GUARD] Order blocked - only {elapsed:.1f}s since last order (min 10s)")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"DUPLICATE_GUARD: {trade_type} blocked, {elapsed:.1f}s since last order\n")
+                except:
+                    pass
+                return False
         try:
             result = self.api.place_order(
                 symbol=self.symbol,
@@ -909,6 +925,8 @@ class OptimizedLeverageTradingBot:
             )
 
             if 'data' in result:
+                # v3.12.1: 注文成功時刻を記録（重複防止用）
+                self.last_order_time = now
                 logger.info(f"✅ {trade_type.upper()} order successful!")
                 logger.info(f"   Size: {size} DOGE, Price: ¥{price:.2f}")
                 logger.info(f"   Reason: {reason}")
