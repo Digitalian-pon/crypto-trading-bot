@@ -46,7 +46,7 @@ class OptimizedLeverageTradingBot:
         # 取引設定
         self.symbol = config.get('trading', 'default_symbol', fallback='DOGE_JPY')
         self.timeframe = config.get('trading', 'default_timeframe', fallback='1hour')
-        self.interval = 300  # チェック間隔（秒）- 5分（手数料負け防止のため延長）
+        self.interval = 60  # チェック間隔（秒）- 1分（リアルタイム性重視）
 
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}

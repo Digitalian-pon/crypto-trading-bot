@@ -36,7 +36,7 @@ class OptimizedTradingLogic:
         self.last_trade_time = None
         self.last_trade_price = None
         self.last_exit_price = None
-        self.min_trade_interval = 300  # 5分
+        self.min_trade_interval = 60  # 1分（チェック間隔に合わせる）
 
         # シンプルなTP/SL設定（固定%）- リスクリワード比 2:1
         self.take_profit_pct = 0.03   # 3%利確
