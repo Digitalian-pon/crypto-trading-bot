@@ -463,6 +463,7 @@ class OptimizedLeverageTradingBot:
 
         # === 2. MACDクロス確認決済 ===
         macd_close_pos = 'above' if macd_line > macd_signal else 'below'
+        logger.info(f"   🔍 MACD Close State: current={macd_close_pos}, last={self.last_close_macd_position}")
 
         # クロス検出（前回の状態と比較）
         is_close_death_cross = False
