@@ -84,11 +84,31 @@ class OptimizedTradingLogic:
             is_death_cross = False
             is_entry_startup = False
 
-            # ★ FIX: Bot再起動後の初回サイクル - 現在のMACDポジションで状態初期化
+            # ★ FIX v3.12.2: Bot再起動後の初回サイクル - 過去データからクロスを検出
             if self.last_macd_position is None:
-                self.last_macd_position = macd_position
                 is_entry_startup = True
-                logger.info(f"🔄 [STARTUP] MACD entry state initialized: {macd_position}")
+                # 過去のローソク足からMACDの前回状態を復元
+                if historical_df is not None and len(historical_df) >= 3 and 'macd_line' in historical_df.columns and 'macd_signal' in historical_df.columns:
+                    prev_row = historical_df.iloc[-2]
+                    prev_macd_line = prev_row.get('macd_line', 0)
+                    prev_macd_signal = prev_row.get('macd_signal', 0)
+                    prev_position = 'above' if prev_macd_line > prev_macd_signal else 'below'
+                    self.last_macd_position = prev_position
+                    logger.info(f"🔄 [STARTUP] MACD state restored from previous candle: {prev_position} (current: {macd_position})")
+                    # 前回と今回が異なればクロス発生
+                    if prev_position == 'below' and macd_position == 'above':
+                        is_golden_cross = True
+                        is_entry_startup = False
+                        logger.info(f"🟢 [STARTUP] GOLDEN CROSS detected from historical data!")
+                    elif prev_position == 'above' and macd_position == 'below':
+                        is_death_cross = True
+                        is_entry_startup = False
+                        logger.info(f"🔴 [STARTUP] DEATH CROSS detected from historical data!")
+                    else:
+                        logger.info(f"🔄 [STARTUP] No cross at startup (both {macd_position})")
+                else:
+                    self.last_macd_position = macd_position
+                    logger.info(f"🔄 [STARTUP] MACD entry state initialized: {macd_position} (no historical data)")
             else:
                 # 1. 新しいクロスを検出
                 if self.last_macd_position == 'below' and macd_position == 'above':

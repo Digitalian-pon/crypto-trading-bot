@@ -333,9 +333,9 @@ class OptimizedLeverageTradingBot:
             trailing_sl = stops.get('trailing_sl_ratio', -0.008)
             logger.info(f"   📈 Trailing Stop: Peak={peak_pl*100:.2f}%, SL={trailing_sl*100:.1f}%")
 
-            # 決済条件チェック
+            # 決済条件チェック（v3.12.2: dfも渡してstartup時のクロス検出に使用）
             should_close, reason, close_trade_type = self._should_close_position(
-                position, current_price, df.iloc[-1].to_dict(), pl_ratio, stop_loss, take_profit
+                position, current_price, df.iloc[-1].to_dict(), pl_ratio, stop_loss, take_profit, df
             )
 
             # デバッグログ追加
@@ -385,7 +385,7 @@ class OptimizedLeverageTradingBot:
 
         return any_closed, reversal_signal, tp_sl_closed, reversal_trade_type, loss_close
 
-    def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit):
+    def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit, df=None):
         """
         ポジション決済判定 - v3.6.0 トレーリングストップ + MACDクロス確認決済
 
@@ -434,7 +434,8 @@ class OptimizedLeverageTradingBot:
         logger.info(f"      MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}")
         logger.info(f"      EMA Trend: {ema_trend} (EMA20={ema_20:.3f}, EMA50={ema_50:.3f})")
 
-        # ログファイルに記録
+        # ログファイルに記録（v3.12.1: MACD状態遷移も追加）
+        macd_close_pos_preview = 'above' if macd_line > macd_signal else 'below'
         try:
             with open('bot_execution_log.txt', 'a') as f:
                 f.write(f"POSITION_CHECK: {side} {size} @ ¥{entry_price:.3f}\n")
@@ -442,6 +443,7 @@ class OptimizedLeverageTradingBot:
                 f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
                 f.write(f"TRAILING_STOP: SL={trailing_sl_ratio*100:.1f}%, Peak={peak_pl*100:.2f}%\n")
                 f.write(f"MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}\n")
+                f.write(f"MACD_CLOSE_STATE: current={macd_close_pos_preview}, last={self.last_close_macd_position}\n")
         except:
             pass
 
@@ -471,13 +473,30 @@ class OptimizedLeverageTradingBot:
         is_startup_check = False
 
         if self.last_close_macd_position is None:
-            # ★ FIX: Bot再起動後の初回サイクル - 現在のMACDポジションで状態初期化
-            self.last_close_macd_position = macd_close_pos
+            # ★ FIX v3.12.2: Bot再起動後 - 過去データからMACDの前回状態を復元
             is_startup_check = True
-            logger.info(f"   🔄 [STARTUP] MACD close state initialized: {macd_close_pos} (hist={macd_histogram:.6f})")
+            if df is not None and len(df) >= 3 and 'macd_line' in df.columns and 'macd_signal' in df.columns:
+                prev_row = df.iloc[-2]
+                prev_macd_line = float(prev_row.get('macd_line', 0))
+                prev_macd_signal = float(prev_row.get('macd_signal', 0))
+                prev_close_pos = 'above' if prev_macd_line > prev_macd_signal else 'below'
+                self.last_close_macd_position = prev_close_pos
+                logger.info(f"   🔄 [STARTUP] MACD close state restored from prev candle: {prev_close_pos} → current: {macd_close_pos}")
+                # クロス検出
+                if prev_close_pos == 'below' and macd_close_pos == 'above':
+                    is_close_golden_cross = True
+                    is_startup_check = False
+                    logger.info(f"   🟢 [STARTUP] GOLDEN CROSS detected from historical data!")
+                elif prev_close_pos == 'above' and macd_close_pos == 'below':
+                    is_close_death_cross = True
+                    is_startup_check = False
+                    logger.info(f"   🔴 [STARTUP] DEATH CROSS detected from historical data!")
+            else:
+                self.last_close_macd_position = macd_close_pos
+                logger.info(f"   🔄 [STARTUP] MACD close state initialized: {macd_close_pos} (no historical data)")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"MACD_STARTUP_INIT: side={side}, macd_pos={macd_close_pos}, hist={macd_histogram:.6f}\n")
+                    f.write(f"MACD_STARTUP_INIT: side={side}, macd_pos={macd_close_pos}, last={self.last_close_macd_position}, hist={macd_histogram:.6f}\n")
             except:
                 pass
         else:
