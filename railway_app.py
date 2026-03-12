@@ -41,7 +41,7 @@ import glob
 # バージョン情報
 VERSION = "3.12.1-cross-only"
 BUILD_DATE = "2026-03-11"
-COMMIT_HASH = "duplicate-guard-fix-redeploy"
+COMMIT_HASH = "emergency-restart-20260311"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
