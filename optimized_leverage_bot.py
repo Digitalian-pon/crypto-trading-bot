@@ -434,16 +434,14 @@ class OptimizedLeverageTradingBot:
         logger.info(f"      MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}")
         logger.info(f"      EMA Trend: {ema_trend} (EMA20={ema_20:.3f}, EMA50={ema_50:.3f})")
 
-        # ログファイルに記録（v3.12.1: MACD状態遷移も追加）
-        macd_close_pos_preview = 'above' if macd_line > macd_signal else 'below'
+        # ログファイルに記録
         try:
             with open('bot_execution_log.txt', 'a') as f:
                 f.write(f"POSITION_CHECK: {side} {size} @ ¥{entry_price:.3f}\n")
-                f.write(f"CURRENT_PRICE: ¥{current_price:.3f}\n")
-                f.write(f"P/L_RATIO: {pl_ratio*100:.2f}%\n")
+                f.write(f"CURRENT_PRICE: ¥{current_price:.3f}, P/L: {pl_ratio*100:.2f}%\n")
                 f.write(f"TRAILING_STOP: SL={trailing_sl_ratio*100:.1f}%, Peak={peak_pl*100:.2f}%\n")
-                f.write(f"MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}\n")
-                f.write(f"MACD_CLOSE_STATE: current={macd_close_pos_preview}, last={self.last_close_macd_position}\n")
+                f.write(f"MACD_LIVE: Line={macd_line:.6f}, Signal={macd_signal:.6f}\n")
+                f.write(f"MACD_CLOSE_STATE: last={self.last_close_macd_position}\n")
         except:
             pass
 
@@ -463,125 +461,110 @@ class OptimizedLeverageTradingBot:
                     return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bullish", 'BUY'
                 return True, f"Stop Loss: {pl_ratio*100:.2f}%", None
 
-        # === 2. MACDクロス確認決済 ===
-        macd_close_pos = 'above' if macd_line > macd_signal else 'below'
-        logger.info(f"   🔍 MACD Close State: current={macd_close_pos}, last={self.last_close_macd_position}")
-
-        # クロス検出（前回の状態と比較）
+        # === 2. MACDクロス確認決済（v3.13.0: 確定済みローソク足ベース） ===
+        # ライブMACDは不安定なため、確定済みローソク足(iloc[-2])のMACDでクロス検出
         is_close_death_cross = False
         is_close_golden_cross = False
-        is_startup_check = False
+        confirmed_close_histogram = abs(macd_histogram)  # fallback
 
-        if self.last_close_macd_position is None:
-            # ★ FIX v3.12.2: Bot再起動後 - 過去データからMACDの前回状態を復元
-            is_startup_check = True
-            if df is not None and len(df) >= 3 and 'macd_line' in df.columns and 'macd_signal' in df.columns:
-                prev_row = df.iloc[-2]
-                prev_macd_line = float(prev_row.get('macd_line', 0))
-                prev_macd_signal = float(prev_row.get('macd_signal', 0))
-                prev_close_pos = 'above' if prev_macd_line > prev_macd_signal else 'below'
-                self.last_close_macd_position = prev_close_pos
-                logger.info(f"   🔄 [STARTUP] MACD close state restored from prev candle: {prev_close_pos} → current: {macd_close_pos}")
-                # クロス検出
-                if prev_close_pos == 'below' and macd_close_pos == 'above':
-                    is_close_golden_cross = True
-                    is_startup_check = False
-                    logger.info(f"   🟢 [STARTUP] GOLDEN CROSS detected from historical data!")
-                elif prev_close_pos == 'above' and macd_close_pos == 'below':
-                    is_close_death_cross = True
-                    is_startup_check = False
-                    logger.info(f"   🔴 [STARTUP] DEATH CROSS detected from historical data!")
-            else:
-                self.last_close_macd_position = macd_close_pos
-                logger.info(f"   🔄 [STARTUP] MACD close state initialized: {macd_close_pos} (no historical data)")
-            try:
-                with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"MACD_STARTUP_INIT: side={side}, macd_pos={macd_close_pos}, last={self.last_close_macd_position}, hist={macd_histogram:.6f}\n")
-            except:
-                pass
-        else:
-            if self.last_close_macd_position == 'above' and macd_close_pos == 'below':
+        if df is not None and len(df) >= 4 and 'macd_line' in df.columns:
+            confirmed = df.iloc[-2]
+            confirmed_ml = float(confirmed.get('macd_line', 0))
+            confirmed_ms = float(confirmed.get('macd_signal', 0))
+            confirmed_close_pos = 'above' if confirmed_ml > confirmed_ms else 'below'
+            confirmed_close_histogram = abs(confirmed_ml - confirmed_ms)
+
+            logger.info(f"   🔍 [v3.13.0] Confirmed MACD: {confirmed_close_pos} (Line={confirmed_ml:.6f}, Signal={confirmed_ms:.6f})")
+            logger.info(f"   🔍 Last close state: {self.last_close_macd_position}")
+
+            if self.last_close_macd_position is None:
+                # 初回: 前々回の確定ローソク足から状態を復元
+                prev = df.iloc[-3]
+                prev_ml = float(prev.get('macd_line', 0))
+                prev_ms = float(prev.get('macd_signal', 0))
+                self.last_close_macd_position = 'above' if prev_ml > prev_ms else 'below'
+                logger.info(f"   🔄 [STARTUP] Close state restored: {self.last_close_macd_position} → {confirmed_close_pos}")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"MACD_STARTUP_INIT: side={side}, confirmed={confirmed_close_pos}, prev={self.last_close_macd_position}\n")
+                except:
+                    pass
+
+            # クロス検出（確定済みローソク足ベース）
+            if self.last_close_macd_position == 'above' and confirmed_close_pos == 'below':
                 is_close_death_cross = True
-                logger.info(f"   🔴 MACD DEATH CROSS detected")
-            elif self.last_close_macd_position == 'below' and macd_close_pos == 'above':
+                logger.info(f"   🔴 CONFIRMED Death Cross (from confirmed candle)")
+            elif self.last_close_macd_position == 'below' and confirmed_close_pos == 'above':
                 is_close_golden_cross = True
-                logger.info(f"   🟢 MACD GOLDEN CROSS detected")
+                logger.info(f"   🟢 CONFIRMED Golden Cross (from confirmed candle)")
 
-        # 状態を更新
-        self.last_close_macd_position = macd_close_pos
-
-        # ★ FIX: 起動時の特別チェック - MACDがすでにポジションと逆方向なら即決済
-        # v3.10.0: 案A - 損失中のポジションはリバーサルなし（クローズのみ）
-        if is_startup_check:
-            if side == 'BUY' and macd_close_pos == 'below' and abs(macd_histogram) > 0.003:
-                logger.info(f"   ⚠️ [STARTUP] BUY pos + bearish MACD → immediate close")
-                if pl_ratio >= 0:
-                    try:
-                        with open('bot_execution_log.txt', 'a') as f:
-                            f.write(f"STARTUP_CLOSE: BUY+bearish MACD (hist={macd_histogram:.4f}) → Reversal SELL (profitable)\n")
-                    except:
-                        pass
-                    return True, f"Startup Check: MACD Bearish (hist={macd_histogram:.4f}) → Reversal SELL", 'SELL'
+            # ★ v3.13.0: ヒストグラムが強い場合のみ状態を更新
+            # 弱いヒストグラムでクロスを「消費」すると、後でヒストグラムが強くなっても
+            # クロスが再検出できなくなるバグを防止
+            if is_close_death_cross or is_close_golden_cross:
+                if confirmed_close_histogram > 0.003:
+                    # ヒストグラム十分 → 状態を更新（クロスを消費）
+                    self.last_close_macd_position = confirmed_close_pos
                 else:
-                    try:
-                        with open('bot_execution_log.txt', 'a') as f:
-                            f.write(f"STARTUP_CLOSE: BUY+bearish MACD (hist={macd_histogram:.4f}) - Loss close, no reversal (P/L={pl_ratio*100:.2f}%)\n")
-                    except:
-                        pass
-                    logger.info(f"   ⛔ [STARTUP] Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
-                    return True, f"Startup Check: MACD Bearish (hist={macd_histogram:.4f}) - Loss Close", None
-            elif side == 'SELL' and macd_close_pos == 'above' and abs(macd_histogram) > 0.003:
-                logger.info(f"   ⚠️ [STARTUP] SELL pos + bullish MACD → immediate close")
-                if pl_ratio >= 0:
-                    try:
-                        with open('bot_execution_log.txt', 'a') as f:
-                            f.write(f"STARTUP_CLOSE: SELL+bullish MACD (hist={macd_histogram:.4f}) → Reversal BUY (profitable)\n")
-                    except:
-                        pass
-                    return True, f"Startup Check: MACD Bullish (hist={macd_histogram:.4f}) → Reversal BUY", 'BUY'
-                else:
-                    try:
-                        with open('bot_execution_log.txt', 'a') as f:
-                            f.write(f"STARTUP_CLOSE: SELL+bullish MACD (hist={macd_histogram:.4f}) - Loss close, no reversal (P/L={pl_ratio*100:.2f}%)\n")
-                    except:
-                        pass
-                    logger.info(f"   ⛔ [STARTUP] Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
-                    return True, f"Startup Check: MACD Bullish (hist={macd_histogram:.4f}) - Loss Close", None
+                    # ヒストグラム不十分 → 状態を更新しない（次回再検出可能）
+                    logger.info(f"   ⏸️ Cross detected but histogram weak ({confirmed_close_histogram:.6f}) - NOT consuming cross")
             else:
-                logger.info(f"   ✅ [STARTUP] MACD direction consistent with position - holding")
-                return False, "Holding position (startup check passed)", None
+                self.last_close_macd_position = confirmed_close_pos
+        else:
+            # Fallback: dfがない場合
+            macd_close_pos = 'above' if macd_line > macd_signal else 'below'
+            confirmed_close_pos = macd_close_pos
+            if self.last_close_macd_position is None:
+                self.last_close_macd_position = macd_close_pos
+                logger.info(f"   🔄 [STARTUP] No df, initialized: {macd_close_pos}")
+            else:
+                if self.last_close_macd_position == 'above' and macd_close_pos == 'below':
+                    is_close_death_cross = True
+                elif self.last_close_macd_position == 'below' and macd_close_pos == 'above':
+                    is_close_golden_cross = True
+                self.last_close_macd_position = macd_close_pos
+
+        # ★ 起動時チェック: 確定済みMACDがポジションと逆方向なら決済検討
+        if self.last_close_macd_position is not None and not is_close_death_cross and not is_close_golden_cross:
+            # 起動直後で既にMACDがポジションと逆方向
+            if side == 'BUY' and confirmed_close_pos == 'below' and confirmed_close_histogram > 0.003:
+                logger.info(f"   ⚠️ BUY pos + confirmed bearish MACD → close")
+                if pl_ratio >= 0:
+                    return True, f"MACD Bearish [Confirmed] → Reversal SELL", 'SELL'
+                else:
+                    return True, f"MACD Bearish [Confirmed] - Loss Close", None
+            elif side == 'SELL' and confirmed_close_pos == 'above' and confirmed_close_histogram > 0.003:
+                logger.info(f"   ⚠️ SELL pos + confirmed bullish MACD → close")
+                if pl_ratio >= 0:
+                    return True, f"MACD Bullish [Confirmed] → Reversal BUY", 'BUY'
+                else:
+                    return True, f"MACD Bullish [Confirmed] - Loss Close", None
 
         # BUYポジション: MACDデッドクロス + ヒストグラム確認
-        # v3.10.0: 案A - 損失中のポジションはリバーサルなし（クローズのみ）
         if side == 'BUY' and is_close_death_cross:
-            if abs(macd_histogram) > 0.003:
-                logger.info(f"   🔴 Closing BUY - Death Cross CONFIRMED (hist={macd_histogram:.6f})")
+            if confirmed_close_histogram > 0.003:
+                logger.info(f"   🔴 Closing BUY - Death Cross CONFIRMED (hist={confirmed_close_histogram:.6f})")
                 if pl_ratio >= 0:
-                    # 利益中 → 即リバーサル許可
                     logger.info(f"   🔄 Profitable position - Will reverse to SELL")
                     return True, f"MACD Death Cross (Confirmed) → Reversal SELL", 'SELL'
                 else:
-                    # 損失中 → クローズのみ、リバーサル禁止
                     logger.info(f"   ⛔ Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
                     return True, f"MACD Death Cross (Confirmed) - Loss Close", None
             else:
-                logger.info(f"   ⏸️ Death Cross but histogram weak ({macd_histogram:.6f}) - HOLDING (trailing stop protects)")
+                logger.info(f"   ⏸️ Death Cross but histogram weak ({confirmed_close_histogram:.6f}) - HOLDING (will re-check)")
 
         # SELLポジション: MACDゴールデンクロス + ヒストグラム確認
-        # v3.10.0: 案A - 損失中のポジションはリバーサルなし（クローズのみ）
         if side == 'SELL' and is_close_golden_cross:
-            if abs(macd_histogram) > 0.003:
-                logger.info(f"   🟢 Closing SELL - Golden Cross CONFIRMED (hist={macd_histogram:.6f})")
+            if confirmed_close_histogram > 0.003:
+                logger.info(f"   🟢 Closing SELL - Golden Cross CONFIRMED (hist={confirmed_close_histogram:.6f})")
                 if pl_ratio >= 0:
-                    # 利益中 → 即リバーサル許可
                     logger.info(f"   🔄 Profitable position - Will reverse to BUY")
                     return True, f"MACD Golden Cross (Confirmed) → Reversal BUY", 'BUY'
                 else:
-                    # 損失中 → クローズのみ、リバーサル禁止
                     logger.info(f"   ⛔ Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
                     return True, f"MACD Golden Cross (Confirmed) - Loss Close", None
             else:
-                logger.info(f"   ⏸️ Golden Cross but histogram weak ({macd_histogram:.6f}) - HOLDING (trailing stop protects)")
+                logger.info(f"   ⏸️ Golden Cross but histogram weak ({confirmed_close_histogram:.6f}) - HOLDING (will re-check)")
 
         # 保持継続
         logger.info(f"   ✅ Holding position (P/L: {pl_ratio*100:.2f}%, SL: {trailing_sl_ratio*100:.1f}%, Peak: {peak_pl*100:.2f}%)")
@@ -922,20 +905,35 @@ class OptimizedLeverageTradingBot:
             self.trading_logic.record_trade(trade_type, current_price)
 
     def _place_order(self, trade_type, size, price, reason, stop_loss, take_profit):
-        """注文実行（SL/TP記録付き・重複防止付き v3.12.1）"""
-        # v3.12.1: 時間ベースの重複注文防止（10秒以内の連続注文をブロック）
+        """注文実行（SL/TP記録付き・重複防止付き v3.13.0）"""
+        # v3.13.0: 時間ベースの重複注文防止（30秒以内の連続注文をブロック）
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         if self.last_order_time is not None:
             elapsed = (now - self.last_order_time).total_seconds()
-            if elapsed < 10:
-                logger.warning(f"⚠️ [DUPLICATE_GUARD] Order blocked - only {elapsed:.1f}s since last order (min 10s)")
+            if elapsed < 30:
+                logger.warning(f"⚠️ [DUPLICATE_GUARD] Order blocked - only {elapsed:.1f}s since last order (min 30s)")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
                         f.write(f"DUPLICATE_GUARD: {trade_type} blocked, {elapsed:.1f}s since last order\n")
                 except:
                     pass
                 return False
+
+        # v3.13.0: 注文直前のポジション存在チェック（最終安全弁）
+        try:
+            pre_check_positions = self.api.get_positions(symbol=self.symbol)
+            if pre_check_positions and len(pre_check_positions) > 0:
+                logger.warning(f"⚠️ [DUPLICATE_GUARD] Position exists right before order - blocking {trade_type}")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"DUPLICATE_GUARD_PRECHECK: {trade_type} blocked, {len(pre_check_positions)} position(s) exist\n")
+                except:
+                    pass
+                return False
+        except Exception as e:
+            logger.warning(f"⚠️ Pre-order position check failed: {e} - proceeding with order")
+
         try:
             result = self.api.place_order(
                 symbol=self.symbol,
@@ -994,9 +992,7 @@ class OptimizedLeverageTradingBot:
                         logger.error(f"❌ Failed to write position log: {e}")
                         # エラーでも継続
 
-                # エントリー成功時の記録（is_exit=False）
-                self.trading_logic.record_trade(trade_type, price, result=None, is_exit=False)
-
+                # v3.13.0: record_tradeは呼び出し元(_check_for_new_trade等)で実行するため、ここでは不要
                 return True
             else:
                 logger.error(f"❌ Order failed: {result}")
