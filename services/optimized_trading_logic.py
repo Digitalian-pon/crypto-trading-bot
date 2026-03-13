@@ -1,22 +1,25 @@
 """
-MACD単体トレーディングロジック v3.13.0
-確定済みローソク足のMACDクロスのみエントリー + トレーリングストップ決済
+MACD単体トレーディングロジック v3.14.0
+確定済みローソク足のMACDクロス + ポジションベースフォールバック
 
 方針:
-- エントリー: 確定済みローソク足のMACDクロスのみ（ファントムクロス防止）
+- エントリー優先: 確定済みローソク足のMACDクロス（ファントムクロス防止）
   - iloc[-2](確定済み) vs iloc[-3](前回確定) でクロス検出
   - iloc[-1](ライブ価格上書き)のMACDは使用しない（不安定なため）
-- ポジションベースエントリー: 無効化（v3.12.0 - 低品質シグナルによる損失防止）
+- フォールバック: クロスなし + ポジションなし + ヒストグラム十分 → ポジションベースエントリー
+  - クロスを逃した場合でもトレンド方向にエントリー可能
+  - ヒストグラム閾値で品質担保（弱いシグナルは除外）
 - クロス保持: フィルターで拒否されてもクロス状態を保持（次回再試行）
 - EMA: 参考情報としてログに表示するのみ（取引判断には使用しない）
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
 - 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
 
-v3.13.0 変更点:
-- ファントムMACDクロス問題の修正
-  - 15分足の最終ローソク足を60秒ごとに現在価格で上書き→MACD再計算
-  - 同一ローソク足内でクロスが複数回発生→往復ビンタ損失
-  - 解決: 確定済みローソク足(iloc[-2])のMACDのみでクロス判定
+v3.14.0 変更点:
+- ポジションベースエントリーを安全に復活
+  - クロスなし + ポジションなし時のみ発動（ポジション保有中は発動しない）
+  - 確定済みローソク足のヒストグラム > 0.01 で品質担保
+  - v3.12.0で無効化していたが、10時間以上シグナルなしの問題が発生
+  - クロス優先: クロスがあればクロスを使用、なければフォールバック
 """
 
 import logging
@@ -28,17 +31,18 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.13.0
+    MACD主体トレーディングロジック v3.14.0
 
     設計思想:
-    - エントリー: 確定済みローソク足のMACDクロスのみ
+    - エントリー: 確定済みローソク足のMACDクロス（優先）
+    - フォールバック: クロスなし + ポジションなし → ポジションベースエントリー
     - クロス保持: フィルター拒否時もクロスを消滅させない
     - EMAは参考情報のみ（取引判断には使用しない）
     - 決済: トレーリングストップ + MACDクロス確認 → 反対注文
     """
 
     def __init__(self, config=None):
-        """初期化 v3.13.0"""
+        """初期化 v3.14.0"""
         self.config = config or {}
         self.last_trade_time = None
         self.last_trade_price = None
@@ -57,16 +61,20 @@ class OptimizedTradingLogic:
         self.last_macd_position = None  # 'above' or 'below'
         self.pending_cross = None       # フィルター拒否されたクロスを保持
 
+        # v3.14.0: ポジションベースエントリー用の待機カウンター
+        self.no_position_cycles = 0  # ポジションなしで待機したサイクル数
+
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - v3.13.0 確定済みローソク足MACDクロスベースエントリー
+        取引判定 - v3.14.0 確定済みMACDクロス + ポジションベースフォールバック
 
         ルール:
-        1. 確定済みローソク足(iloc[-2])のMACDでクロス検出
-        2. iloc[-1]のライブMACDは参考表示のみ（ファントムクロス防止）
-        3. クロスなし → 取引なし
-        4. フィルターで拒否 → クロスを保持し次回再試行
-        5. EMAトレンド: 参考情報のみ
+        1. 確定済みローソク足(iloc[-2])のMACDでクロス検出（優先）
+        2. クロスなし + ポジションなし → ポジションベースエントリー（フォールバック）
+           - 確定済みヒストグラム > 0.01 で品質担保
+           - 3サイクル以上ポジションなしで待機した場合のみ
+        3. フィルターで拒否 → クロスを保持し次回再試行
+        4. EMAトレンド: 参考情報のみ
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -80,13 +88,14 @@ class OptimizedTradingLogic:
             ema_20 = market_data.get('ema_20', current_price)
             ema_50 = market_data.get('ema_50', current_price)
 
-            logger.info(f"📊 [MACD v3.13.0 Confirmed-Candle Cross] Price=¥{current_price:.3f}")
-            logger.info(f"   Live MACD (reference only): Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}")
+            logger.info(f"📊 [MACD v3.14.0 Cross+Fallback] Price=¥{current_price:.3f}")
+            logger.info(f"   Live MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}")
 
-            # === v3.13.0: 確定済みローソク足でMACDクロス判定 ===
+            # === v3.14.0: 確定済みローソク足でMACDクロス判定 ===
             is_golden_cross = False
             is_death_cross = False
             confirmed_histogram = abs(macd_histogram)  # fallback
+            confirmed_position = 'above' if macd_line > macd_signal else 'below'  # fallback
 
             if historical_df is not None and len(historical_df) >= 4 and 'macd_line' in historical_df.columns:
                 # 確定済みローソク足(iloc[-2])のMACD
@@ -148,57 +157,94 @@ class OptimizedTradingLogic:
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
             logger.info(f"   EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%), Confirmed hist: {confirmed_histogram:.6f}")
+            logger.info(f"   No-position cycles: {self.no_position_cycles}")
 
-            # === クロスなし → 待機 ===
-            if not is_golden_cross and not is_death_cross:
-                logger.info(f"   No MACD cross on confirmed candles - waiting")
-                return False, None, "No MACD cross - waiting", 0.0, None, None
+            # === クロスあり → クロスベースエントリー ===
+            if is_golden_cross or is_death_cross:
+                # クロス検出時はカウンターリセット
+                self.no_position_cycles = 0
 
-            # === シグナル強度計算（確定済みヒストグラム使用） ===
-            if confirmed_histogram > 0.03:
-                confidence = 2.5
-            elif confirmed_histogram > 0.01:
-                confidence = 2.0
-            elif confirmed_histogram > 0.005:
-                confidence = 1.5
-            else:
-                confidence = 1.0
+                # シグナル強度計算（確定済みヒストグラム使用）
+                if confirmed_histogram > 0.03:
+                    confidence = 2.5
+                elif confirmed_histogram > 0.01:
+                    confidence = 2.0
+                elif confirmed_histogram > 0.005:
+                    confidence = 1.5
+                else:
+                    confidence = 1.0
 
-            # === 取引タイミングフィルター ===
-            if not skip_price_filter:
-                if not self._check_trade_timing():
-                    cross_type = 'golden' if is_golden_cross else 'death'
-                    self.pending_cross = cross_type
-                    logger.info(f"   ⏳ Cross PENDING (trade interval too short)")
-                    return False, None, "Trade interval too short (cross pending)", 0.0, None, None
-
-                if self.last_trade_price is not None:
-                    price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
-                    if price_change < 0.003:
+                # 取引タイミングフィルター
+                if not skip_price_filter:
+                    if not self._check_trade_timing():
                         cross_type = 'golden' if is_golden_cross else 'death'
                         self.pending_cross = cross_type
-                        logger.info(f"   ⏳ Cross PENDING (price change too small: {price_change*100:.2f}%)")
-                        return False, None, "Price change too small (cross pending)", 0.0, None, None
+                        logger.info(f"   ⏳ Cross PENDING (trade interval too short)")
+                        return False, None, "Trade interval too short (cross pending)", 0.0, None, None
 
-            # === クロスが実行される → pending をクリア ===
-            self.pending_cross = None
+                    if self.last_trade_price is not None:
+                        price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
+                        if price_change < 0.003:
+                            cross_type = 'golden' if is_golden_cross else 'death'
+                            self.pending_cross = cross_type
+                            logger.info(f"   ⏳ Cross PENDING (price change too small: {price_change*100:.2f}%)")
+                            return False, None, "Price change too small (cross pending)", 0.0, None, None
 
-            # === 売買判定 ===
-            if is_golden_cross:
-                reason = f'MACD Golden Cross [Confirmed] (EMA: {ema_trend} {ema_diff_pct:.2f}%)'
-                stop_loss = current_price * (1 - self.stop_loss_pct)
-                take_profit = current_price * (1 + self.take_profit_pct)
-                logger.info(f"   🟢 BUY SIGNAL: {reason} (confidence={confidence:.2f})")
-                return True, 'BUY', reason, confidence, stop_loss, take_profit
+                self.pending_cross = None
 
-            elif is_death_cross:
-                reason = f'MACD Death Cross [Confirmed] (EMA: {ema_trend} {ema_diff_pct:.2f}%)'
-                stop_loss = current_price * (1 + self.stop_loss_pct)
-                take_profit = current_price * (1 - self.take_profit_pct)
-                logger.info(f"   🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
-                return True, 'SELL', reason, confidence, stop_loss, take_profit
+                if is_golden_cross:
+                    reason = f'MACD Golden Cross [Confirmed] (EMA: {ema_trend} {ema_diff_pct:.2f}%)'
+                    stop_loss = current_price * (1 - self.stop_loss_pct)
+                    take_profit = current_price * (1 + self.take_profit_pct)
+                    logger.info(f"   🟢 BUY SIGNAL: {reason} (confidence={confidence:.2f})")
+                    return True, 'BUY', reason, confidence, stop_loss, take_profit
+                else:
+                    reason = f'MACD Death Cross [Confirmed] (EMA: {ema_trend} {ema_diff_pct:.2f}%)'
+                    stop_loss = current_price * (1 + self.stop_loss_pct)
+                    take_profit = current_price * (1 - self.take_profit_pct)
+                    logger.info(f"   🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
+                    return True, 'SELL', reason, confidence, stop_loss, take_profit
 
-            return False, None, "No signal", 0.0, None, None
+            # === v3.14.0: クロスなし → ポジションベースフォールバック ===
+            # ポジションなしで3サイクル以上待機 + ヒストグラム十分 → トレンド方向にエントリー
+            self.no_position_cycles += 1
+
+            if self.no_position_cycles >= 3 and confirmed_histogram > 0.01:
+                # タイミングフィルター
+                if not skip_price_filter:
+                    if not self._check_trade_timing():
+                        logger.info(f"   ⏳ Position-based entry blocked (trade interval)")
+                        return False, None, "Position-based: trade interval too short", 0.0, None, None
+
+                    if self.last_exit_price is not None:
+                        exit_distance = abs(current_price - self.last_exit_price) / self.last_exit_price
+                        if exit_distance < 0.003:
+                            logger.info(f"   ⏳ Position-based entry blocked (too close to exit: {exit_distance*100:.2f}%)")
+                            return False, None, "Position-based: too close to exit price", 0.0, None, None
+
+                # confidence は控えめ（クロスより低い）
+                if confirmed_histogram > 0.03:
+                    confidence = 2.0
+                elif confirmed_histogram > 0.02:
+                    confidence = 1.5
+                else:
+                    confidence = 1.2
+
+                if confirmed_position == 'above':
+                    reason = f'MACD Position-Based BUY [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles})'
+                    stop_loss = current_price * (1 - self.stop_loss_pct)
+                    take_profit = current_price * (1 + self.take_profit_pct)
+                    logger.info(f"   🟢 POSITION-BASED BUY: {reason} (confidence={confidence:.2f})")
+                    return True, 'BUY', reason, confidence, stop_loss, take_profit
+                else:
+                    reason = f'MACD Position-Based SELL [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles})'
+                    stop_loss = current_price * (1 + self.stop_loss_pct)
+                    take_profit = current_price * (1 - self.take_profit_pct)
+                    logger.info(f"   🔴 POSITION-BASED SELL: {reason} (confidence={confidence:.2f})")
+                    return True, 'SELL', reason, confidence, stop_loss, take_profit
+
+            logger.info(f"   No MACD cross - waiting (cycles={self.no_position_cycles}, need 3+ with hist>0.01)")
+            return False, None, "No MACD cross - waiting", 0.0, None, None
 
         except Exception as e:
             logger.error(f"Error in MACD trading logic: {e}", exc_info=True)
@@ -225,6 +271,7 @@ class OptimizedTradingLogic:
             logger.info(f"💰 Exit recorded: ¥{price:.2f}")
         else:
             self.last_trade_price = price
+            self.no_position_cycles = 0  # v3.14.0: エントリー時にリセット
             logger.info(f"📝 Entry recorded: ¥{price:.2f}")
 
         # ファイルログ

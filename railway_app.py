@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.13.0-confirmed-candle"
+VERSION = "3.14.0-position-fallback"
 BUILD_DATE = "2026-03-13"
-COMMIT_HASH = "phantom-cross-fix"
+COMMIT_HASH = "cross-plus-fallback"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
