@@ -6,10 +6,10 @@ MACD単体トレーディングロジック v3.15.0
 - エントリー優先: 確定済みローソク足のMACDクロス（ファントムクロス防止）
   - iloc[-2](確定済み) vs iloc[-3](前回確定) でクロス検出
   - iloc[-1](ライブ価格上書き)のMACDは使用しない（不安定なため）
-- EMAトレンドフィルター: EMA方向と一致するシグナルのみ許可（v3.15.0で復活）
-  - EMA20 > EMA50（上昇トレンド）→ BUYのみ許可、SELL禁止
-  - EMA20 < EMA50（下降トレンド）→ SELLのみ許可、BUY禁止
-  - 上昇トレンド中のMACDデッドクロスは「騙しクロス」として無視
+- EMAトレンドフィルター: 条件付き許可（v3.15.1で改善）
+  - ヒストグラム強い(>0.01) → EMA逆方向でも許可（confidence×0.7で慎重エントリー）
+  - ヒストグラム弱い(<=0.01) → EMA逆方向はブロック（騙しクロス）
+  - トレンド転換の初動を捉えつつ、弱いクロスは除外
 - フォールバック: クロスなし + ポジションなし + ヒストグラム十分 → トレンド方向にエントリー
   - EMAトレンドフィルターも適用（逆方向はブロック）
 - クロス保持: タイミングフィルターで拒否されたクロスは保持（次回再試行）
@@ -17,12 +17,11 @@ MACD単体トレーディングロジック v3.15.0
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
 - 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
 
-v3.15.0 変更点:
-- EMAトレンドフィルター復活（v3.11.0で削除→v3.15.0で復活）
-  - 上昇トレンド中のSELL（騙しデッドクロス）を完全ブロック
-  - 下降トレンド中のBUY（騙しゴールデンクロス）を完全ブロック
-  - クロスベース・ポジションベース両方に適用
-  - 根拠: v3.14.0で上昇トレンド中にSELL連発→連続損失が発生
+v3.15.1 変更点:
+- EMAトレンドフィルターを条件付き許可に改善（v3.15.0の完全ブロックは保守的すぎた）
+  - ヒストグラム強い(>0.01): EMA逆方向でも許可（confidence×0.7）→ トレンド転換初動を捉える
+  - ヒストグラム弱い(<=0.01): EMA逆方向はブロック → 騙しクロスを除外
+  - 根拠: v3.15.0でEMA遅行により反発局面でBUYできず機会損失
 """
 
 import logging
@@ -167,17 +166,26 @@ class OptimizedTradingLogic:
                 # クロス検出時はカウンターリセット
                 self.no_position_cycles = 0
 
-                # === v3.15.0: EMAトレンドフィルター（逆方向クロスをブロック） ===
-                # 上昇トレンド(EMA20>EMA50)でのSELL禁止、下降トレンドでのBUY禁止
+                # === v3.15.1: EMAトレンドフィルター（条件付き許可） ===
+                # ヒストグラムが強い(>0.01) → トレンド転換の初動として許可（confidence下げ）
+                # ヒストグラムが弱い(<0.01) → 騙しクロスとしてブロック
+                ema_counter_trend = False
                 if is_golden_cross and ema_trend == 'down':
-                    logger.info(f"   🚫 Golden Cross BLOCKED by EMA downtrend ({ema_diff_pct:.2f}%)")
-                    # 逆方向クロスはpendingにしない（騙しクロスの可能性が高い）
-                    self.pending_cross = None
-                    return False, None, f"Golden Cross blocked - EMA downtrend ({ema_diff_pct:.2f}%)", 0.0, None, None
+                    ema_counter_trend = True
+                    if confirmed_histogram <= 0.01:
+                        logger.info(f"   🚫 Golden Cross BLOCKED - weak hist ({confirmed_histogram:.6f}) + EMA downtrend ({ema_diff_pct:.2f}%)")
+                        self.pending_cross = None
+                        return False, None, f"Golden Cross blocked - weak + EMA downtrend ({ema_diff_pct:.2f}%)", 0.0, None, None
+                    else:
+                        logger.info(f"   ⚠️ Golden Cross ALLOWED (strong hist={confirmed_histogram:.6f}) despite EMA downtrend ({ema_diff_pct:.2f}%)")
                 if is_death_cross and ema_trend == 'up':
-                    logger.info(f"   🚫 Death Cross BLOCKED by EMA uptrend ({ema_diff_pct:.2f}%)")
-                    self.pending_cross = None
-                    return False, None, f"Death Cross blocked - EMA uptrend ({ema_diff_pct:.2f}%)", 0.0, None, None
+                    ema_counter_trend = True
+                    if confirmed_histogram <= 0.01:
+                        logger.info(f"   🚫 Death Cross BLOCKED - weak hist ({confirmed_histogram:.6f}) + EMA uptrend ({ema_diff_pct:.2f}%)")
+                        self.pending_cross = None
+                        return False, None, f"Death Cross blocked - weak + EMA uptrend ({ema_diff_pct:.2f}%)", 0.0, None, None
+                    else:
+                        logger.info(f"   ⚠️ Death Cross ALLOWED (strong hist={confirmed_histogram:.6f}) despite EMA uptrend ({ema_diff_pct:.2f}%)")
 
                 # シグナル強度計算（確定済みヒストグラム使用）
                 if confirmed_histogram > 0.03:
@@ -188,6 +196,11 @@ class OptimizedTradingLogic:
                     confidence = 1.5
                 else:
                     confidence = 1.0
+
+                # v3.15.1: EMA逆方向の場合はconfidenceを30%下げる（慎重エントリー）
+                if ema_counter_trend:
+                    confidence *= 0.7
+                    logger.info(f"   ⚠️ Counter-trend: confidence reduced to {confidence:.2f} (×0.7)")
 
                 # 取引タイミングフィルター
                 if not skip_price_filter:
@@ -245,13 +258,26 @@ class OptimizedTradingLogic:
                 else:
                     confidence = 1.2
 
-                # v3.15.0: EMAトレンドフィルター（フォールバックにも適用）
+                # v3.15.1: EMAトレンドフィルター（フォールバック - 条件付き許可）
+                # ヒストグラムが強い(>0.01)場合はconfidenceを下げて許可
+                fallback_counter_trend = False
                 if confirmed_position == 'above' and ema_trend == 'down':
-                    logger.info(f"   🚫 Position-Based BUY BLOCKED by EMA downtrend ({ema_diff_pct:.2f}%)")
-                    return False, None, "Position BUY blocked - EMA downtrend", 0.0, None, None
+                    if confirmed_histogram <= 0.01:
+                        logger.info(f"   🚫 Position-Based BUY BLOCKED - weak hist + EMA downtrend ({ema_diff_pct:.2f}%)")
+                        return False, None, "Position BUY blocked - weak + EMA downtrend", 0.0, None, None
+                    fallback_counter_trend = True
+                    logger.info(f"   ⚠️ Position-Based BUY ALLOWED (strong hist) despite EMA downtrend ({ema_diff_pct:.2f}%)")
                 if confirmed_position == 'below' and ema_trend == 'up':
-                    logger.info(f"   🚫 Position-Based SELL BLOCKED by EMA uptrend ({ema_diff_pct:.2f}%)")
-                    return False, None, "Position SELL blocked - EMA uptrend", 0.0, None, None
+                    if confirmed_histogram <= 0.01:
+                        logger.info(f"   🚫 Position-Based SELL BLOCKED - weak hist + EMA uptrend ({ema_diff_pct:.2f}%)")
+                        return False, None, "Position SELL blocked - weak + EMA uptrend", 0.0, None, None
+                    fallback_counter_trend = True
+                    logger.info(f"   ⚠️ Position-Based SELL ALLOWED (strong hist) despite EMA uptrend ({ema_diff_pct:.2f}%)")
+
+                # v3.15.1: EMA逆方向の場合はconfidenceを30%下げる
+                if fallback_counter_trend:
+                    confidence *= 0.7
+                    logger.info(f"   ⚠️ Counter-trend fallback: confidence reduced to {confidence:.2f} (×0.7)")
 
                 if confirmed_position == 'above':
                     reason = f'MACD Position-Based BUY [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles}, EMA: {ema_trend})'
