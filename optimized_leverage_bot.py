@@ -153,7 +153,7 @@ class OptimizedLeverageTradingBot:
 
         # 標準出力にも詳細を表示
         if positions:
-            # v3.14.0: ポジション保有中はフォールバックカウンターをリセット
+            # v3.14.0+: ポジション保有中はフォールバックカウンターをリセット
             self.trading_logic.no_position_cycles = 0
             for pos in positions:
                 logger.info(f"  └─ Position {pos.get('positionId')}: {pos.get('side')} {pos.get('size')} @ ¥{pos.get('price')}")

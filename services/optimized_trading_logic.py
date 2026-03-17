@@ -1,25 +1,28 @@
 """
-MACD単体トレーディングロジック v3.14.0
-確定済みローソク足のMACDクロス + ポジションベースフォールバック
+MACD単体トレーディングロジック v3.15.0
+確定済みローソク足のMACDクロス + EMAトレンドフィルター + ポジションベースフォールバック
 
 方針:
 - エントリー優先: 確定済みローソク足のMACDクロス（ファントムクロス防止）
   - iloc[-2](確定済み) vs iloc[-3](前回確定) でクロス検出
   - iloc[-1](ライブ価格上書き)のMACDは使用しない（不安定なため）
-- フォールバック: クロスなし + ポジションなし + ヒストグラム十分 → ポジションベースエントリー
-  - クロスを逃した場合でもトレンド方向にエントリー可能
-  - ヒストグラム閾値で品質担保（弱いシグナルは除外）
-- クロス保持: フィルターで拒否されてもクロス状態を保持（次回再試行）
-- EMA: 参考情報としてログに表示するのみ（取引判断には使用しない）
+- EMAトレンドフィルター: EMA方向と一致するシグナルのみ許可（v3.15.0で復活）
+  - EMA20 > EMA50（上昇トレンド）→ BUYのみ許可、SELL禁止
+  - EMA20 < EMA50（下降トレンド）→ SELLのみ許可、BUY禁止
+  - 上昇トレンド中のMACDデッドクロスは「騙しクロス」として無視
+- フォールバック: クロスなし + ポジションなし + ヒストグラム十分 → トレンド方向にエントリー
+  - EMAトレンドフィルターも適用（逆方向はブロック）
+- クロス保持: タイミングフィルターで拒否されたクロスは保持（次回再試行）
+  - EMAフィルターで拒否されたクロスは保持しない（騙しクロスのため）
 - 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
 - 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
 
-v3.14.0 変更点:
-- ポジションベースエントリーを安全に復活
-  - クロスなし + ポジションなし時のみ発動（ポジション保有中は発動しない）
-  - 確定済みローソク足のヒストグラム > 0.01 で品質担保
-  - v3.12.0で無効化していたが、10時間以上シグナルなしの問題が発生
-  - クロス優先: クロスがあればクロスを使用、なければフォールバック
+v3.15.0 変更点:
+- EMAトレンドフィルター復活（v3.11.0で削除→v3.15.0で復活）
+  - 上昇トレンド中のSELL（騙しデッドクロス）を完全ブロック
+  - 下降トレンド中のBUY（騙しゴールデンクロス）を完全ブロック
+  - クロスベース・ポジションベース両方に適用
+  - 根拠: v3.14.0で上昇トレンド中にSELL連発→連続損失が発生
 """
 
 import logging
@@ -31,18 +34,18 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.14.0
+    MACD主体トレーディングロジック v3.15.0
 
     設計思想:
     - エントリー: 確定済みローソク足のMACDクロス（優先）
-    - フォールバック: クロスなし + ポジションなし → ポジションベースエントリー
-    - クロス保持: フィルター拒否時もクロスを消滅させない
-    - EMAは参考情報のみ（取引判断には使用しない）
+    - EMAトレンドフィルター: トレンド方向のシグナルのみ許可
+    - フォールバック: クロスなし + ポジションなし → ポジションベースエントリー（EMAフィルター付き）
+    - クロス保持: タイミングフィルター拒否時のみ保持（EMAブロック時は破棄）
     - 決済: トレーリングストップ + MACDクロス確認 → 反対注文
     """
 
     def __init__(self, config=None):
-        """初期化 v3.14.0"""
+        """初期化 v3.15.0"""
         self.config = config or {}
         self.last_trade_time = None
         self.last_trade_price = None
@@ -66,15 +69,15 @@ class OptimizedTradingLogic:
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - v3.14.0 確定済みMACDクロス + ポジションベースフォールバック
+        取引判定 - v3.15.0 確定済みMACDクロス + EMAトレンドフィルター + フォールバック
 
         ルール:
         1. 確定済みローソク足(iloc[-2])のMACDでクロス検出（優先）
-        2. クロスなし + ポジションなし → ポジションベースエントリー（フォールバック）
-           - 確定済みヒストグラム > 0.01 で品質担保
-           - 3サイクル以上ポジションなしで待機した場合のみ
-        3. フィルターで拒否 → クロスを保持し次回再試行
-        4. EMAトレンド: 参考情報のみ
+        2. EMAトレンドフィルター: トレンド逆方向のクロスはブロック
+           - 上昇トレンド(EMA20>EMA50) → SELL禁止
+           - 下降トレンド(EMA20<EMA50) → BUY禁止
+        3. クロスなし + ポジションなし → ポジションベースフォールバック（EMAフィルター付き）
+        4. タイミングフィルターで拒否 → クロスを保持し次回再試行
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -88,10 +91,10 @@ class OptimizedTradingLogic:
             ema_20 = market_data.get('ema_20', current_price)
             ema_50 = market_data.get('ema_50', current_price)
 
-            logger.info(f"📊 [MACD v3.14.0 Cross+Fallback] Price=¥{current_price:.3f}")
+            logger.info(f"📊 [MACD v3.15.0 Cross+EMA+Fallback] Price=¥{current_price:.3f}")
             logger.info(f"   Live MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}")
 
-            # === v3.14.0: 確定済みローソク足でMACDクロス判定 ===
+            # === v3.15.0: 確定済みローソク足でMACDクロス判定 ===
             is_golden_cross = False
             is_death_cross = False
             confirmed_histogram = abs(macd_histogram)  # fallback
@@ -153,7 +156,7 @@ class OptimizedTradingLogic:
                         is_death_cross = True
                     self.last_macd_position = macd_position
 
-            # === EMAトレンド（参考情報のみ） ===
+            # === EMAトレンドフィルター（v3.15.0: トレンド方向のみ取引許可） ===
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
             logger.info(f"   EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%), Confirmed hist: {confirmed_histogram:.6f}")
@@ -163,6 +166,18 @@ class OptimizedTradingLogic:
             if is_golden_cross or is_death_cross:
                 # クロス検出時はカウンターリセット
                 self.no_position_cycles = 0
+
+                # === v3.15.0: EMAトレンドフィルター（逆方向クロスをブロック） ===
+                # 上昇トレンド(EMA20>EMA50)でのSELL禁止、下降トレンドでのBUY禁止
+                if is_golden_cross and ema_trend == 'down':
+                    logger.info(f"   🚫 Golden Cross BLOCKED by EMA downtrend ({ema_diff_pct:.2f}%)")
+                    # 逆方向クロスはpendingにしない（騙しクロスの可能性が高い）
+                    self.pending_cross = None
+                    return False, None, f"Golden Cross blocked - EMA downtrend ({ema_diff_pct:.2f}%)", 0.0, None, None
+                if is_death_cross and ema_trend == 'up':
+                    logger.info(f"   🚫 Death Cross BLOCKED by EMA uptrend ({ema_diff_pct:.2f}%)")
+                    self.pending_cross = None
+                    return False, None, f"Death Cross blocked - EMA uptrend ({ema_diff_pct:.2f}%)", 0.0, None, None
 
                 # シグナル強度計算（確定済みヒストグラム使用）
                 if confirmed_histogram > 0.03:
@@ -230,14 +245,22 @@ class OptimizedTradingLogic:
                 else:
                     confidence = 1.2
 
+                # v3.15.0: EMAトレンドフィルター（フォールバックにも適用）
+                if confirmed_position == 'above' and ema_trend == 'down':
+                    logger.info(f"   🚫 Position-Based BUY BLOCKED by EMA downtrend ({ema_diff_pct:.2f}%)")
+                    return False, None, "Position BUY blocked - EMA downtrend", 0.0, None, None
+                if confirmed_position == 'below' and ema_trend == 'up':
+                    logger.info(f"   🚫 Position-Based SELL BLOCKED by EMA uptrend ({ema_diff_pct:.2f}%)")
+                    return False, None, "Position SELL blocked - EMA uptrend", 0.0, None, None
+
                 if confirmed_position == 'above':
-                    reason = f'MACD Position-Based BUY [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles})'
+                    reason = f'MACD Position-Based BUY [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles}, EMA: {ema_trend})'
                     stop_loss = current_price * (1 - self.stop_loss_pct)
                     take_profit = current_price * (1 + self.take_profit_pct)
                     logger.info(f"   🟢 POSITION-BASED BUY: {reason} (confidence={confidence:.2f})")
                     return True, 'BUY', reason, confidence, stop_loss, take_profit
                 else:
-                    reason = f'MACD Position-Based SELL [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles})'
+                    reason = f'MACD Position-Based SELL [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles}, EMA: {ema_trend})'
                     stop_loss = current_price * (1 + self.stop_loss_pct)
                     take_profit = current_price * (1 - self.take_profit_pct)
                     logger.info(f"   🔴 POSITION-BASED SELL: {reason} (confidence={confidence:.2f})")

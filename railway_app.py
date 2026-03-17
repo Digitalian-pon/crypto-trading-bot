@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.14.0-position-fallback"
-BUILD_DATE = "2026-03-13"
-COMMIT_HASH = "cross-plus-fallback"
+VERSION = "3.15.0-ema-trend-filter"
+BUILD_DATE = "2026-03-17"
+COMMIT_HASH = "ema-trend-filter-restored"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
