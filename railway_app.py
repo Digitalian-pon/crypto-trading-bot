@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.15.1-ema-conditional"
-BUILD_DATE = "2026-03-17"
-COMMIT_HASH = "ema-conditional-filter"
+VERSION = "3.15.2-ema-absolute-block"
+BUILD_DATE = "2026-03-18"
+COMMIT_HASH = "ema-absolute-block-final"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
