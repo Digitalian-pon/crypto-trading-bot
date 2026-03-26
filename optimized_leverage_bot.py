@@ -302,14 +302,14 @@ class OptimizedLeverageTradingBot:
             # === トレーリングストップ管理 (v3.4.0) ===
             if position_id not in self.active_positions_stops:
                 # 既存ポジション（再起動後など）の初期化
-                stop_loss = entry_price * (1 - 0.008) if side == 'BUY' else entry_price * (1 + 0.008)
+                stop_loss = entry_price * (1 - 0.012) if side == 'BUY' else entry_price * (1 + 0.012)
                 self.active_positions_stops[position_id] = {
                     'stop_loss': stop_loss,
                     'take_profit': None,
                     'peak_pl_ratio': max(0.0, pl_ratio),
-                    'trailing_sl_ratio': -0.008,
+                    'trailing_sl_ratio': -0.012,
                 }
-                logger.warning(f"   Initialized trailing stop for existing position: SL=-0.8%")
+                logger.warning(f"   Initialized trailing stop for existing position: SL=-1.2%")
 
             stops = self.active_positions_stops[position_id]
             peak_pl = stops.get('peak_pl_ratio', 0.0)
@@ -319,16 +319,16 @@ class OptimizedLeverageTradingBot:
                 stops['peak_pl_ratio'] = pl_ratio
                 peak_pl = pl_ratio
 
-            # トレーリングストップレベル更新（v3.6.0: 段階を細かく）
+            # トレーリングストップレベル更新（v3.17.0: SL拡大 + トレーリング発動遅延）
             if peak_pl >= 0.02:
                 stops['trailing_sl_ratio'] = 0.015  # +2%到達 → SL=+1.5%
             elif peak_pl >= 0.015:
                 stops['trailing_sl_ratio'] = 0.01   # +1.5%到達 → SL=+1%
             elif peak_pl >= 0.01:
                 stops['trailing_sl_ratio'] = 0.005  # +1%到達 → SL=+0.5%
-            elif peak_pl >= 0.003:
-                stops['trailing_sl_ratio'] = 0.0    # +0.3%到達 → SL=建値（損失ゼロ保証）
-            # else: -0.008のまま
+            elif peak_pl >= 0.005:
+                stops['trailing_sl_ratio'] = 0.0    # +0.5%到達 → SL=建値（損失ゼロ保証）
+            # else: -0.012のまま（v3.17.0: -0.008→-0.012に拡大）
 
             stop_loss = stops.get('stop_loss', entry_price * 0.985)
             take_profit = stops.get('take_profit')
@@ -756,7 +756,7 @@ class OptimizedLeverageTradingBot:
         # ポジションサイズ計算（残高の95%）
         max_jpy = available_jpy * 0.95
         max_doge_quantity = int(max_jpy / current_price)
-        trade_size = max(10, (max_doge_quantity // 10) * 10)  # 10DOGE単位
+        trade_size = max(10, max_doge_quantity)  # v3.17.0: 1DOGE単位で残高を最大活用
 
         # 動的SL/TP計算（ATRベース）
         last_row = df.iloc[-1].to_dict()
@@ -894,7 +894,7 @@ class OptimizedLeverageTradingBot:
         # ポジションサイズ計算（残高の95%）
         max_jpy = available_jpy * 0.95
         max_doge_quantity = int(max_jpy / current_price)
-        trade_size = max(10, (max_doge_quantity // 10) * 10)  # 10DOGE単位
+        trade_size = max(10, max_doge_quantity)  # v3.17.0: 1DOGE単位で残高を最大活用
 
         logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE")
         logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")

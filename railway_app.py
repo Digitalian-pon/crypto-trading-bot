@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.16.0-macd-priority"
-BUILD_DATE = "2026-03-20"
-COMMIT_HASH = "remove-ema-filter-macd-priority"
+VERSION = "3.17.0-optimize-params"
+BUILD_DATE = "2026-03-26"
+COMMIT_HASH = "increase-size-widen-sl-delay-trailing"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
