@@ -756,7 +756,7 @@ class OptimizedLeverageTradingBot:
         # ポジションサイズ計算（残高の95%）
         max_jpy = available_jpy * 0.95
         max_doge_quantity = int(max_jpy / current_price)
-        trade_size = max(10, max_doge_quantity)  # v3.17.0: 1DOGE単位で残高を最大活用
+        trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
         # 動的SL/TP計算（ATRベース）
         last_row = df.iloc[-1].to_dict()
@@ -894,7 +894,7 @@ class OptimizedLeverageTradingBot:
         # ポジションサイズ計算（残高の95%）
         max_jpy = available_jpy * 0.95
         max_doge_quantity = int(max_jpy / current_price)
-        trade_size = max(10, max_doge_quantity)  # v3.17.0: 1DOGE単位で残高を最大活用
+        trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
         logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE")
         logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")

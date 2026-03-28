@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.17.0-optimize-params"
-BUILD_DATE = "2026-03-26"
-COMMIT_HASH = "increase-size-widen-sl-delay-trailing"
+VERSION = "3.17.1-fix-order-size"
+BUILD_DATE = "2026-03-29"
+COMMIT_HASH = "fix-10doge-unit-order-size"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
