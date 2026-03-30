@@ -350,7 +350,33 @@ class OptimizedLeverageTradingBot:
 
             if should_close:
                 logger.info(f"🔄 Closing position: {reason}")
-                self._close_position(position, current_price, reason)
+                close_success = self._close_position(position, current_price, reason)
+
+                if not close_success:
+                    # API失敗 → ポジションが既にGMO側で決済済みか確認
+                    logger.warning(f"⚠️ Close API failed - verifying position status...")
+                    remaining = self.api.get_positions(symbol=self.symbol)
+                    pos_still_exists = any(
+                        str(p.get('positionId')) == str(position_id) for p in (remaining or [])
+                    )
+                    if pos_still_exists:
+                        # ポジションがまだ存在する → 決済失敗として扱う
+                        logger.error(f"❌ Position {position_id} still exists - close truly failed, skipping")
+                        try:
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"CLOSE_VERIFIED_FAILED: Position {position_id} still open\n")
+                        except:
+                            pass
+                        continue  # このポジションはスキップ、次のポジションへ
+                    else:
+                        # ポジションが消えている → GMO側で既に決済済み
+                        logger.info(f"✅ Position {position_id} already closed on exchange side")
+                        try:
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"CLOSE_ALREADY_DONE: Position {position_id} closed by exchange\n")
+                        except:
+                            pass
+
                 any_closed = True
 
                 # 決済理由を判定
@@ -640,7 +666,19 @@ class OptimizedLeverageTradingBot:
 
             # 【方法1失敗】エラーログ記録
             error_msg = result.get('messages', [{}])[0].get('message_string', 'Unknown error') if 'messages' in result else str(result)
-            logger.warning(f"⚠️  Method 1 failed: {error_msg}")
+            error_code = result.get('messages', [{}])[0].get('message_code', '') if 'messages' in result else ''
+            logger.warning(f"⚠️  Method 1 failed: {error_msg} ({error_code})")
+
+            # ERR-254 (Not found position) → GMO側で既に決済済み
+            if error_code == 'ERR-254':
+                logger.info(f"   Position already closed on exchange (ERR-254) - treating as success")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"CLOSE_ALREADY_CLOSED_BY_EXCHANGE: ERR-254 (Not found position)\n")
+                except:
+                    pass
+                return True  # 決済済みとして扱う
+
             logger.info(f"   Trying fallback method...")
 
             try:
