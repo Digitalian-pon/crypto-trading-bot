@@ -53,6 +53,7 @@ class OptimizedLeverageTradingBot:
 
         # v3.12.1: 重複注文防止 - 最後の注文時刻を記録
         self.last_order_time = None
+        self._order_placed_this_cycle = False  # v3.17.3: 同一サイクル内の重複注文防止
 
         # MACDクロス検出用（決済判定）- v3.1.1: position-based → cross-based
         self.last_close_macd_position = None
@@ -85,6 +86,7 @@ class OptimizedLeverageTradingBot:
 
     def _trading_cycle(self):
         """1回の取引サイクル"""
+        self._order_placed_this_cycle = False  # サイクル開始時にリセット
         cycle_time = datetime.now()
 
         # ボット稼働状況をログファイルに記録（ダッシュボードで表示可能）
@@ -945,7 +947,17 @@ class OptimizedLeverageTradingBot:
             self.trading_logic.record_trade(trade_type, current_price)
 
     def _place_order(self, trade_type, size, price, reason, stop_loss, take_profit):
-        """注文実行（SL/TP記録付き・重複防止付き v3.13.0）"""
+        """注文実行（SL/TP記録付き・重複防止付き v3.17.3）"""
+        # v3.17.3: 同一サイクル内の重複注文を完全ブロック（余力全額1注文に集中）
+        if self._order_placed_this_cycle:
+            logger.warning(f"⚠️ [CYCLE_GUARD] Order blocked - already placed an order this cycle")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CYCLE_GUARD: {trade_type} blocked, already ordered this cycle\n")
+            except:
+                pass
+            return False
+
         # v3.13.0: 時間ベースの重複注文防止（30秒以内の連続注文をブロック）
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
@@ -985,6 +997,7 @@ class OptimizedLeverageTradingBot:
             if 'data' in result:
                 # v3.12.1: 注文成功時刻を記録（重複防止用）
                 self.last_order_time = now
+                self._order_placed_this_cycle = True  # v3.17.3: サイクル内重複防止
                 logger.info(f"✅ {trade_type.upper()} order successful!")
                 logger.info(f"   Size: {size} DOGE, Price: ¥{price:.2f}")
                 logger.info(f"   Reason: {reason}")
