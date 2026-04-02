@@ -321,16 +321,16 @@ class OptimizedLeverageTradingBot:
                 stops['peak_pl_ratio'] = pl_ratio
                 peak_pl = pl_ratio
 
-            # トレーリングストップレベル更新（v3.17.0: SL拡大 + トレーリング発動遅延）
+            # トレーリングストップレベル更新（v3.17.4: 利益を伸ばすため+1%から発動）
             if peak_pl >= 0.02:
                 stops['trailing_sl_ratio'] = 0.015  # +2%到達 → SL=+1.5%
             elif peak_pl >= 0.015:
                 stops['trailing_sl_ratio'] = 0.01   # +1.5%到達 → SL=+1%
             elif peak_pl >= 0.01:
-                stops['trailing_sl_ratio'] = 0.005  # +1%到達 → SL=+0.5%
-            elif peak_pl >= 0.005:
-                stops['trailing_sl_ratio'] = 0.0    # +0.5%到達 → SL=建値（損失ゼロ保証）
-            # else: -0.012のまま（v3.17.0: -0.008→-0.012に拡大）
+                stops['trailing_sl_ratio'] = 0.005  # +1%到達 → SL=+0.5%（トレーリング開始）
+            # v3.17.4: +0.5%建値ロック廃止（手数料負けの原因）
+            # +1%未満はハードSL(-1.2%)のみで保護
+            # else: -0.012のまま
 
             stop_loss = stops.get('stop_loss', entry_price * 0.985)
             take_profit = stops.get('take_profit')
