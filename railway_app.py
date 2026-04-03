@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.17.4-widen-trailing-profit"
+VERSION = "3.17.5-range-filter"
 BUILD_DATE = "2026-04-03"
-COMMIT_HASH = "remove-breakeven-lock-let-profits-run"
+COMMIT_HASH = "weak-cross-filter-sl-cooldown"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

@@ -158,15 +158,20 @@ class OptimizedTradingLogic:
                 # クロス検出時はカウンターリセット
                 self.no_position_cycles = 0
 
+                # v3.17.5: 弱いクロスをフィルタリング（レンジ相場の偽シグナル防止）
+                if confirmed_histogram < 0.01:
+                    cross_type = 'Golden' if is_golden_cross else 'Death'
+                    logger.info(f"   ⚠️ Weak {cross_type} Cross IGNORED (hist={confirmed_histogram:.6f} < 0.01)")
+                    self.no_position_cycles += 1
+                    return False, None, f"Weak cross ignored (hist={confirmed_histogram:.6f})", 0.0, None, None
+
                 # シグナル強度計算（確定済みヒストグラム使用）
                 if confirmed_histogram > 0.03:
                     confidence = 2.5
                 elif confirmed_histogram > 0.01:
                     confidence = 2.0
-                elif confirmed_histogram > 0.005:
-                    confidence = 1.5
                 else:
-                    confidence = 1.0
+                    confidence = 1.5
 
                 # 取引タイミングフィルター
                 if not skip_price_filter:

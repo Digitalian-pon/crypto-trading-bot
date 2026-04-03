@@ -482,14 +482,11 @@ class OptimizedLeverageTradingBot:
                 logger.info(f"   ✅ TRAILING STOP HIT: P/L {pl_ratio*100:.2f}% <= lock {trailing_sl_ratio*100:.1f}%")
                 return True, f"Trailing Stop: {pl_ratio*100:.2f}% (locked at {trailing_sl_ratio*100:.1f}%)", None
             else:
-                # 通常の損切り（初期SL -0.8%）
+                # 通常の損切り（初期SL -1.2%）
                 logger.info(f"   🚨 STOP LOSS: {pl_ratio*100:.2f}% <= {trailing_sl_ratio*100:.1f}%")
-                # MACDの位置で反対注文を判断
-                if side == 'BUY' and macd_line < macd_signal:
-                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bearish", 'SELL'
-                elif side == 'SELL' and macd_line > macd_signal:
-                    return True, f"Stop Loss: {pl_ratio*100:.2f}% + MACD Bullish", 'BUY'
-                return True, f"Stop Loss: {pl_ratio*100:.2f}%", None
+                # v3.17.5: ハードSL後は反転注文を出さない（レンジ相場での往復ビンタ防止）
+                # 反転注文なしで "Loss Close" として処理 → 同サイクルの新規エントリーも禁止
+                return True, f"Loss Close: Hard SL {pl_ratio*100:.2f}%", None
 
         # === 2. MACDクロス確認決済（v3.13.0: 確定済みローソク足ベース） ===
         # ライブMACDは不安定なため、確定済みローソク足(iloc[-2])のMACDでクロス検出
