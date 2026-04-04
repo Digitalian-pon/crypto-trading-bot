@@ -52,11 +52,34 @@ class OptimizedLeverageTradingBot:
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
 
         # v3.12.1: 重複注文防止 - 最後の注文時刻を記録
-        self.last_order_time = None
+        self.last_order_time = self._load_last_order_time()  # v3.17.6: ファイルから復元（再起動対応）
         self._order_placed_this_cycle = False  # v3.17.3: 同一サイクル内の重複注文防止
 
         # MACDクロス検出用（決済判定）- v3.1.1: position-based → cross-based
         self.last_close_macd_position = None
+
+    # v3.17.6: ファイルベースの注文時刻管理（再起動しても消えない）
+    ORDER_TIME_FILE = 'last_order_time.txt'
+
+    def _load_last_order_time(self):
+        """ファイルから最後の注文時刻を読み込む"""
+        try:
+            with open(self.ORDER_TIME_FILE, 'r') as f:
+                ts = float(f.read().strip())
+                from datetime import datetime, timezone
+                t = datetime.fromtimestamp(ts, tz=timezone.utc)
+                logger.info(f"📂 Loaded last order time from file: {t.isoformat()}")
+                return t
+        except:
+            return None
+
+    def _save_last_order_time(self, t):
+        """最後の注文時刻をファイルに保存する"""
+        try:
+            with open(self.ORDER_TIME_FILE, 'w') as f:
+                f.write(str(t.timestamp()))
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to save order time: {e}")
 
     def run(self):
         """メインループ"""
@@ -944,7 +967,7 @@ class OptimizedLeverageTradingBot:
             self.trading_logic.record_trade(trade_type, current_price)
 
     def _place_order(self, trade_type, size, price, reason, stop_loss, take_profit):
-        """注文実行（SL/TP記録付き・重複防止付き v3.17.3）"""
+        """注文実行（SL/TP記録付き・重複防止付き v3.17.6）"""
         # v3.17.3: 同一サイクル内の重複注文を完全ブロック（余力全額1注文に集中）
         if self._order_placed_this_cycle:
             logger.warning(f"⚠️ [CYCLE_GUARD] Order blocked - already placed an order this cycle")
@@ -955,13 +978,13 @@ class OptimizedLeverageTradingBot:
                 pass
             return False
 
-        # v3.13.0: 時間ベースの重複注文防止（30秒以内の連続注文をブロック）
+        # v3.17.6: 時間ベースの重複注文防止（60秒以内の連続注文をブロック、ファイル永続化で再起動対応）
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         if self.last_order_time is not None:
             elapsed = (now - self.last_order_time).total_seconds()
-            if elapsed < 30:
-                logger.warning(f"⚠️ [DUPLICATE_GUARD] Order blocked - only {elapsed:.1f}s since last order (min 30s)")
+            if elapsed < 60:
+                logger.warning(f"⚠️ [DUPLICATE_GUARD] Order blocked - only {elapsed:.1f}s since last order (min 60s)")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
                         f.write(f"DUPLICATE_GUARD: {trade_type} blocked, {elapsed:.1f}s since last order\n")
@@ -983,6 +1006,21 @@ class OptimizedLeverageTradingBot:
         except Exception as e:
             logger.warning(f"⚠️ Pre-order position check failed: {e} - proceeding with order")
 
+        # v3.17.6: 注文直前に3秒待機してからもう一度ポジション確認（API反映待ち）
+        time.sleep(3)
+        try:
+            recheck_positions = self.api.get_positions(symbol=self.symbol)
+            if recheck_positions and len(recheck_positions) > 0:
+                logger.warning(f"⚠️ [DUPLICATE_GUARD] Position appeared after 3s wait - blocking {trade_type}")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"DUPLICATE_GUARD_RECHECK: {trade_type} blocked after 3s wait, {len(recheck_positions)} position(s)\n")
+                except:
+                    pass
+                return False
+        except:
+            pass
+
         try:
             result = self.api.place_order(
                 symbol=self.symbol,
@@ -992,8 +1030,9 @@ class OptimizedLeverageTradingBot:
             )
 
             if 'data' in result:
-                # v3.12.1: 注文成功時刻を記録（重複防止用）
+                # v3.17.6: 注文成功時刻を記録（メモリ + ファイル永続化）
                 self.last_order_time = now
+                self._save_last_order_time(now)
                 self._order_placed_this_cycle = True  # v3.17.3: サイクル内重複防止
                 logger.info(f"✅ {trade_type.upper()} order successful!")
                 logger.info(f"   Size: {size} DOGE, Price: ¥{price:.2f}")
