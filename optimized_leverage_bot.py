@@ -327,14 +327,14 @@ class OptimizedLeverageTradingBot:
             # === トレーリングストップ管理 (v3.4.0) ===
             if position_id not in self.active_positions_stops:
                 # 既存ポジション（再起動後など）の初期化
-                stop_loss = entry_price * (1 - 0.012) if side == 'BUY' else entry_price * (1 + 0.012)
+                stop_loss = entry_price * (1 - 0.008) if side == 'BUY' else entry_price * (1 + 0.008)
                 self.active_positions_stops[position_id] = {
                     'stop_loss': stop_loss,
                     'take_profit': None,
                     'peak_pl_ratio': max(0.0, pl_ratio),
-                    'trailing_sl_ratio': -0.012,
+                    'trailing_sl_ratio': -0.008,
                 }
-                logger.warning(f"   Initialized trailing stop for existing position: SL=-1.2%")
+                logger.warning(f"   Initialized trailing stop for existing position: SL=-0.8%")
 
             stops = self.active_positions_stops[position_id]
             peak_pl = stops.get('peak_pl_ratio', 0.0)
@@ -344,16 +344,19 @@ class OptimizedLeverageTradingBot:
                 stops['peak_pl_ratio'] = pl_ratio
                 peak_pl = pl_ratio
 
-            # トレーリングストップレベル更新（v3.17.4: 利益を伸ばすため+1%から発動）
-            if peak_pl >= 0.02:
+            # トレーリングストップレベル更新（v3.18.0: 利益を伸ばす + 早期ロック）
+            if peak_pl >= 0.03:
+                stops['trailing_sl_ratio'] = 0.02   # +3%到達 → SL=+2%
+            elif peak_pl >= 0.02:
                 stops['trailing_sl_ratio'] = 0.015  # +2%到達 → SL=+1.5%
             elif peak_pl >= 0.015:
                 stops['trailing_sl_ratio'] = 0.01   # +1.5%到達 → SL=+1%
             elif peak_pl >= 0.01:
                 stops['trailing_sl_ratio'] = 0.005  # +1%到達 → SL=+0.5%（トレーリング開始）
-            # v3.17.4: +0.5%建値ロック廃止（手数料負けの原因）
-            # +1%未満はハードSL(-1.2%)のみで保護
-            # else: -0.012のまま
+            elif peak_pl >= 0.005:
+                stops['trailing_sl_ratio'] = 0.0    # +0.5%到達 → SL=0%（建値ロック）
+            # +0.5%未満はハードSL(-0.8%)のみで保護
+            # else: -0.008のまま
 
             stop_loss = stops.get('stop_loss', entry_price * 0.985)
             take_profit = stops.get('take_profit')
@@ -443,12 +446,13 @@ class OptimizedLeverageTradingBot:
         ポジション決済判定 - v3.6.0 トレーリングストップ + MACDクロス確認決済
 
         ルール:
-        1. トレーリングストップ（含み益に応じてSLを自動引き上げ - v3.6.0で細分化）
-           - 含み益 0〜+0.5%: SL -1.5%（通常の損切り）
-           - 含み益 +0.5%到達: SL 0%（建値 = 損失ゼロ保証）
+        1. トレーリングストップ（v3.18.0: 利益を伸ばす + 早期建値ロック）
+           - 含み益 0〜+0.5%: SL -0.8%（ハードストップ）
+           - 含み益 +0.5%到達: SL 0%（建値ロック = 損失ゼロ保証）
            - 含み益 +1%到達: SL +0.5%
            - 含み益 +1.5%到達: SL +1%
-           - 含み益 +2%到達: SL +1.5%（利益を追従）
+           - 含み益 +2%到達: SL +1.5%
+           - 含み益 +3%到達: SL +2%（利益を追従）
            ※固定TPなし - トレーリングストップが自動的に利益を追従
         2. MACDクロス確認決済
            - クロス検出 + ヒストグラム強い(>0.003) → 決済
@@ -472,7 +476,7 @@ class OptimizedLeverageTradingBot:
         ema_50 = indicators.get('ema_50', current_price)
         ema_trend = 'up' if ema_20 > ema_50 else 'down'
 
-        # トレーリングストップ情報取得
+        # トレーリングストップ情報取得（v3.18.0: ハードSL -0.8%）
         trailing_sl_ratio = -0.008
         peak_pl = 0.0
         if position_id and position_id in self.active_positions_stops:
