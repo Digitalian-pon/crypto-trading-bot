@@ -41,6 +41,7 @@ class FinalDashboard:
         self.last_update = datetime.utcnow() + timedelta(hours=9)
         self.data_service = None
         self.trading_logic = SimpleTradingLogic()
+        self.optimizer_status = None  # v3.19.0: オプティマイザーステータス
         self.update_all_data()
 
     def update_all_data(self):
@@ -133,6 +134,10 @@ class FinalDashboard:
                 from config import load_config
                 _cfg = load_config()
                 _tf = _cfg.get('trading', 'default_timeframe', fallback='15min')
+
+                # v3.19.0: ボットのオプティマイザー結果をダッシュボード側にも反映
+                self._sync_optimizer_params()
+
                 market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval=_tf)
                 if market_data_response is not None and not market_data_response.empty:
                     # Convert DataFrame to dictionary for the last row (most recent data)
@@ -267,6 +272,94 @@ class FinalDashboard:
             logger.error(f"Error generating execution history HTML: {e}")
             return f'<div style="color: #ff6b6b; padding: 20px; text-align: center;">取引履歴表示エラー: {str(e)}</div>'
 
+    def _get_optimizer_html(self):
+        """v3.19.0: オプティマイザーステータスのHTML"""
+        if not self.optimizer_status:
+            return ''
+
+        s = self.optimizer_status
+        wr = f"{s['wins']}/{s['total']}" if s.get('wins') is not None else 'N/A'
+        pnl_color = '#00E676' if (s.get('pnl') or 0) >= 0 else '#FF1744'
+
+        return f'''
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.2);">
+            <div style="font-size: 0.85em; color: #BB86FC; margin-bottom: 6px;"><strong>🧠 自動最適化 (v3.19.0)</strong></div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.8em; color: #e0e0e0;">
+                <div>SL: {s.get("sl", "?")}%</div>
+                <div>建値ロック: +{s.get("be", "?")}%</div>
+                <div>MACD: {s.get("macd", "?")}</div>
+                <div>勝率: {wr}</div>
+                <div style="color: {pnl_color};">BT損益: ¥{s.get("pnl", 0):.1f}</div>
+                <div>取引数: {s.get("trades", "?")}</div>
+            </div>
+        </div>
+        '''
+
+    def _sync_optimizer_params(self):
+        """v3.19.0: ボットのオプティマイザー結果をダッシュボード側TradingLogicに反映"""
+        try:
+            if not os.path.exists('bot_execution_log.txt'):
+                return
+
+            # ログファイルの末尾からOPTIMIZATION行を探す
+            with open('bot_execution_log.txt', 'r') as f:
+                lines = f.readlines()
+
+            # 最新のOPTIMIZATION行を取得
+            opt_line = None
+            for line in reversed(lines):
+                if line.startswith('OPTIMIZATION:'):
+                    opt_line = line.strip()
+                    break
+
+            if opt_line is None:
+                return
+
+            # パース: OPTIMIZATION: SL=1.2% BE=0.7% MACD=slow PnL=¥11.9 Trades=6 WR=3/6
+            import re
+            sl_match = re.search(r'SL=([\d.]+)%', opt_line)
+            be_match = re.search(r'BE=([\d.]+)%', opt_line)
+            macd_match = re.search(r'MACD=(\w+)', opt_line)
+            pnl_match = re.search(r'PnL=¥([-\d.]+)', opt_line)
+            trades_match = re.search(r'Trades=(\d+)', opt_line)
+            wr_match = re.search(r'WR=(\d+)/(\d+)', opt_line)
+
+            params = {}
+            if sl_match:
+                params['stop_loss_pct'] = float(sl_match.group(1)) / 100
+            if be_match:
+                params['breakeven_threshold'] = float(be_match.group(1)) / 100
+
+            # entry/close hist filterはログに含まれないので推定値を使用
+            # SLが広い → ノイズに強い → hist filterも緩め
+            sl_pct = params.get('stop_loss_pct', 0.008)
+            if sl_pct >= 0.012:
+                params['entry_hist_filter'] = 0.001
+                params['close_hist_filter'] = 0.001
+            elif sl_pct >= 0.010:
+                params['entry_hist_filter'] = 0.002
+                params['close_hist_filter'] = 0.001
+            else:
+                params['entry_hist_filter'] = 0.003
+                params['close_hist_filter'] = 0.002
+
+            if params:
+                self.trading_logic.update_parameters(params)
+
+            # ステータス保存（HTML表示用）
+            self.optimizer_status = {
+                'sl': float(sl_match.group(1)) if sl_match else None,
+                'be': float(be_match.group(1)) if be_match else None,
+                'macd': macd_match.group(1) if macd_match else None,
+                'pnl': float(pnl_match.group(1)) if pnl_match else None,
+                'trades': int(trades_match.group(1)) if trades_match else None,
+                'wins': int(wr_match.group(1)) if wr_match else None,
+                'total': int(wr_match.group(2)) if wr_match else None,
+            }
+
+        except Exception as e:
+            logger.warning(f"⚠️ Optimizer sync error (non-fatal): {e}")
+
     def get_signal_html(self):
         """Generate trading signal HTML"""
         try:
@@ -358,6 +451,7 @@ class FinalDashboard:
                         <div style="color: #ffffff;"><strong>BB下限:</strong> ¥{format_indicator(bb_lower)}</div>
                         <div style="color: #ffffff;"><strong>現在価格:</strong> ¥{self.current_price:.3f}</div>
                     </div>
+                    {self._get_optimizer_html()}
                 </div>
             </div>
             '''
