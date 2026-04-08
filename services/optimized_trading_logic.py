@@ -61,6 +61,42 @@ class OptimizedTradingLogic:
         # v3.14.0: ポジションベースエントリー用の待機カウンター
         self.no_position_cycles = 0  # ポジションなしで待機したサイクル数
 
+        # v3.19.0: ローリング最適化による動的パラメータ
+        self.optimized_params = None  # RollingOptimizerからのパラメータ
+        self.entry_hist_filter = 0.01  # デフォルト（最適化で上書き可能）
+        self.close_hist_filter = 0.003  # デフォルト（最適化で上書き可能）
+
+    def update_parameters(self, params):
+        """
+        ローリング最適化から最適パラメータを適用（v3.19.0）
+
+        Args:
+            params: dict with keys like 'stop_loss_pct', 'entry_hist_filter', etc.
+        """
+        if params is None:
+            return
+
+        old_sl = self.stop_loss_pct
+        old_tp = self.take_profit_pct
+        old_entry_hist = self.entry_hist_filter
+        old_close_hist = self.close_hist_filter
+
+        self.stop_loss_pct = params.get('stop_loss_pct', self.stop_loss_pct)
+        self.entry_hist_filter = params.get('entry_hist_filter', self.entry_hist_filter)
+        self.close_hist_filter = params.get('close_hist_filter', self.close_hist_filter)
+        self.optimized_params = params
+
+        changes = []
+        if old_sl != self.stop_loss_pct:
+            changes.append(f"SL: {old_sl*100:.1f}%→{self.stop_loss_pct*100:.1f}%")
+        if old_entry_hist != self.entry_hist_filter:
+            changes.append(f"EntryHist: {old_entry_hist:.3f}→{self.entry_hist_filter:.3f}")
+        if old_close_hist != self.close_hist_filter:
+            changes.append(f"CloseHist: {old_close_hist:.3f}→{self.close_hist_filter:.3f}")
+
+        if changes:
+            logger.info(f"🧠 [OPTIMIZER] Parameters updated: {', '.join(changes)}")
+
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
         取引判定 - v3.16.0 確定済みMACDクロス + フォールバック（EMAフィルターなし）
@@ -158,10 +194,10 @@ class OptimizedTradingLogic:
                 # クロス検出時はカウンターリセット
                 self.no_position_cycles = 0
 
-                # v3.17.5: 弱いクロスをフィルタリング（レンジ相場の偽シグナル防止）
-                if confirmed_histogram < 0.01:
+                # v3.19.0: 動的ヒストグラムフィルター（ローリング最適化で自動調整）
+                if confirmed_histogram < self.entry_hist_filter:
                     cross_type = 'Golden' if is_golden_cross else 'Death'
-                    logger.info(f"   ⚠️ Weak {cross_type} Cross IGNORED (hist={confirmed_histogram:.6f} < 0.01)")
+                    logger.info(f"   ⚠️ Weak {cross_type} Cross IGNORED (hist={confirmed_histogram:.6f} < {self.entry_hist_filter:.3f})")
                     self.no_position_cycles += 1
                     return False, None, f"Weak cross ignored (hist={confirmed_histogram:.6f})", 0.0, None, None
 
@@ -208,7 +244,7 @@ class OptimizedTradingLogic:
             # ポジションなしで3サイクル以上待機 + ヒストグラム十分 → トレンド方向にエントリー
             self.no_position_cycles += 1
 
-            if self.no_position_cycles >= 3 and confirmed_histogram > 0.01:
+            if self.no_position_cycles >= 3 and confirmed_histogram > self.entry_hist_filter:
                 # タイミングフィルター
                 if not skip_price_filter:
                     if not self._check_trade_timing():
@@ -242,7 +278,7 @@ class OptimizedTradingLogic:
                     logger.info(f"   🔴 POSITION-BASED SELL: {reason} (confidence={confidence:.2f})")
                     return True, 'SELL', reason, confidence, stop_loss, take_profit
 
-            logger.info(f"   No MACD cross - waiting (cycles={self.no_position_cycles}, need 3+ with hist>0.01)")
+            logger.info(f"   No MACD cross - waiting (cycles={self.no_position_cycles}, need 3+ with hist>{self.entry_hist_filter:.3f})")
             return False, None, "No MACD cross - waiting", 0.0, None, None
 
         except Exception as e:

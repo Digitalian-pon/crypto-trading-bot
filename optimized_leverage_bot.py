@@ -11,6 +11,7 @@ import sys
 from services.gmo_api import GMOCoinAPI
 from services.optimized_trading_logic import OptimizedTradingLogic
 from services.data_service import DataService
+from services.rolling_optimizer import RollingOptimizer
 from config import load_config
 
 # ロギング設定
@@ -48,6 +49,10 @@ class OptimizedLeverageTradingBot:
         self.timeframe = config.get('trading', 'default_timeframe', fallback='1hour')
         self.interval = 60  # チェック間隔（秒）- 1分（リアルタイム性重視）
 
+        # v3.19.0: ローリングパラメータ最適化エンジン
+        self.optimizer = RollingOptimizer()
+        self.optimization_cycle_count = 0
+
         # 動的ストップロス/テイクプロフィット管理
         self.active_positions_stops = {}  # {position_id: {'stop_loss': price, 'take_profit': price}}
 
@@ -57,6 +62,36 @@ class OptimizedLeverageTradingBot:
 
         # MACDクロス検出用（決済判定）- v3.1.1: position-based → cross-based
         self.last_close_macd_position = None
+
+        # v3.19.0: 動的トレーリングストップテンプレート
+        self.trailing_template = [
+            (0.005, 0.0),    # +0.5% → 建値ロック
+            (0.010, 0.005),  # +1.0% → +0.5%
+            (0.015, 0.010),  # +1.5% → +1.0%
+            (0.020, 0.015),  # +2.0% → +1.5%
+            (0.030, 0.020),  # +3.0% → +2.0%
+        ]
+        self.dynamic_hard_sl = -0.008  # デフォルトSL -0.8%
+
+    def _update_trailing_template(self, params):
+        """ローリング最適化からトレーリングストップテンプレートを更新"""
+        if params is None:
+            return
+        old_sl = self.dynamic_hard_sl
+        self.dynamic_hard_sl = -params.get('stop_loss_pct', 0.008)
+        if 'trailing_stops' in params:
+            self.trailing_template = params['trailing_stops']
+        elif 'breakeven_threshold' in params:
+            be = params['breakeven_threshold']
+            self.trailing_template = [
+                (be, 0.0),
+                (be * 2, be),
+                (be * 3, be * 2),
+                (be * 4, be * 3),
+                (be * 6, be * 4),
+            ]
+        if old_sl != self.dynamic_hard_sl:
+            logger.info(f"🧠 [OPTIMIZER] Trailing SL updated: {old_sl*100:.1f}% → {self.dynamic_hard_sl*100:.1f}%")
 
     # v3.17.6: ファイルベースの注文時刻管理（再起動しても消えない）
     ORDER_TIME_FILE = 'last_order_time.txt'
@@ -158,6 +193,31 @@ class OptimizedLeverageTradingBot:
         # 市場レジーム表示
         market_regime = df['market_regime'].iloc[-1] if 'market_regime' in df.columns else 'Unknown'
         logger.info(f"🎯 Market Regime: {market_regime}")
+
+        # v3.19.0: ローリングパラメータ最適化
+        self.optimization_cycle_count += 1
+        if self.optimizer.should_optimize():
+            try:
+                # マルチデイデータ取得（3日分 = 約288本の15分足）
+                opt_df = self.optimizer.fetch_extended_data(
+                    self.data_service, self.symbol, self.timeframe, days=3
+                )
+                if opt_df is None or len(opt_df) < 50:
+                    opt_df = df  # フォールバック: 通常のデータを使用
+
+                best_params = self.optimizer.optimize(opt_df)
+                if best_params:
+                    # トレーディングロジックのパラメータを更新
+                    self.trading_logic.update_parameters(best_params)
+                    # トレーリングストップのテンプレートも更新
+                    self._update_trailing_template(best_params)
+            except Exception as e:
+                logger.error(f"⚠️ Optimization error (non-fatal): {e}")
+        else:
+            opt_status = self.optimizer.get_status()
+            if opt_status['params']:
+                p = opt_status['params']
+                logger.info(f"🧠 [OPTIMIZER] Active: SL={p['stop_loss_pct']*100:.1f}% MACD={p['macd_preset']} EntryHist={p['entry_hist_filter']:.3f}")
 
         # 2. 既存ポジション確認
         logger.info(f"🔍 Fetching positions for symbol: {self.symbol}")
@@ -324,17 +384,19 @@ class OptimizedLeverageTradingBot:
 
             logger.info(f"Position {position_id} ({side}): Entry=¥{entry_price:.2f}, P/L={pl_ratio*100:.2f}%")
 
-            # === トレーリングストップ管理 (v3.4.0) ===
+            # === トレーリングストップ管理 (v3.19.0: 動的パラメータ対応) ===
+            hard_sl = self.dynamic_hard_sl  # ローリング最適化から動的に設定
+
             if position_id not in self.active_positions_stops:
                 # 既存ポジション（再起動後など）の初期化
-                stop_loss = entry_price * (1 - 0.008) if side == 'BUY' else entry_price * (1 + 0.008)
+                stop_loss = entry_price * (1 + hard_sl) if side == 'BUY' else entry_price * (1 - hard_sl)
                 self.active_positions_stops[position_id] = {
                     'stop_loss': stop_loss,
                     'take_profit': None,
                     'peak_pl_ratio': max(0.0, pl_ratio),
-                    'trailing_sl_ratio': -0.008,
+                    'trailing_sl_ratio': hard_sl,
                 }
-                logger.warning(f"   Initialized trailing stop for existing position: SL=-0.8%")
+                logger.warning(f"   Initialized trailing stop for existing position: SL={hard_sl*100:.1f}%")
 
             stops = self.active_positions_stops[position_id]
             peak_pl = stops.get('peak_pl_ratio', 0.0)
@@ -344,23 +406,18 @@ class OptimizedLeverageTradingBot:
                 stops['peak_pl_ratio'] = pl_ratio
                 peak_pl = pl_ratio
 
-            # トレーリングストップレベル更新（v3.18.0: 利益を伸ばす + 早期ロック）
-            if peak_pl >= 0.03:
-                stops['trailing_sl_ratio'] = 0.02   # +3%到達 → SL=+2%
-            elif peak_pl >= 0.02:
-                stops['trailing_sl_ratio'] = 0.015  # +2%到達 → SL=+1.5%
-            elif peak_pl >= 0.015:
-                stops['trailing_sl_ratio'] = 0.01   # +1.5%到達 → SL=+1%
-            elif peak_pl >= 0.01:
-                stops['trailing_sl_ratio'] = 0.005  # +1%到達 → SL=+0.5%（トレーリング開始）
-            elif peak_pl >= 0.005:
-                stops['trailing_sl_ratio'] = 0.0    # +0.5%到達 → SL=0%（建値ロック）
-            # +0.5%未満はハードSL(-0.8%)のみで保護
-            # else: -0.008のまま
+            # トレーリングストップレベル更新（v3.19.0: 動的テンプレート）
+            for threshold, lock in reversed(self.trailing_template):
+                if peak_pl >= threshold:
+                    stops['trailing_sl_ratio'] = lock
+                    break
+            else:
+                # どの閾値にも到達していない → ハードSLのまま
+                stops['trailing_sl_ratio'] = hard_sl
 
             stop_loss = stops.get('stop_loss', entry_price * 0.985)
             take_profit = stops.get('take_profit')
-            trailing_sl = stops.get('trailing_sl_ratio', -0.008)
+            trailing_sl = stops.get('trailing_sl_ratio', hard_sl)
             logger.info(f"   📈 Trailing Stop: Peak={peak_pl*100:.2f}%, SL={trailing_sl*100:.1f}%")
 
             # 決済条件チェック（v3.12.2: dfも渡してstartup時のクロス検出に使用）
@@ -476,12 +533,13 @@ class OptimizedLeverageTradingBot:
         ema_50 = indicators.get('ema_50', current_price)
         ema_trend = 'up' if ema_20 > ema_50 else 'down'
 
-        # トレーリングストップ情報取得（v3.18.0: ハードSL -0.8%）
-        trailing_sl_ratio = -0.008
+        # トレーリングストップ情報取得（v3.19.0: 動的SL）
+        hard_sl = self.dynamic_hard_sl
+        trailing_sl_ratio = hard_sl
         peak_pl = 0.0
         if position_id and position_id in self.active_positions_stops:
             stops = self.active_positions_stops[position_id]
-            trailing_sl_ratio = stops.get('trailing_sl_ratio', -0.008)
+            trailing_sl_ratio = stops.get('trailing_sl_ratio', hard_sl)
             peak_pl = stops.get('peak_pl_ratio', 0.0)
 
         logger.info(f"   📊 [v3.4.0 Trailing Stop] Position Check:")
@@ -556,7 +614,7 @@ class OptimizedLeverageTradingBot:
             # 弱いヒストグラムでクロスを「消費」すると、後でヒストグラムが強くなっても
             # クロスが再検出できなくなるバグを防止
             if is_close_death_cross or is_close_golden_cross:
-                if confirmed_close_histogram > 0.003:
+                if confirmed_close_histogram > self.trading_logic.close_hist_filter:
                     # ヒストグラム十分 → 状態を更新（クロスを消費）
                     self.last_close_macd_position = confirmed_close_pos
                 else:
@@ -579,15 +637,16 @@ class OptimizedLeverageTradingBot:
                 self.last_close_macd_position = macd_close_pos
 
         # ★ 起動時チェック: 確定済みMACDがポジションと逆方向なら決済検討
+        close_hist_threshold = self.trading_logic.close_hist_filter  # v3.19.0: 動的パラメータ
         if self.last_close_macd_position is not None and not is_close_death_cross and not is_close_golden_cross:
             # 起動直後で既にMACDがポジションと逆方向
-            if side == 'BUY' and confirmed_close_pos == 'below' and confirmed_close_histogram > 0.003:
+            if side == 'BUY' and confirmed_close_pos == 'below' and confirmed_close_histogram > close_hist_threshold:
                 logger.info(f"   ⚠️ BUY pos + confirmed bearish MACD → close")
                 if pl_ratio >= 0:
                     return True, f"MACD Bearish [Confirmed] → Reversal SELL", 'SELL'
                 else:
                     return True, f"MACD Bearish [Confirmed] - Loss Close", None
-            elif side == 'SELL' and confirmed_close_pos == 'above' and confirmed_close_histogram > 0.003:
+            elif side == 'SELL' and confirmed_close_pos == 'above' and confirmed_close_histogram > close_hist_threshold:
                 logger.info(f"   ⚠️ SELL pos + confirmed bullish MACD → close")
                 if pl_ratio >= 0:
                     return True, f"MACD Bullish [Confirmed] → Reversal BUY", 'BUY'
@@ -596,7 +655,7 @@ class OptimizedLeverageTradingBot:
 
         # BUYポジション: MACDデッドクロス + ヒストグラム確認
         if side == 'BUY' and is_close_death_cross:
-            if confirmed_close_histogram > 0.003:
+            if confirmed_close_histogram > close_hist_threshold:
                 logger.info(f"   🔴 Closing BUY - Death Cross CONFIRMED (hist={confirmed_close_histogram:.6f})")
                 if pl_ratio >= 0:
                     logger.info(f"   🔄 Profitable position - Will reverse to SELL")
@@ -605,11 +664,11 @@ class OptimizedLeverageTradingBot:
                     logger.info(f"   ⛔ Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
                     return True, f"MACD Death Cross (Confirmed) - Loss Close", None
             else:
-                logger.info(f"   ⏸️ Death Cross but histogram weak ({confirmed_close_histogram:.6f}) - HOLDING (will re-check)")
+                logger.info(f"   ⏸️ Death Cross but histogram weak ({confirmed_close_histogram:.6f} < {close_hist_threshold:.3f}) - HOLDING")
 
         # SELLポジション: MACDゴールデンクロス + ヒストグラム確認
         if side == 'SELL' and is_close_golden_cross:
-            if confirmed_close_histogram > 0.003:
+            if confirmed_close_histogram > close_hist_threshold:
                 logger.info(f"   🟢 Closing SELL - Golden Cross CONFIRMED (hist={confirmed_close_histogram:.6f})")
                 if pl_ratio >= 0:
                     logger.info(f"   🔄 Profitable position - Will reverse to BUY")
@@ -618,7 +677,7 @@ class OptimizedLeverageTradingBot:
                     logger.info(f"   ⛔ Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
                     return True, f"MACD Golden Cross (Confirmed) - Loss Close", None
             else:
-                logger.info(f"   ⏸️ Golden Cross but histogram weak ({confirmed_close_histogram:.6f}) - HOLDING (will re-check)")
+                logger.info(f"   ⏸️ Golden Cross but histogram weak ({confirmed_close_histogram:.6f} < {close_hist_threshold:.3f}) - HOLDING")
 
         # 保持継続
         logger.info(f"   ✅ Holding position (P/L: {pl_ratio*100:.2f}%, SL: {trailing_sl_ratio*100:.1f}%, Peak: {peak_pl*100:.2f}%)")
