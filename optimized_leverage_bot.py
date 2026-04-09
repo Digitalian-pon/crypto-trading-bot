@@ -236,12 +236,25 @@ class OptimizedLeverageTradingBot:
         except:
             pass
 
+        # v3.19.1: 最大ポジション数超過フラグ
+        max_pos_exceeded = False
+
         # 標準出力にも詳細を表示
         if positions:
             # v3.14.0+: ポジション保有中はフォールバックカウンターをリセット
             self.trading_logic.no_position_cycles = 0
             for pos in positions:
                 logger.info(f"  └─ Position {pos.get('positionId')}: {pos.get('side')} {pos.get('size')} @ ¥{pos.get('price')}")
+
+            # v3.19.1: 最大ポジション数=1を厳格化。2以上なら決済チェックのみで新規注文は一切出さない
+            if len(positions) >= 2:
+                logger.warning(f"⚠️ [MAX_POS] {len(positions)} positions detected (max=1) - close check only, no new orders")
+                max_pos_exceeded = True
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"MAX_POSITION_LIMIT: {len(positions)} positions, skipping new orders\n")
+                except:
+                    pass
 
         # 3. ポジションの決済チェック（動的SL/TP使用）
         any_closed = False
@@ -305,6 +318,11 @@ class OptimizedLeverageTradingBot:
                 pass
             return
 
+        # v3.19.1: max_pos_exceeded時は新規注文を一切出さない
+        if max_pos_exceeded:
+            logger.warning(f"⚠️ [MAX_POS] Skipping all new order checks due to {len(positions)} positions")
+            return
+
         should_check_new_trade = (
             reversal_signal or                    # 反転シグナル決済
             tp_sl_closed or                       # TP/SL決済（継続機会）
@@ -320,6 +338,7 @@ class OptimizedLeverageTradingBot:
             pass
 
         if should_check_new_trade:
+            # v3.19.1: 1サイクル1注文を厳格化 - reversal OR new trade、両方は実行しない
             if reversal_signal and reversal_trade_type:
                 logger.info(f"🔄 Position closed by reversal signal - FORCING {reversal_trade_type} order immediately...")
                 try:
@@ -327,19 +346,16 @@ class OptimizedLeverageTradingBot:
                         f.write(f"NEW_TRADE_ACTION: REVERSAL_ORDER type={reversal_trade_type}\n")
                 except:
                     pass
-                # 反転シグナル時は、シグナル再評価なしで強制的に反対注文を出す
                 self._place_forced_reversal_order(reversal_trade_type, current_price, df)
+                # ★ v3.19.1: reversal注文後は必ずreturn（_check_for_new_tradeに進まない）
+                return
             elif tp_sl_closed:
-                # TP/SL決済後も新規エントリーをチェック（価格距離フィルターで保護）
-                # 改善: 完全クールダウン→価格距離フィルターのみで制御
                 logger.info("💰 Position closed by TP/SL - checking for new opportunities...")
-                logger.info("   Note: Price distance filter will prevent immediate re-entry at same price")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
                         f.write(f"NEW_TRADE_ACTION: TP_SL_CHECK (with price distance filter)\n")
                 except:
                     pass
-                # 価格距離フィルターが機能するので、新規エントリーチェックを実行
                 self._check_for_new_trade(df, current_price, is_reversal=False)
             elif not positions:
                 logger.info("✅ No positions - checking for new trade opportunities...")
@@ -1055,34 +1071,21 @@ class OptimizedLeverageTradingBot:
                     pass
                 return False
 
-        # v3.13.0: 注文直前のポジション存在チェック（最終安全弁）
+        # v3.19.1: 注文直前のポジション存在チェック（最大1ポジション厳格化）
+        # 5秒待機してAPIに決済が反映されるのを待つ
+        time.sleep(5)
         try:
             pre_check_positions = self.api.get_positions(symbol=self.symbol)
             if pre_check_positions and len(pre_check_positions) > 0:
-                logger.warning(f"⚠️ [DUPLICATE_GUARD] Position exists right before order - blocking {trade_type}")
+                logger.warning(f"⚠️ [SINGLE_POS_GUARD] {len(pre_check_positions)} position(s) exist - blocking {trade_type}")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"DUPLICATE_GUARD_PRECHECK: {trade_type} blocked, {len(pre_check_positions)} position(s) exist\n")
+                        f.write(f"SINGLE_POS_GUARD: {trade_type} blocked, {len(pre_check_positions)} position(s) exist\n")
                 except:
                     pass
                 return False
         except Exception as e:
             logger.warning(f"⚠️ Pre-order position check failed: {e} - proceeding with order")
-
-        # v3.17.6: 注文直前に3秒待機してからもう一度ポジション確認（API反映待ち）
-        time.sleep(3)
-        try:
-            recheck_positions = self.api.get_positions(symbol=self.symbol)
-            if recheck_positions and len(recheck_positions) > 0:
-                logger.warning(f"⚠️ [DUPLICATE_GUARD] Position appeared after 3s wait - blocking {trade_type}")
-                try:
-                    with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"DUPLICATE_GUARD_RECHECK: {trade_type} blocked after 3s wait, {len(recheck_positions)} position(s)\n")
-                except:
-                    pass
-                return False
-        except:
-            pass
 
         try:
             result = self.api.place_order(

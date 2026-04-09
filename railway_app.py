@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.19.0-rolling-optimizer"
-BUILD_DATE = "2026-04-08"
-COMMIT_HASH = "adaptive-params-auto-optimize"
+VERSION = "3.19.1-single-position"
+BUILD_DATE = "2026-04-10"
+COMMIT_HASH = "max-1-position-guard"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
