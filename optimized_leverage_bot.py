@@ -78,11 +78,14 @@ class OptimizedLeverageTradingBot:
         self.dynamic_hard_sl = -0.008  # デフォルトSL -0.8%
 
     def _update_trailing_template(self, params):
-        """ローリング最適化からトレーリングストップテンプレートを更新"""
+        """ローリング最適化からトレーリングストップテンプレートを更新（v3.20.2: SL下限0.8%）"""
         if params is None:
             return
         old_sl = self.dynamic_hard_sl
-        self.dynamic_hard_sl = -params.get('stop_loss_pct', 0.008)
+        # v3.20.2: SL下限クランプ - 最適化が0.8%未満を選んでも0.8%を維持
+        MIN_SL = 0.008  # 0.8%（15分足ノイズ対策）
+        raw_sl = params.get('stop_loss_pct', MIN_SL)
+        self.dynamic_hard_sl = -max(raw_sl, MIN_SL)
         if 'trailing_stops' in params:
             self.trailing_template = params['trailing_stops']
         elif 'breakeven_threshold' in params:
