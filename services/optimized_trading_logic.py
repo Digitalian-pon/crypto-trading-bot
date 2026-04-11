@@ -61,6 +61,10 @@ class OptimizedTradingLogic:
         # v3.14.0: ポジションベースエントリー用の待機カウンター
         self.no_position_cycles = 0  # ポジションなしで待機したサイクル数
 
+        # v3.20.0: SL後クールダウン（即再エントリー防止）
+        self.last_sl_time = None          # 最後のSL発動時刻
+        self.sl_cooldown_seconds = 300    # SL後5分間は新規エントリー禁止
+
         # v3.19.0: ローリング最適化による動的パラメータ
         self.optimized_params = None  # RollingOptimizerからのパラメータ
         self.entry_hist_filter = 0.01  # デフォルト（最適化で上書き可能）
@@ -286,16 +290,33 @@ class OptimizedTradingLogic:
             return False, None, f"Error: {str(e)}", 0.0, None, None
 
     def _check_trade_timing(self):
-        """取引タイミングチェック"""
+        """取引タイミングチェック（v3.20.0: SLクールダウン追加）"""
         if not self.last_trade_time:
             return True
 
         elapsed = (datetime.now(timezone.utc) - self.last_trade_time).total_seconds()
-        return elapsed >= self.min_trade_interval
+        if elapsed < self.min_trade_interval:
+            return False
+
+        # v3.20.0: SL後クールダウン（5分間は新規エントリーを禁止）
+        if self.last_sl_time is not None:
+            sl_elapsed = (datetime.now(timezone.utc) - self.last_sl_time).total_seconds()
+            if sl_elapsed < self.sl_cooldown_seconds:
+                remaining = self.sl_cooldown_seconds - sl_elapsed
+                logger.info(f"   ⏳ [SL Cooldown] {remaining:.0f}s remaining - blocking new entry")
+                return False
+
+        return True
 
     def record_stop_loss(self, side):
-        """損切り記録"""
-        logger.info(f"📝 Stop loss recorded: {side}")
+        """損切り記録（v3.20.0: 5分クールダウン開始）"""
+        self.last_sl_time = datetime.now(timezone.utc)
+        logger.info(f"📝 Stop loss recorded: {side} - 5min cooldown started")
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"SL_COOLDOWN_START: {side}, blocking new entry for {self.sl_cooldown_seconds}s\n")
+        except:
+            pass
 
     def record_trade(self, trade_type, price, result=None, is_exit=False):
         """取引記録"""

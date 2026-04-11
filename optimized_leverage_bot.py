@@ -58,7 +58,10 @@ class OptimizedLeverageTradingBot:
 
         # v3.12.1: 重複注文防止 - 最後の注文時刻を記録
         self.last_order_time = self._load_last_order_time()  # v3.17.6: ファイルから復元（再起動対応）
-        self._order_placed_this_cycle = False  # v3.17.3: 同一サイクル内の重複注文防止
+        self._orders_placed_this_cycle = 0  # v3.20.0: サイクル内注文カウント（旧bool → count）
+
+        # v3.20.0: 最大同時ポジション数（1回のサイクルでこの数まで注文を出す）
+        self.MAX_POSITIONS = 2
 
         # MACDクロス検出用（決済判定）- v3.1.1: position-based → cross-based
         self.last_close_macd_position = None
@@ -144,7 +147,7 @@ class OptimizedLeverageTradingBot:
 
     def _trading_cycle(self):
         """1回の取引サイクル"""
-        self._order_placed_this_cycle = False  # サイクル開始時にリセット
+        self._orders_placed_this_cycle = 0  # サイクル開始時にリセット
         cycle_time = datetime.now()
 
         # ボット稼働状況をログファイルに記録（ダッシュボードで表示可能）
@@ -246,13 +249,13 @@ class OptimizedLeverageTradingBot:
             for pos in positions:
                 logger.info(f"  └─ Position {pos.get('positionId')}: {pos.get('side')} {pos.get('size')} @ ¥{pos.get('price')}")
 
-            # v3.19.1: 最大ポジション数=1を厳格化。2以上なら決済チェックのみで新規注文は一切出さない
-            if len(positions) >= 2:
-                logger.warning(f"⚠️ [MAX_POS] {len(positions)} positions detected (max=1) - close check only, no new orders")
+            # v3.20.0: 最大ポジション数（MAX_POSITIONS）超過時は決済チェックのみで新規注文は出さない
+            if len(positions) >= self.MAX_POSITIONS:
+                logger.warning(f"⚠️ [MAX_POS] {len(positions)} positions detected (max={self.MAX_POSITIONS}) - close check only, no new orders")
                 max_pos_exceeded = True
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"MAX_POSITION_LIMIT: {len(positions)} positions, skipping new orders\n")
+                        f.write(f"MAX_POSITION_LIMIT: {len(positions)}/{self.MAX_POSITIONS} positions, skipping new orders\n")
                 except:
                     pass
 
@@ -318,9 +321,9 @@ class OptimizedLeverageTradingBot:
                 pass
             return
 
-        # v3.19.1: max_pos_exceeded時は新規注文を一切出さない
+        # v3.20.0: max_pos_exceeded時は新規注文を一切出さない
         if max_pos_exceeded:
-            logger.warning(f"⚠️ [MAX_POS] Skipping all new order checks due to {len(positions)} positions")
+            logger.warning(f"⚠️ [MAX_POS] Skipping all new order checks due to {len(positions)}/{self.MAX_POSITIONS} positions")
             return
 
         should_check_new_trade = (
@@ -858,10 +861,10 @@ class OptimizedLeverageTradingBot:
         except:
             pass
 
-        # 【重複ポジション防止】注文前に既存ポジションを確認 (v3.8.2)
+        # v3.20.0: 反転注文前の既存ポジション確認（MAX_POSITIONS上限）
         existing_positions = self.api.get_positions(symbol=self.symbol)
-        if existing_positions and len(existing_positions) > 0:
-            logger.warning(f"⚠️ [REVERSAL] Already have {len(existing_positions)} position(s) - skipping reversal order to prevent duplicates")
+        if existing_positions and len(existing_positions) >= self.MAX_POSITIONS:
+            logger.warning(f"⚠️ [REVERSAL] Already have {len(existing_positions)}/{self.MAX_POSITIONS} position(s) - skipping reversal order")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
                     f.write(f"REVERSAL_DUPLICATE_PREVENTION: Skipped {trade_type} order - already have {len(existing_positions)} position(s)\n")
@@ -1004,13 +1007,15 @@ class OptimizedLeverageTradingBot:
             logger.info(f"⏸️  No trade signal")
             return
 
-        # 【重複ポジション防止】注文前に既存ポジションを確認（v2.7.2追加）
+        # v3.20.0: 既存ポジション確認（MAX_POSITIONS未満なら追加発注可能）
         existing_positions = self.api.get_positions(symbol=self.symbol)
-        if existing_positions and len(existing_positions) > 0:
-            logger.warning(f"⚠️ Already have {len(existing_positions)} position(s) - skipping new order")
+        existing_count = len(existing_positions) if existing_positions else 0
+
+        if existing_count >= self.MAX_POSITIONS:
+            logger.warning(f"⚠️ Max positions reached ({existing_count}/{self.MAX_POSITIONS}) - skipping new order")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"DUPLICATE_PREVENTION: Skipped new order, already have {len(existing_positions)} position(s)\n")
+                    f.write(f"DUPLICATE_PREVENTION: Skipped, {existing_count}/{self.MAX_POSITIONS} positions\n")
             except:
                 pass
             return
@@ -1030,37 +1035,54 @@ class OptimizedLeverageTradingBot:
             logger.warning("⚠️  Insufficient JPY balance")
             return
 
-        # ポジションサイズ計算（残高の95%）
-        max_jpy = available_jpy * 0.95
-        max_doge_quantity = int(max_jpy / current_price)
+        # v3.20.0: 1回で最大数まで注文を出す（残高をMAX_POSITIONSで按分）
+        positions_to_open = self.MAX_POSITIONS - existing_count
+        max_jpy_per_order = (available_jpy * 0.95) / self.MAX_POSITIONS
+        max_doge_quantity = int(max_jpy_per_order / current_price)
         trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
-        logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE")
+        logger.info(f"🎯 Placing {positions_to_open}x {trade_type.upper()} order(s): {trade_size} DOGE each")
         logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"MULTI_ORDER_PLAN: {positions_to_open}x {trade_type.upper()} {trade_size} DOGE (existing={existing_count})\n")
+        except:
+            pass
 
-        # 注文実行
-        success = self._place_order(trade_type, trade_size, current_price, reason, stop_loss, take_profit)
+        # 複数注文実行ループ
+        any_success = False
+        for i in range(positions_to_open):
+            if i > 0:
+                time.sleep(2)  # 注文間の短い間隔（API負荷対策）
+            success = self._place_order(trade_type, trade_size, current_price, reason, stop_loss, take_profit)
+            if success:
+                any_success = True
+                logger.info(f"   ✅ Order {i+1}/{positions_to_open} placed successfully")
+            else:
+                logger.warning(f"   ⚠️ Order {i+1}/{positions_to_open} failed - stopping")
+                break
 
-        if success:
-            # 取引記録
+        if any_success:
+            # 取引記録（1回のみ）
             self.trading_logic.record_trade(trade_type, current_price)
 
     def _place_order(self, trade_type, size, price, reason, stop_loss, take_profit):
         """注文実行（SL/TP記録付き・重複防止付き v3.17.6）"""
-        # v3.17.3: 同一サイクル内の重複注文を完全ブロック（余力全額1注文に集中）
-        if self._order_placed_this_cycle:
-            logger.warning(f"⚠️ [CYCLE_GUARD] Order blocked - already placed an order this cycle")
+        # v3.20.0: サイクル内注文数ガード（MAX_POSITIONS件まで許可）
+        if self._orders_placed_this_cycle >= self.MAX_POSITIONS:
+            logger.warning(f"⚠️ [CYCLE_GUARD] Max orders/cycle reached ({self._orders_placed_this_cycle}/{self.MAX_POSITIONS})")
             try:
                 with open('bot_execution_log.txt', 'a') as f:
-                    f.write(f"CYCLE_GUARD: {trade_type} blocked, already ordered this cycle\n")
+                    f.write(f"CYCLE_GUARD: {trade_type} blocked, {self._orders_placed_this_cycle}/{self.MAX_POSITIONS} orders this cycle\n")
             except:
                 pass
             return False
 
-        # v3.17.6: 時間ベースの重複注文防止（60秒以内の連続注文をブロック、ファイル永続化で再起動対応）
+        # v3.20.0: 時間ベースの重複注文防止（同サイクル2本目以降はスキップ）
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
-        if self.last_order_time is not None:
+        if self._orders_placed_this_cycle == 0 and self.last_order_time is not None:
+            # サイクル最初の注文のみ60秒チェック（2本目以降は意図的な連続注文なのでスキップ）
             elapsed = (now - self.last_order_time).total_seconds()
             if elapsed < 60:
                 logger.warning(f"⚠️ [DUPLICATE_GUARD] Order blocked - only {elapsed:.1f}s since last order (min 60s)")
@@ -1071,16 +1093,16 @@ class OptimizedLeverageTradingBot:
                     pass
                 return False
 
-        # v3.19.1: 注文直前のポジション存在チェック（最大1ポジション厳格化）
+        # v3.20.0: 注文直前のポジション存在チェック（MAX_POSITIONS上限）
         # 5秒待機してAPIに決済が反映されるのを待つ
         time.sleep(5)
         try:
             pre_check_positions = self.api.get_positions(symbol=self.symbol)
-            if pre_check_positions and len(pre_check_positions) > 0:
-                logger.warning(f"⚠️ [SINGLE_POS_GUARD] {len(pre_check_positions)} position(s) exist - blocking {trade_type}")
+            if pre_check_positions and len(pre_check_positions) >= self.MAX_POSITIONS:
+                logger.warning(f"⚠️ [MAX_POS_GUARD] {len(pre_check_positions)}/{self.MAX_POSITIONS} positions exist - blocking {trade_type}")
                 try:
                     with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"SINGLE_POS_GUARD: {trade_type} blocked, {len(pre_check_positions)} position(s) exist\n")
+                        f.write(f"MAX_POS_GUARD: {trade_type} blocked, {len(pre_check_positions)}/{self.MAX_POSITIONS} positions exist\n")
                 except:
                     pass
                 return False
@@ -1099,7 +1121,7 @@ class OptimizedLeverageTradingBot:
                 # v3.17.6: 注文成功時刻を記録（メモリ + ファイル永続化）
                 self.last_order_time = now
                 self._save_last_order_time(now)
-                self._order_placed_this_cycle = True  # v3.17.3: サイクル内重複防止
+                self._orders_placed_this_cycle += 1  # v3.20.0: サイクル内注文カウント
                 logger.info(f"✅ {trade_type.upper()} order successful!")
                 logger.info(f"   Size: {size} DOGE, Price: ¥{price:.2f}")
                 logger.info(f"   Reason: {reason}")
