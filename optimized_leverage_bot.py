@@ -60,8 +60,9 @@ class OptimizedLeverageTradingBot:
         self.last_order_time = self._load_last_order_time()  # v3.17.6: ファイルから復元（再起動対応）
         self._orders_placed_this_cycle = 0  # v3.20.0: サイクル内注文カウント（旧bool → count）
 
-        # v3.20.0: 最大同時ポジション数（1回のサイクルでこの数まで注文を出す）
-        self.MAX_POSITIONS = 2
+        # v3.20.1: 最大同時ポジション数 = 1（残高全額を1注文・手数料1回）
+        # GMO Coin分割約定で2件表示されても、1件以上あれば新規注文をブロック
+        self.MAX_POSITIONS = 1
 
         # MACDクロス検出用（決済判定）- v3.1.1: position-based → cross-based
         self.last_close_macd_position = None

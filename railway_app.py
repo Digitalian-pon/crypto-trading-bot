@@ -39,7 +39,7 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.20.1-full-balance-single-order"
+VERSION = "3.20.2-max-pos-fix"
 BUILD_DATE = "2026-04-11"
 COMMIT_HASH = "max-1-position-guard"
 
