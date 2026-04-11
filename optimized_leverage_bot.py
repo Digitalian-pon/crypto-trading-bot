@@ -1035,35 +1035,19 @@ class OptimizedLeverageTradingBot:
             logger.warning("⚠️  Insufficient JPY balance")
             return
 
-        # v3.20.0: 1回で最大数まで注文を出す（残高をMAX_POSITIONSで按分）
-        positions_to_open = self.MAX_POSITIONS - existing_count
-        max_jpy_per_order = (available_jpy * 0.95) / self.MAX_POSITIONS
-        max_doge_quantity = int(max_jpy_per_order / current_price)
+        # v3.20.0: 残高全額を1回の注文で使い切る（手数料1回）
+        max_jpy = available_jpy * 0.95
+        max_doge_quantity = int(max_jpy / current_price)
         trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
-        logger.info(f"🎯 Placing {positions_to_open}x {trade_type.upper()} order(s): {trade_size} DOGE each")
+        logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE (full balance ¥{max_jpy:.0f})")
         logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")
-        try:
-            with open('bot_execution_log.txt', 'a') as f:
-                f.write(f"MULTI_ORDER_PLAN: {positions_to_open}x {trade_type.upper()} {trade_size} DOGE (existing={existing_count})\n")
-        except:
-            pass
 
-        # 複数注文実行ループ
-        any_success = False
-        for i in range(positions_to_open):
-            if i > 0:
-                time.sleep(2)  # 注文間の短い間隔（API負荷対策）
-            success = self._place_order(trade_type, trade_size, current_price, reason, stop_loss, take_profit)
-            if success:
-                any_success = True
-                logger.info(f"   ✅ Order {i+1}/{positions_to_open} placed successfully")
-            else:
-                logger.warning(f"   ⚠️ Order {i+1}/{positions_to_open} failed - stopping")
-                break
+        # 1回の注文で全額使用（手数料1回）
+        success = self._place_order(trade_type, trade_size, current_price, reason, stop_loss, take_profit)
 
-        if any_success:
-            # 取引記録（1回のみ）
+        if success:
+            # 取引記録
             self.trading_logic.record_trade(trade_type, current_price)
 
     def _place_order(self, trade_type, size, price, reason, stop_loss, take_profit):
