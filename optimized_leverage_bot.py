@@ -913,8 +913,9 @@ class OptimizedLeverageTradingBot:
                 pass
             return
 
-        # ポジションサイズ計算（残高の95%）
-        max_jpy = available_jpy * 0.95
+        # v3.20.5: レバレッジ2倍を考慮した最大数量計算
+        LEVERAGE = 2  # GMO Coin DOGE_JPY レバレッジ倍率
+        max_jpy = available_jpy * 0.95 * LEVERAGE
         max_doge_quantity = int(max_jpy / current_price)
         trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
@@ -1053,12 +1054,13 @@ class OptimizedLeverageTradingBot:
             logger.warning("⚠️  Insufficient JPY balance")
             return
 
-        # v3.20.0: 残高全額を1回の注文で使い切る（手数料1回）
-        max_jpy = available_jpy * 0.95
+        # v3.20.5: レバレッジ2倍を考慮した最大数量計算（手数料1回）
+        LEVERAGE = 2  # GMO Coin DOGE_JPY レバレッジ倍率
+        max_jpy = available_jpy * 0.95 * LEVERAGE
         max_doge_quantity = int(max_jpy / current_price)
         trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
-        logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE (full balance ¥{max_jpy:.0f})")
+        logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE (balance ¥{available_jpy * 0.95:.0f} × {LEVERAGE}x leverage)")
         logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")
 
         # 1回の注文で全額使用（手数料1回）

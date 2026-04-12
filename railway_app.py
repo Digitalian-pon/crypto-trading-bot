@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.20.4-sl-cooldown-fix"
+VERSION = "3.20.5-leverage-size-fix"
 BUILD_DATE = "2026-04-12"
-COMMIT_HASH = "max-1-position-guard"
+COMMIT_HASH = "leverage-2x-position-size"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
