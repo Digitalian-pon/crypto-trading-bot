@@ -494,23 +494,37 @@ class OptimizedLeverageTradingBot:
                     reversal_trade_type = close_trade_type  # 反転シグナルのタイプを記録
                     logger.info(f"🔄 REVERSAL DETECTED - Will place {close_trade_type} order immediately")
                 elif "Loss Close" in reason:
-                    # v3.10.2: MACDクロスで損失中のポジションをクローズ → 同サイクルの新規エントリー禁止
+                    # Hard SL: 同サイクルブロック + 5分クールダウン開始
                     loss_close = True
-                    logger.info(f"⛔ LOSS CLOSE - Skipping new trade check this cycle (防往復ビンタ)")
+                    # v3.20.4: Hard SL後もSLクールダウンを開始（次サイクル以降も5分間ブロック）
+                    self.trading_logic.record_stop_loss(side)
+                    logger.info(f"⛔ LOSS CLOSE - Skipping this cycle + 5min SL cooldown started")
                     try:
                         with open('bot_execution_log.txt', 'a') as f:
-                            f.write(f"LOSS_CLOSE_DETECTED: Suppressing new trade check this cycle\n")
+                            f.write(f"LOSS_CLOSE_DETECTED: Suppressing new trade + SL cooldown 5min\n")
                     except:
                         pass
+                elif "Trailing Stop" in reason:
+                    # v3.20.4: Trailing Stop決済の処理
+                    tp_sl_closed = True
+                    if pl_ratio <= 0.002:
+                        # 利益0.2%以下（実質手数料負け水準）→ 5分クールダウン開始
+                        self.trading_logic.record_stop_loss(side)
+                        logger.info(f"⏳ Low-profit trailing stop ({pl_ratio*100:.2f}%) - 5min SL cooldown started")
+                        try:
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"TRAILING_STOP_COOLDOWN: pl={pl_ratio*100:.2f}%, SL cooldown 5min\n")
+                        except:
+                            pass
+                    else:
+                        logger.info(f"💰 Trailing stop with profit ({pl_ratio*100:.2f}%) - no cooldown")
                 elif "Take Profit" in reason or "Stop Loss" in reason or "Loss Limit" in reason:
                     # TP/SL/絶対損失リミットで決済された場合
                     tp_sl_closed = True
                     logger.info(f"💰 TP/SL CLOSE - Will check for continuation with moderate threshold")
-
-                    # v3.3.0: 損切り時はクールダウンを記録（連続損失防止）
                     if "Stop Loss" in reason:
                         self.trading_logic.record_stop_loss(side)
-                        logger.info(f"⏳ Stop loss cooldown started: {side} blocked for 30 minutes")
+                        logger.info(f"⏳ Stop loss cooldown started: {side} blocked for 5 minutes")
 
                 # 決済後、SL/TP記録を削除
                 if position_id in self.active_positions_stops:

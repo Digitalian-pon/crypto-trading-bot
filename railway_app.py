@@ -39,8 +39,8 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.20.3-sl-min-0.8pct"
-BUILD_DATE = "2026-04-11"
+VERSION = "3.20.4-sl-cooldown-fix"
+BUILD_DATE = "2026-04-12"
 COMMIT_HASH = "max-1-position-guard"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
