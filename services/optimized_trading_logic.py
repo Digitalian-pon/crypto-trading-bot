@@ -244,45 +244,11 @@ class OptimizedTradingLogic:
                     logger.info(f"   🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
                     return True, 'SELL', reason, confidence, stop_loss, take_profit
 
-            # === v3.14.0: クロスなし → ポジションベースフォールバック ===
-            # ポジションなしで3サイクル以上待機 + ヒストグラム十分 → トレンド方向にエントリー
+            # === v3.20.6: ポジションベースフォールバック無効化 ===
+            # レンジ相場でのフォールバックエントリーが損失の主因のため無効化
+            # MACDクロス確認のみエントリー（精度重視）
             self.no_position_cycles += 1
-
-            if self.no_position_cycles >= 3 and confirmed_histogram > self.entry_hist_filter:
-                # タイミングフィルター
-                if not skip_price_filter:
-                    if not self._check_trade_timing():
-                        logger.info(f"   ⏳ Position-based entry blocked (trade interval)")
-                        return False, None, "Position-based: trade interval too short", 0.0, None, None
-
-                    if self.last_exit_price is not None:
-                        exit_distance = abs(current_price - self.last_exit_price) / self.last_exit_price
-                        if exit_distance < 0.003:
-                            logger.info(f"   ⏳ Position-based entry blocked (too close to exit: {exit_distance*100:.2f}%)")
-                            return False, None, "Position-based: too close to exit price", 0.0, None, None
-
-                # confidence は控えめ（クロスより低い）
-                if confirmed_histogram > 0.03:
-                    confidence = 2.0
-                elif confirmed_histogram > 0.02:
-                    confidence = 1.5
-                else:
-                    confidence = 1.2
-
-                if confirmed_position == 'above':
-                    reason = f'MACD Position-Based BUY [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles})'
-                    stop_loss = current_price * (1 - self.stop_loss_pct)
-                    take_profit = current_price * (1 + self.take_profit_pct)
-                    logger.info(f"   🟢 POSITION-BASED BUY: {reason} (confidence={confidence:.2f})")
-                    return True, 'BUY', reason, confidence, stop_loss, take_profit
-                else:
-                    reason = f'MACD Position-Based SELL [Fallback] (hist={confirmed_histogram:.4f}, cycles={self.no_position_cycles})'
-                    stop_loss = current_price * (1 + self.stop_loss_pct)
-                    take_profit = current_price * (1 - self.take_profit_pct)
-                    logger.info(f"   🔴 POSITION-BASED SELL: {reason} (confidence={confidence:.2f})")
-                    return True, 'SELL', reason, confidence, stop_loss, take_profit
-
-            logger.info(f"   No MACD cross - waiting (cycles={self.no_position_cycles}, need 3+ with hist>{self.entry_hist_filter:.3f})")
+            logger.info(f"   No MACD cross - waiting for confirmed cross (cycles={self.no_position_cycles})")
             return False, None, "No MACD cross - waiting", 0.0, None, None
 
         except Exception as e:

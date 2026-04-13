@@ -913,9 +913,9 @@ class OptimizedLeverageTradingBot:
                 pass
             return
 
-        # v3.20.5: レバレッジ2倍を考慮した最大数量計算
-        LEVERAGE = 2  # GMO Coin DOGE_JPY レバレッジ倍率
-        max_jpy = available_jpy * 0.95 * LEVERAGE
+        # v3.20.6: レバレッジ係数1.8（証拠金不足ERR-201防止のため安全マージン込み）
+        LEVERAGE_FACTOR = 1.8
+        max_jpy = available_jpy * 0.95 * LEVERAGE_FACTOR
         max_doge_quantity = int(max_jpy / current_price)
         trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
@@ -1054,13 +1054,13 @@ class OptimizedLeverageTradingBot:
             logger.warning("⚠️  Insufficient JPY balance")
             return
 
-        # v3.20.5: レバレッジ2倍を考慮した最大数量計算（手数料1回）
-        LEVERAGE = 2  # GMO Coin DOGE_JPY レバレッジ倍率
-        max_jpy = available_jpy * 0.95 * LEVERAGE
+        # v3.20.6: レバレッジ係数1.8（証拠金不足ERR-201防止のため2.0→1.8に調整）
+        LEVERAGE_FACTOR = 1.8  # 2.0だとERR-201「証拠金不足」が発生するため安全マージン込み
+        max_jpy = available_jpy * 0.95 * LEVERAGE_FACTOR
         max_doge_quantity = int(max_jpy / current_price)
         trade_size = max(10, (max_doge_quantity // 10) * 10)  # GMO Coin: 10DOGE単位必須
 
-        logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE (balance ¥{available_jpy * 0.95:.0f} × {LEVERAGE}x leverage)")
+        logger.info(f"🎯 Placing {trade_type.upper()} order: {trade_size} DOGE (balance ¥{available_jpy * 0.95:.0f} × {LEVERAGE_FACTOR}x factor)")
         logger.info(f"   Stop Loss: ¥{stop_loss:.2f}, Take Profit: ¥{take_profit:.2f}")
 
         # 1回の注文で全額使用（手数料1回）
