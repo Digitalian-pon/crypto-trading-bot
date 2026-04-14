@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.20.6-cross-only-no-fallback"
-BUILD_DATE = "2026-04-13"
-COMMIT_HASH = "disable-fallback-fix-leverage-factor"
+VERSION = "3.21.0-macd-position-entry"
+BUILD_DATE = "2026-04-14"
+COMMIT_HASH = "macd-position-based-immediate-entry"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

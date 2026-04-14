@@ -1,22 +1,22 @@
 """
-MACD単体トレーディングロジック v3.16.0
-確定済みローソク足のMACDクロス + ポジションベースフォールバック（EMAフィルター削除）
+MACD現在ポジションベース トレーディングロジック v3.21.0
 
 方針:
-- エントリー優先: 確定済みローソク足のMACDクロス（ファントムクロス防止）
-  - iloc[-2](確定済み) vs iloc[-3](前回確定) でクロス検出
-  - iloc[-1](ライブ価格上書き)のMACDは使用しない（不安定なため）
-- EMAフィルター: 削除（v3.16.0）
-  - MACDシグナルを最優先。EMAは遅行指標のため、有効なシグナルをブロックし機会損失を生んでいた
-- フォールバック: クロスなし + ポジションなし + ヒストグラム十分 → MACD方向にエントリー
-- クロス保持: タイミングフィルターで拒否されたクロスは保持（次回再試行）
-- 決済: トレーリングストップ + MACDクロス確認（bot側で処理）
-- 決済時のMACDクロス → 即座に反対注文（トレンド転換を捉える）
+- クロス待ちをやめ「現在MACDがシグナルラインのどちら側にいるか」でシグナルを出す
+- iloc[-2](確定済みローソク足)のMACDポジション(above/below)を見る
+  - 'above'(MACD Line > Signal) → BUY方向
+  - 'below'(MACD Line < Signal) → SELL方向
+- 前回エントリーと同方向の場合はスキップ（即再エントリー防止）
+- ポジションクローズ後は last_entry_macd_position をリセット → 次サイクルで即再エントリー可能
+- 再起動後も初回サイクルで即トレード可能（last_entry_macd_position=None）
 
-v3.16.0 変更点:
-- EMAトレンドフィルターを完全削除
-  - EMAはMACDシグナルをブロックし、取引機会を逃す原因になっていた
-  - MACD単体でBUY/SELL両方向のシグナルを即座に実行
+v3.21.0 変更点:
+- MACDクロス検出方式を廃止
+  - クロス待ちのため長時間シグナルが出ない問題を解消
+  - ダウン復帰後も即座にトレード可能
+- MACD現在ポジション方式に変更
+  - 確定ローソク足(iloc[-2])のMACD位置で判定
+  - ヒストグラム強度フィルターは維持（弱すぎるシグナルを除外）
 """
 
 import logging
@@ -28,18 +28,18 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTradingLogic:
     """
-    MACD主体トレーディングロジック v3.16.0
+    MACD現在ポジションベース トレーディングロジック v3.21.0
 
     設計思想:
-    - エントリー: 確定済みローソク足のMACDクロス（優先）
-    - EMAフィルター: なし（MACD優先）
-    - フォールバック: クロスなし + ポジションなし → ポジションベースエントリー
-    - クロス保持: タイミングフィルター拒否時のみ保持
-    - 決済: トレーリングストップ + MACDクロス確認 → 反対注文
+    - エントリー: 確定済みローソク足(iloc[-2])のMACDが上(above)→BUY / 下(below)→SELL
+    - クロス待ちなし: 現在のMACD位置を見るだけなので再起動後も即エントリー可能
+    - 同方向再エントリー防止: last_entry_macd_position で制御
+    - ポジションクローズ後リセット: record_trade(is_exit=True) で None に戻す → 即再エントリー可能
+    - SLクールダウン: SL発動後5分間は新規エントリー禁止（往復ビンタ防止）
     """
 
     def __init__(self, config=None):
-        """初期化 v3.15.0"""
+        """初期化 v3.21.0"""
         self.config = config or {}
         self.last_trade_time = None
         self.last_trade_price = None
@@ -54,12 +54,16 @@ class OptimizedTradingLogic:
         self.trade_history = []
         self.recent_trades_limit = 20
 
-        # MACD状態追跡（確定済みローソク足ベース）
-        self.last_macd_position = None  # 'above' or 'below'
-        self.pending_cross = None       # フィルター拒否されたクロスを保持
+        # v3.21.0: MACD現在ポジションベース追跡
+        # None = 未エントリー（再起動直後・クローズ直後）→ 即エントリー可能
+        # 'above' = 直前のエントリーがBUY方向
+        # 'below' = 直前のエントリーがSELL方向
+        self.last_entry_macd_position = None
 
-        # v3.14.0: ポジションベースエントリー用の待機カウンター
-        self.no_position_cycles = 0  # ポジションなしで待機したサイクル数
+        # 互換性のため保持（close側で参照される可能性）
+        self.last_macd_position = None
+        self.pending_cross = None
+        self.no_position_cycles = 0
 
         # v3.20.0: SL後クールダウン（即再エントリー防止）
         self.last_sl_time = None          # 最後のSL発動時刻
@@ -103,12 +107,19 @@ class OptimizedTradingLogic:
 
     def should_trade(self, market_data, historical_df=None, skip_price_filter=False, is_tpsl_continuation=False):
         """
-        取引判定 - v3.16.0 確定済みMACDクロス + フォールバック（EMAフィルターなし）
+        取引判定 - v3.21.0 MACD現在ポジションベース
+
+        クロス待ちではなく「今MACDがシグナルラインのどちら側にいるか」でシグナルを出す。
+        - 再起動後も初回サイクルで即エントリー可能
+        - ポジションクローズ後も即再エントリー可能
+        - 同方向への再エントリーは last_entry_macd_position でブロック
 
         ルール:
-        1. 確定済みローソク足(iloc[-2])のMACDでクロス検出（優先）
-        2. クロスなし + ポジションなし → ポジションベースフォールバック
-        3. タイミングフィルターで拒否 → クロスを保持し次回再試行
+        1. 確定済みローソク足(iloc[-2])のMACDポジションを確認
+        2. 'above'(MACD Line > Signal Line) → BUY方向
+        3. 'below'(MACD Line < Signal Line) → SELL方向
+        4. 前回エントリー方向と同じならスキップ（無限ループ防止）
+        5. ポジションクローズ後は last_entry_macd_position=None → 次サイクルで即エントリー
 
         Returns:
             (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
@@ -122,17 +133,14 @@ class OptimizedTradingLogic:
             ema_20 = market_data.get('ema_20', current_price)
             ema_50 = market_data.get('ema_50', current_price)
 
-            logger.info(f"📊 [MACD v3.16.0 Cross+Fallback] Price=¥{current_price:.3f}")
+            logger.info(f"📊 [MACD v3.21.0 Position] Price=¥{current_price:.3f}")
             logger.info(f"   Live MACD: Line={macd_line:.6f}, Signal={macd_signal:.6f}, Hist={macd_histogram:.6f}")
 
-            # === v3.15.0: 確定済みローソク足でMACDクロス判定 ===
-            is_golden_cross = False
-            is_death_cross = False
-            confirmed_histogram = abs(macd_histogram)  # fallback
-            confirmed_position = 'above' if macd_line > macd_signal else 'below'  # fallback
+            # === 確定済みローソク足(iloc[-2])のMACD位置を取得 ===
+            confirmed_histogram = abs(macd_histogram)  # フォールバック: ライブ値
+            confirmed_position = 'above' if macd_line > macd_signal else 'below'  # フォールバック
 
-            if historical_df is not None and len(historical_df) >= 4 and 'macd_line' in historical_df.columns:
-                # 確定済みローソク足(iloc[-2])のMACD
+            if historical_df is not None and len(historical_df) >= 3 and 'macd_line' in historical_df.columns:
                 confirmed = historical_df.iloc[-2]
                 confirmed_macd_line = float(confirmed.get('macd_line', 0))
                 confirmed_macd_signal = float(confirmed.get('macd_signal', 0))
@@ -140,116 +148,59 @@ class OptimizedTradingLogic:
                 confirmed_position = 'above' if confirmed_macd_line > confirmed_macd_signal else 'below'
 
                 logger.info(f"   Confirmed candle MACD: Line={confirmed_macd_line:.6f}, Signal={confirmed_macd_signal:.6f}")
-                logger.info(f"   Confirmed position: {confirmed_position}, Last tracked: {self.last_macd_position}")
 
-                if self.last_macd_position is None:
-                    # 初回: 前々回の確定ローソク足から状態を復元
-                    prev = historical_df.iloc[-3]
-                    prev_ml = float(prev.get('macd_line', 0))
-                    prev_ms = float(prev.get('macd_signal', 0))
-                    self.last_macd_position = 'above' if prev_ml > prev_ms else 'below'
-                    logger.info(f"   🔄 [STARTUP] Restored: {self.last_macd_position} → {confirmed_position}")
+            # 互換性のため last_macd_position を更新（close側ロジックで参照される場合に備える）
+            self.last_macd_position = confirmed_position
 
-                # クロス検出（確定済みローソク足ベース）
-                if self.last_macd_position == 'below' and confirmed_position == 'above':
-                    is_golden_cross = True
-                    self.pending_cross = None
-                    logger.info(f"   🟢 CONFIRMED Golden Cross! (from confirmed candle)")
-                elif self.last_macd_position == 'above' and confirmed_position == 'below':
-                    is_death_cross = True
-                    self.pending_cross = None
-                    logger.info(f"   🔴 CONFIRMED Death Cross! (from confirmed candle)")
-
-                # 保留中のクロス復元
-                if not is_golden_cross and not is_death_cross and self.pending_cross is not None:
-                    if self.pending_cross == 'golden' and confirmed_position == 'above':
-                        is_golden_cross = True
-                        logger.info(f"   🟢 PENDING Golden Cross RESTORED")
-                    elif self.pending_cross == 'death' and confirmed_position == 'below':
-                        is_death_cross = True
-                        logger.info(f"   🔴 PENDING Death Cross RESTORED")
-                    else:
-                        logger.info(f"   Pending cross '{self.pending_cross}' expired")
-                        self.pending_cross = None
-
-                # 状態を更新（確定済みローソク足ベース）
-                self.last_macd_position = confirmed_position
-            else:
-                # Fallback: historical_dfがない場合はライブMACDを使用
-                macd_position = 'above' if macd_line > macd_signal else 'below'
-                if self.last_macd_position is None:
-                    self.last_macd_position = macd_position
-                    logger.info(f"   🔄 [STARTUP] No historical data, initialized: {macd_position}")
-                else:
-                    if self.last_macd_position == 'below' and macd_position == 'above':
-                        is_golden_cross = True
-                    elif self.last_macd_position == 'above' and macd_position == 'below':
-                        is_death_cross = True
-                    self.last_macd_position = macd_position
-
-            # === EMA情報（参考ログのみ、フィルターなし v3.16.0） ===
+            # EMA参考ログ
             ema_trend = 'up' if ema_20 > ema_50 else 'down'
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
-            logger.info(f"   EMA Trend: {ema_trend} ({ema_diff_pct:.2f}%) [参考のみ・フィルターなし]")
-            logger.info(f"   Confirmed hist: {confirmed_histogram:.6f}, No-position cycles: {self.no_position_cycles}")
+            logger.info(f"   MACD Position: {confirmed_position}, Hist: {confirmed_histogram:.6f}")
+            logger.info(f"   Last Entry Direction: {self.last_entry_macd_position}, EMA: {ema_trend} ({ema_diff_pct:.2f}%)")
 
-            # === クロスあり → クロスベースエントリー（EMAフィルターなし） ===
-            if is_golden_cross or is_death_cross:
-                # クロス検出時はカウンターリセット
-                self.no_position_cycles = 0
+            # === タイミングチェック（SLクールダウンのみ）===
+            if not skip_price_filter:
+                if not self._check_trade_timing():
+                    logger.info(f"   ⏳ Trade timing blocked (SL cooldown or min interval)")
+                    return False, None, "Trade timing blocked", 0.0, None, None
 
-                # v3.19.0: 動的ヒストグラムフィルター（ローリング最適化で自動調整）
-                if confirmed_histogram < self.entry_hist_filter:
-                    cross_type = 'Golden' if is_golden_cross else 'Death'
-                    logger.info(f"   ⚠️ Weak {cross_type} Cross IGNORED (hist={confirmed_histogram:.6f} < {self.entry_hist_filter:.3f})")
-                    self.no_position_cycles += 1
-                    return False, None, f"Weak cross ignored (hist={confirmed_histogram:.6f})", 0.0, None, None
+            # === ヒストグラム強度フィルター（弱すぎるシグナルを除外）===
+            if confirmed_histogram < self.entry_hist_filter:
+                self.no_position_cycles += 1
+                logger.info(f"   ⚠️ Weak signal (hist={confirmed_histogram:.6f} < {self.entry_hist_filter:.3f}) - waiting")
+                return False, None, f"Weak signal (hist={confirmed_histogram:.6f})", 0.0, None, None
 
-                # シグナル強度計算（確定済みヒストグラム使用）
-                if confirmed_histogram > 0.03:
-                    confidence = 2.5
-                elif confirmed_histogram > 0.01:
-                    confidence = 2.0
-                else:
-                    confidence = 1.5
+            # === 同方向への再エントリー防止 ===
+            if self.last_entry_macd_position == confirmed_position:
+                self.no_position_cycles += 1
+                logger.info(f"   ↔️ Already entered in '{confirmed_position}' direction - waiting for direction change")
+                return False, None, f"Already in {confirmed_position} direction", 0.0, None, None
 
-                # 取引タイミングフィルター
-                if not skip_price_filter:
-                    if not self._check_trade_timing():
-                        cross_type = 'golden' if is_golden_cross else 'death'
-                        self.pending_cross = cross_type
-                        logger.info(f"   ⏳ Cross PENDING (trade interval too short)")
-                        return False, None, "Trade interval too short (cross pending)", 0.0, None, None
+            # === シグナル強度計算 ===
+            if confirmed_histogram > 0.03:
+                confidence = 2.5
+            elif confirmed_histogram > 0.01:
+                confidence = 2.0
+            else:
+                confidence = 1.5
 
-                    if self.last_trade_price is not None:
-                        price_change = abs(current_price - self.last_trade_price) / self.last_trade_price
-                        if price_change < 0.003:
-                            cross_type = 'golden' if is_golden_cross else 'death'
-                            self.pending_cross = cross_type
-                            logger.info(f"   ⏳ Cross PENDING (price change too small: {price_change*100:.2f}%)")
-                            return False, None, "Price change too small (cross pending)", 0.0, None, None
+            self.no_position_cycles = 0
 
-                self.pending_cross = None
-
-                if is_golden_cross:
-                    reason = f'MACD Golden Cross [Confirmed] (hist={confirmed_histogram:.4f})'
-                    stop_loss = current_price * (1 - self.stop_loss_pct)
-                    take_profit = current_price * (1 + self.take_profit_pct)
-                    logger.info(f"   🟢 BUY SIGNAL: {reason} (confidence={confidence:.2f})")
-                    return True, 'BUY', reason, confidence, stop_loss, take_profit
-                else:
-                    reason = f'MACD Death Cross [Confirmed] (hist={confirmed_histogram:.4f})'
-                    stop_loss = current_price * (1 + self.stop_loss_pct)
-                    take_profit = current_price * (1 - self.take_profit_pct)
-                    logger.info(f"   🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
-                    return True, 'SELL', reason, confidence, stop_loss, take_profit
-
-            # === v3.20.6: ポジションベースフォールバック無効化 ===
-            # レンジ相場でのフォールバックエントリーが損失の主因のため無効化
-            # MACDクロス確認のみエントリー（精度重視）
-            self.no_position_cycles += 1
-            logger.info(f"   No MACD cross - waiting for confirmed cross (cycles={self.no_position_cycles})")
-            return False, None, "No MACD cross - waiting", 0.0, None, None
+            # === BUY / SELL シグナル生成 ===
+            if confirmed_position == 'above':
+                reason = f'MACD Position BUY (above signal, hist={confirmed_histogram:.4f})'
+                stop_loss = current_price * (1 - self.stop_loss_pct)
+                take_profit = current_price * (1 + self.take_profit_pct)
+                logger.info(f"   🟢 BUY SIGNAL: {reason} (confidence={confidence:.2f})")
+                self.last_entry_macd_position = confirmed_position
+                return True, 'BUY', reason, confidence, stop_loss, take_profit
+            else:
+                reason = f'MACD Position SELL (below signal, hist={confirmed_histogram:.4f})'
+                stop_loss = current_price * (1 + self.stop_loss_pct)
+                take_profit = current_price * (1 - self.take_profit_pct)
+                logger.info(f"   🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
+                self.last_entry_macd_position = confirmed_position
+                return True, 'SELL', reason, confidence, stop_loss, take_profit
 
         except Exception as e:
             logger.error(f"Error in MACD trading logic: {e}", exc_info=True)
@@ -290,10 +241,13 @@ class OptimizedTradingLogic:
 
         if is_exit:
             self.last_exit_price = price
-            logger.info(f"💰 Exit recorded: ¥{price:.2f}")
+            # v3.21.0: クローズ後は last_entry_macd_position をリセット
+            # → 次サイクルで現在のMACD位置に基づき即再エントリー可能
+            self.last_entry_macd_position = None
+            logger.info(f"💰 Exit recorded: ¥{price:.2f} - MACD entry direction reset (ready for re-entry)")
         else:
             self.last_trade_price = price
-            self.no_position_cycles = 0  # v3.14.0: エントリー時にリセット
+            self.no_position_cycles = 0
             logger.info(f"📝 Entry recorded: ¥{price:.2f}")
 
         # ファイルログ
