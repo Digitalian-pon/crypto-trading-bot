@@ -2973,31 +2973,65 @@ MACD_STARTUP_INIT: side=BUY, macd_pos=above, hist=0.047145 ✅
 
 ---
 
-**最終更新**: 2026年2月23日
-**ステータス**: 24時間完全稼働中 ✅ (MACD Cross + EMA-confirmed Position Entry)
-**バージョン**: **3.8.2-fix-duplicate-positions** ⭐**最新**
-**現在の残高**: JPY ¥965（2026年2月23日時点）
+**最終更新**: 2026年4月14日
+**ステータス**: 24時間完全稼働中 ✅ (MACD Position-based Entry)
+**バージョン**: **3.21.0-macd-position-entry** ⭐**最新**
+**現在の残高**: JPY ¥830（2026年4月14日時点）
 **時間足**: **15分足**
-**チェック間隔**: **300秒（5分）**
-**主要指標**: **MACD Cross + EMA確認済みPosition-based + トレーリングストップ (v3.8.2)**
+**チェック間隔**: **60秒（1分）**
+**主要指標**: **MACD現在ポジションベース + トレーリングストップ (v3.21.0)**
 **トレードルール**:
-- MACDゴールデンクロス → BUY（高confidence）
-- MACDデッドクロス → SELL（高confidence）
-- MACDポジションベース + EMA同方向 → BUY/SELL（中confidence）← v3.8.2: EMA逆方向はブロック
-- 反転注文: 既存ポジションチェック必須 ← v3.8.2: 重複防止
-- 決済: トレーリングストップ + MACDクロス確認 + 起動時チェック
+- 確定ローソク足(iloc[-2])のMACDがシグナルより上(above) → BUY
+- 確定ローソク足(iloc[-2])のMACDがシグナルより下(below) → SELL
+- 前回エントリーと同方向の場合はスキップ（last_entry_macd_positionで制御）
+- ポジションクローズ後: last_entry_macd_position=None → 即再エントリー可能
+- 再起動後も初回サイクルで即エントリー可能
+- ヒストグラム < 0.01 は弱シグナルとしてスキップ
+- SL発動後5分間は新規エントリー禁止
+- 決済: トレーリングストップ + MACDクロス確認
 **MACD設定**: 12, 26, 9（標準設定）
 **ボット**: Railway環境で自動稼働中
 **ダッシュボード**:
 - ✅ **Railway**: https://web-production-1f4ce.up.railway.app/
 - ✅ **ログ監視**: https://web-production-1f4ce.up.railway.app/logs
-**最新修正**: 重複ポジション防止 + 逆張りエントリーブロック ✅ **CRITICAL FIX**
+**最新修正**: MACDクロス待ち廃止 → 現在ポジションベースエントリーで即シグナル発生 ✅
 **GitHubコミット履歴**:
-- 9da03a7 - 🐛 v3.8.2 - Fix duplicate positions + counter-trend entry ⭐**最新**
+- bea196f - 🎯 v3.21.0 - MACDクロス待ちから現在ポジションベースエントリーに変更 ⭐**最新**
+- 3cb721f - v3.20.6: フォールバック無効化・レバレッジ係数1.8
+- 9da03a7 - 🐛 v3.8.2 - Fix duplicate positions + counter-trend entry
 - 6331281 - 🐛 v3.8.1 - Fix MACD state reset on bot restart
-- f363171 - 🐛 Fix histogram_strength/ema_trend undefined error
 - cd54497 - 🎯 v3.8.0 - Add MACD position-based entry (not just cross)
-- 2bd28b0 - 🐛 v3.7.0 CRITICAL FIX: Cross consumed by filter
 - b97689e - 🎯 v3.1.0 - TREND-FOLLOW ONLY MODE
 - 2873eb5 - 🎯 v3.0.0 - MACD Simple Strategy
-- b64b079 - 🎯 v2.4.0 - 本物の4時間足 + MACD主体ロジック実装
+
+---
+
+#### 36. **MACDクロス待ち廃止 → 現在ポジションベースエントリー** (2026年4月14日)
+**問題**: シグナルが長時間出ない、ダウン復帰後も取引できない
+
+**原因**:
+- v3.20.6で「MACDクロス待ち専用(cross-only-no-fallback)」になっていた
+- レンジ相場ではクロスが発生しないため "No MACD cross - waiting" が延々続く
+- 再起動後もクロスが来るまで待機 → 機会損失
+
+**修正内容** (`services/optimized_trading_logic.py`):
+```python
+# Before（v3.20.6: クロス検出方式）
+# iloc[-2] vs 前回状態 → above→below or below→above の遷移を待つ
+# → クロスが来ない限り永遠に待機
+
+# After（v3.21.0: 現在ポジション方式）
+# iloc[-2]のMACD位置を見るだけ
+confirmed_position = 'above' if macd_line > signal else 'below'
+if confirmed_position != last_entry_macd_position:
+    → エントリー（BUY or SELL）
+```
+
+**同方向再エントリー防止**:
+- `last_entry_macd_position` でエントリー済み方向を記憶
+- クローズ時に `None` リセット → 次サイクルで即再エントリー可能
+- 再起動時も `None` → 即エントリー可能
+
+**GitHubコミット**: bea196f - 🎯 v3.21.0
+
+**解決**: シグナルが出なかった問題を根本解決、クローズ1分後に即再エントリー確認 ✅
