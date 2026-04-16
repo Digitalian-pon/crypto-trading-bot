@@ -537,20 +537,14 @@ class OptimizedLeverageTradingBot:
 
     def _should_close_position(self, position, current_price, indicators, pl_ratio, stop_loss, take_profit, df=None):
         """
-        ポジション決済判定 - v3.6.0 トレーリングストップ + MACDクロス確認決済
+        ポジション決済判定 - v3.22.0 トレーリングストップ + MACD位置ベース決済
 
         ルール:
         1. トレーリングストップ（v3.18.0: 利益を伸ばす + 早期建値ロック）
-           - 含み益 0〜+0.5%: SL -0.8%（ハードストップ）
-           - 含み益 +0.5%到達: SL 0%（建値ロック = 損失ゼロ保証）
-           - 含み益 +1%到達: SL +0.5%
-           - 含み益 +1.5%到達: SL +1%
-           - 含み益 +2%到達: SL +1.5%
-           - 含み益 +3%到達: SL +2%（利益を追従）
-           ※固定TPなし - トレーリングストップが自動的に利益を追従
-        2. MACDクロス確認決済
-           - クロス検出 + ヒストグラム強い(>0.003) → 決済
-           - クロス検出 + ヒストグラム弱い → 保持継続（トレーリングが保護）
+        2. MACD位置ベース決済（v3.22.0: エントリーと同じロジック）
+           - BUY保持中 + 確定MACD below → 即決済
+           - SELL保持中 + 確定MACD above → 即決済
+           - ヒストグラムフィルターなし（MACD方向のみで判断）
 
         Returns:
             (should_close: bool, reason: str, trade_type: str or None)
@@ -610,114 +604,49 @@ class OptimizedLeverageTradingBot:
                 # 反転注文なしで "Loss Close" として処理 → 同サイクルの新規エントリーも禁止
                 return True, f"Loss Close: Hard SL {pl_ratio*100:.2f}%", None
 
-        # === 2. MACDクロス確認決済（v3.13.0: 確定済みローソク足ベース） ===
-        # ライブMACDは不安定なため、確定済みローソク足(iloc[-2])のMACDでクロス検出
-        is_close_death_cross = False
-        is_close_golden_cross = False
-        confirmed_close_histogram = abs(macd_histogram)  # fallback
+        # === 2. MACD位置ベース決済（v3.22.0: エントリーと同じMACD主体ロジック）===
+        # クロス待ちやヒストグラムフィルターを廃止
+        # 確定済みローソク足(iloc[-2])のMACD位置がポジションと逆方向なら即決済
+        confirmed_close_pos = 'above' if macd_line > macd_signal else 'below'  # fallback
 
-        if df is not None and len(df) >= 4 and 'macd_line' in df.columns:
+        if df is not None and len(df) >= 3 and 'macd_line' in df.columns:
             confirmed = df.iloc[-2]
             confirmed_ml = float(confirmed.get('macd_line', 0))
             confirmed_ms = float(confirmed.get('macd_signal', 0))
             confirmed_close_pos = 'above' if confirmed_ml > confirmed_ms else 'below'
-            confirmed_close_histogram = abs(confirmed_ml - confirmed_ms)
 
-            logger.info(f"   🔍 [v3.13.0] Confirmed MACD: {confirmed_close_pos} (Line={confirmed_ml:.6f}, Signal={confirmed_ms:.6f})")
-            logger.info(f"   🔍 Last close state: {self.last_close_macd_position}")
-
-            if self.last_close_macd_position is None:
-                # 初回: 前々回の確定ローソク足から状態を復元
-                prev = df.iloc[-3]
-                prev_ml = float(prev.get('macd_line', 0))
-                prev_ms = float(prev.get('macd_signal', 0))
-                self.last_close_macd_position = 'above' if prev_ml > prev_ms else 'below'
-                logger.info(f"   🔄 [STARTUP] Close state restored: {self.last_close_macd_position} → {confirmed_close_pos}")
-                try:
-                    with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"MACD_STARTUP_INIT: side={side}, confirmed={confirmed_close_pos}, prev={self.last_close_macd_position}\n")
-                except:
-                    pass
-
-            # クロス検出（確定済みローソク足ベース）
-            if self.last_close_macd_position == 'above' and confirmed_close_pos == 'below':
-                is_close_death_cross = True
-                logger.info(f"   🔴 CONFIRMED Death Cross (from confirmed candle)")
-            elif self.last_close_macd_position == 'below' and confirmed_close_pos == 'above':
-                is_close_golden_cross = True
-                logger.info(f"   🟢 CONFIRMED Golden Cross (from confirmed candle)")
-
-            # ★ v3.13.0: ヒストグラムが強い場合のみ状態を更新
-            # 弱いヒストグラムでクロスを「消費」すると、後でヒストグラムが強くなっても
-            # クロスが再検出できなくなるバグを防止
-            if is_close_death_cross or is_close_golden_cross:
-                if confirmed_close_histogram > self.trading_logic.close_hist_filter:
-                    # ヒストグラム十分 → 状態を更新（クロスを消費）
-                    self.last_close_macd_position = confirmed_close_pos
-                else:
-                    # ヒストグラム不十分 → 状態を更新しない（次回再検出可能）
-                    logger.info(f"   ⏸️ Cross detected but histogram weak ({confirmed_close_histogram:.6f}) - NOT consuming cross")
-            else:
-                self.last_close_macd_position = confirmed_close_pos
+            logger.info(f"   🔍 [v3.22.0] Confirmed MACD Position: {confirmed_close_pos} (Line={confirmed_ml:.6f}, Signal={confirmed_ms:.6f})")
         else:
-            # Fallback: dfがない場合
-            macd_close_pos = 'above' if macd_line > macd_signal else 'below'
-            confirmed_close_pos = macd_close_pos
-            if self.last_close_macd_position is None:
-                self.last_close_macd_position = macd_close_pos
-                logger.info(f"   🔄 [STARTUP] No df, initialized: {macd_close_pos}")
+            logger.info(f"   🔍 [v3.22.0] Live MACD Position: {confirmed_close_pos} (no df)")
+
+        # 互換性のため更新
+        self.last_close_macd_position = confirmed_close_pos
+
+        # ログ記録
+        try:
+            with open('bot_execution_log.txt', 'a') as f:
+                f.write(f"MACD_CLOSE_POSITION: {confirmed_close_pos}, side={side}\n")
+        except:
+            pass
+
+        # BUY保持中 + MACD below signal → 即決済
+        if side == 'BUY' and confirmed_close_pos == 'below':
+            logger.info(f"   🔴 BUY pos + MACD below signal → CLOSE (MACD主体決済)")
+            if pl_ratio >= 0:
+                return True, f"MACD Position SELL → Reversal SELL", 'SELL'
             else:
-                if self.last_close_macd_position == 'above' and macd_close_pos == 'below':
-                    is_close_death_cross = True
-                elif self.last_close_macd_position == 'below' and macd_close_pos == 'above':
-                    is_close_golden_cross = True
-                self.last_close_macd_position = macd_close_pos
+                return True, f"MACD Position SELL - Loss Close", None
 
-        # ★ 起動時チェック: 確定済みMACDがポジションと逆方向なら決済検討
-        close_hist_threshold = self.trading_logic.close_hist_filter  # v3.19.0: 動的パラメータ
-        if self.last_close_macd_position is not None and not is_close_death_cross and not is_close_golden_cross:
-            # 起動直後で既にMACDがポジションと逆方向
-            if side == 'BUY' and confirmed_close_pos == 'below' and confirmed_close_histogram > close_hist_threshold:
-                logger.info(f"   ⚠️ BUY pos + confirmed bearish MACD → close")
-                if pl_ratio >= 0:
-                    return True, f"MACD Bearish [Confirmed] → Reversal SELL", 'SELL'
-                else:
-                    return True, f"MACD Bearish [Confirmed] - Loss Close", None
-            elif side == 'SELL' and confirmed_close_pos == 'above' and confirmed_close_histogram > close_hist_threshold:
-                logger.info(f"   ⚠️ SELL pos + confirmed bullish MACD → close")
-                if pl_ratio >= 0:
-                    return True, f"MACD Bullish [Confirmed] → Reversal BUY", 'BUY'
-                else:
-                    return True, f"MACD Bullish [Confirmed] - Loss Close", None
-
-        # BUYポジション: MACDデッドクロス + ヒストグラム確認
-        if side == 'BUY' and is_close_death_cross:
-            if confirmed_close_histogram > close_hist_threshold:
-                logger.info(f"   🔴 Closing BUY - Death Cross CONFIRMED (hist={confirmed_close_histogram:.6f})")
-                if pl_ratio >= 0:
-                    logger.info(f"   🔄 Profitable position - Will reverse to SELL")
-                    return True, f"MACD Death Cross (Confirmed) → Reversal SELL", 'SELL'
-                else:
-                    logger.info(f"   ⛔ Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
-                    return True, f"MACD Death Cross (Confirmed) - Loss Close", None
+        # SELL保持中 + MACD above signal → 即決済
+        if side == 'SELL' and confirmed_close_pos == 'above':
+            logger.info(f"   🟢 SELL pos + MACD above signal → CLOSE (MACD主体決済)")
+            if pl_ratio >= 0:
+                return True, f"MACD Position BUY → Reversal BUY", 'BUY'
             else:
-                logger.info(f"   ⏸️ Death Cross but histogram weak ({confirmed_close_histogram:.6f} < {close_hist_threshold:.3f}) - HOLDING")
+                return True, f"MACD Position BUY - Loss Close", None
 
-        # SELLポジション: MACDゴールデンクロス + ヒストグラム確認
-        if side == 'SELL' and is_close_golden_cross:
-            if confirmed_close_histogram > close_hist_threshold:
-                logger.info(f"   🟢 Closing SELL - Golden Cross CONFIRMED (hist={confirmed_close_histogram:.6f})")
-                if pl_ratio >= 0:
-                    logger.info(f"   🔄 Profitable position - Will reverse to BUY")
-                    return True, f"MACD Golden Cross (Confirmed) → Reversal BUY", 'BUY'
-                else:
-                    logger.info(f"   ⛔ Loss position ({pl_ratio*100:.2f}%) - Closing only, no reversal")
-                    return True, f"MACD Golden Cross (Confirmed) - Loss Close", None
-            else:
-                logger.info(f"   ⏸️ Golden Cross but histogram weak ({confirmed_close_histogram:.6f} < {close_hist_threshold:.3f}) - HOLDING")
-
-        # 保持継続
-        logger.info(f"   ✅ Holding position (P/L: {pl_ratio*100:.2f}%, SL: {trailing_sl_ratio*100:.1f}%, Peak: {peak_pl*100:.2f}%)")
+        # MACD方向がポジションと一致 → 保持継続
+        logger.info(f"   ✅ Holding position - MACD {confirmed_close_pos} matches {side} (P/L: {pl_ratio*100:.2f}%, SL: {trailing_sl_ratio*100:.1f}%)")
         return False, "Holding position", None
 
     def _close_position(self, position, current_price, reason):
