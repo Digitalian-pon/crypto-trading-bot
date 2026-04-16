@@ -604,24 +604,37 @@ class OptimizedLeverageTradingBot:
                 # 反転注文なしで "Loss Close" として処理 → 同サイクルの新規エントリーも禁止
                 return True, f"Loss Close: Hard SL {pl_ratio*100:.2f}%", None
 
-        # === 2. MACD位置ベース決済（v3.22.1: 最小ヒストグラムフィルター付き）===
-        # 確定済みローソク足(iloc[-2])のMACD位置がポジションと逆方向なら決済
-        # ただしhist < 0.005（方向性なし）の場合は保持継続（レンジ相場ノイズ回避）
-        CLOSE_HIST_MIN = 0.005  # クローズ用最小ヒストグラム閾値
+        # === 2. MACD位置ベース決済（v3.23.0: 強化フィルター + 2本連続確認）===
+        # 確定済みローソク足のMACD位置がポジションと逆方向なら決済
+        # v3.23.0変更点:
+        #   - hist閾値: 0.005 → 0.02（レンジ相場の弱シグナルを除外）
+        #   - 2本連続(iloc[-2]とiloc[-3])で逆方向かつhist充分のみ決済
+        CLOSE_HIST_MIN = 0.02  # v3.22.1: 0.005 → v3.23.0: 0.02
 
         confirmed_close_pos = 'above' if macd_line > macd_signal else 'below'  # fallback
         confirmed_close_hist = abs(macd_line - macd_signal)  # fallback
+        prev_close_pos = None  # 1本前の確定足(iloc[-3])
+        prev_close_hist = 0.0
 
-        if df is not None and len(df) >= 3 and 'macd_line' in df.columns:
+        if df is not None and len(df) >= 4 and 'macd_line' in df.columns:
+            # 最新の確定足 (iloc[-2])
             confirmed = df.iloc[-2]
             confirmed_ml = float(confirmed.get('macd_line', 0))
             confirmed_ms = float(confirmed.get('macd_signal', 0))
             confirmed_close_pos = 'above' if confirmed_ml > confirmed_ms else 'below'
             confirmed_close_hist = abs(confirmed_ml - confirmed_ms)
 
-            logger.info(f"   🔍 [v3.22.1] Confirmed MACD: {confirmed_close_pos} (Line={confirmed_ml:.6f}, Signal={confirmed_ms:.6f}, Hist={confirmed_close_hist:.6f})")
+            # 1本前の確定足 (iloc[-3]) - 2本連続確認用
+            prev_confirmed = df.iloc[-3]
+            prev_ml = float(prev_confirmed.get('macd_line', 0))
+            prev_ms = float(prev_confirmed.get('macd_signal', 0))
+            prev_close_pos = 'above' if prev_ml > prev_ms else 'below'
+            prev_close_hist = abs(prev_ml - prev_ms)
+
+            logger.info(f"   🔍 [v3.23.0] Confirmed[-2]: {confirmed_close_pos} (Hist={confirmed_close_hist:.6f})")
+            logger.info(f"   🔍 [v3.23.0] Confirmed[-3]: {prev_close_pos} (Hist={prev_close_hist:.6f})")
         else:
-            logger.info(f"   🔍 [v3.22.1] Live MACD Position: {confirmed_close_pos} (no df)")
+            logger.info(f"   🔍 [v3.23.0] Live MACD: {confirmed_close_pos} (履歴不足, 1本判定フォールバック)")
 
         # 互換性のため更新
         self.last_close_macd_position = confirmed_close_pos
@@ -629,30 +642,40 @@ class OptimizedLeverageTradingBot:
         # ログ記録
         try:
             with open('bot_execution_log.txt', 'a') as f:
-                f.write(f"MACD_CLOSE_CHECK: pos={confirmed_close_pos}, hist={confirmed_close_hist:.6f}, side={side}, threshold={CLOSE_HIST_MIN}\n")
+                f.write(f"MACD_CLOSE_CHECK: pos[-2]={confirmed_close_pos}(h={confirmed_close_hist:.6f}), pos[-3]={prev_close_pos}(h={prev_close_hist:.6f}), side={side}, threshold={CLOSE_HIST_MIN}\n")
         except:
             pass
 
-        # MACD方向がポジションと逆 かつ ヒストグラムが十分（方向性あり）→ 決済
+        # v3.23.0: 2本連続の確定足で逆方向 + 両方ともhist>=閾値 のみ決済
+        # prev_close_pos=None（履歴不足）時は従来通り1本判定にフォールバック
+        def _reversal_confirmed(reversal_pos):
+            if prev_close_pos is None:
+                return (confirmed_close_pos == reversal_pos
+                        and confirmed_close_hist >= CLOSE_HIST_MIN)
+            return (confirmed_close_pos == reversal_pos
+                    and prev_close_pos == reversal_pos
+                    and confirmed_close_hist >= CLOSE_HIST_MIN
+                    and prev_close_hist >= CLOSE_HIST_MIN)
+
         if side == 'BUY' and confirmed_close_pos == 'below':
-            if confirmed_close_hist >= CLOSE_HIST_MIN:
-                logger.info(f"   🔴 BUY pos + MACD below (hist={confirmed_close_hist:.6f} >= {CLOSE_HIST_MIN}) → CLOSE")
+            if _reversal_confirmed('below'):
+                logger.info(f"   🔴 BUY pos + MACD below CONFIRMED (2-candle, hist>={CLOSE_HIST_MIN}) → CLOSE")
                 if pl_ratio >= 0:
-                    return True, f"MACD Position SELL → Reversal SELL", 'SELL'
+                    return True, f"MACD Position SELL → Reversal SELL (2-candle confirmed)", 'SELL'
                 else:
-                    return True, f"MACD Position SELL - Loss Close", None
+                    return True, f"MACD Position SELL - Loss Close (2-candle confirmed)", None
             else:
-                logger.info(f"   ⏸️ BUY pos + MACD below but weak (hist={confirmed_close_hist:.6f} < {CLOSE_HIST_MIN}) → HOLD")
+                logger.info(f"   ⏸️ BUY pos + MACD below - not confirmed (need 2-candle & hist>={CLOSE_HIST_MIN}) → HOLD")
 
         if side == 'SELL' and confirmed_close_pos == 'above':
-            if confirmed_close_hist >= CLOSE_HIST_MIN:
-                logger.info(f"   🟢 SELL pos + MACD above (hist={confirmed_close_hist:.6f} >= {CLOSE_HIST_MIN}) → CLOSE")
+            if _reversal_confirmed('above'):
+                logger.info(f"   🟢 SELL pos + MACD above CONFIRMED (2-candle, hist>={CLOSE_HIST_MIN}) → CLOSE")
                 if pl_ratio >= 0:
-                    return True, f"MACD Position BUY → Reversal BUY", 'BUY'
+                    return True, f"MACD Position BUY → Reversal BUY (2-candle confirmed)", 'BUY'
                 else:
-                    return True, f"MACD Position BUY - Loss Close", None
+                    return True, f"MACD Position BUY - Loss Close (2-candle confirmed)", None
             else:
-                logger.info(f"   ⏸️ SELL pos + MACD above but weak (hist={confirmed_close_hist:.6f} < {CLOSE_HIST_MIN}) → HOLD")
+                logger.info(f"   ⏸️ SELL pos + MACD above - not confirmed (need 2-candle & hist>={CLOSE_HIST_MIN}) → HOLD")
 
         # MACD方向がポジションと一致 or ヒストグラム不足 → 保持継続
         logger.info(f"   ✅ Holding position - MACD {confirmed_close_pos}, hist={confirmed_close_hist:.6f} (P/L: {pl_ratio*100:.2f}%, SL: {trailing_sl_ratio*100:.1f}%)")
