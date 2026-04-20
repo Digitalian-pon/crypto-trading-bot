@@ -604,12 +604,19 @@ class OptimizedLeverageTradingBot:
                 # 反転注文なしで "Loss Close" として処理 → 同サイクルの新規エントリーも禁止
                 return True, f"Loss Close: Hard SL {pl_ratio*100:.2f}%", None
 
-        # === 2. MACD位置ベース決済（v3.23.0: 強化フィルター + 2本連続確認）===
+        # === 2. 価格ベースTP（v3.24.0: +2%で確実利確）===
+        # MACDヒストグラムに依存せず、+2%到達で必ず利確
+        PRICE_TP_PCT = 0.02  # +2% 利確
+        if pl_ratio >= PRICE_TP_PCT:
+            logger.info(f"   💰 PRICE TP HIT: P/L {pl_ratio*100:.2f}% >= {PRICE_TP_PCT*100:.0f}% → CLOSE")
+            return True, f"Price TP: {pl_ratio*100:.2f}% (target +{PRICE_TP_PCT*100:.0f}%)", None
+
+        # === 3. MACD位置ベース決済（v3.24.0: hist閾値を現実的な値に修正）===
         # 確定済みローソク足のMACD位置がポジションと逆方向なら決済
-        # v3.23.0変更点:
-        #   - hist閾値: 0.005 → 0.02（レンジ相場の弱シグナルを除外）
-        #   - 2本連続(iloc[-2]とiloc[-3])で逆方向かつhist充分のみ決済
-        CLOSE_HIST_MIN = 0.02  # v3.22.1: 0.005 → v3.23.0: 0.02
+        # v3.24.0変更点:
+        #   - hist閾値: 0.02 → 0.003（DOGE/JPY 15分足の実際のhist値に合わせて修正）
+        #   - 2本連続確認は維持（誤発火防止）
+        CLOSE_HIST_MIN = 0.003  # v3.23.0: 0.02 → v3.24.0: 0.003
 
         confirmed_close_pos = 'above' if macd_line > macd_signal else 'below'  # fallback
         confirmed_close_hist = abs(macd_line - macd_signal)  # fallback

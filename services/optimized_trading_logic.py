@@ -186,16 +186,28 @@ class OptimizedTradingLogic:
 
             self.no_position_cycles = 0
 
+            # === EMAトレンドフィルター（v3.24.0: 逆張り防止）===
+            # BUY: EMA20 > EMA50（上昇トレンド）のみ許可
+            # SELL: EMA20 < EMA50（下降トレンド）のみ許可
+            if confirmed_position == 'above' and ema_trend != 'up':
+                self.no_position_cycles += 1
+                logger.info(f"   🚫 BUY blocked by EMA filter (EMA trend={ema_trend}, need uptrend)")
+                return False, None, f"BUY blocked: EMA downtrend", 0.0, None, None
+            if confirmed_position == 'below' and ema_trend != 'down':
+                self.no_position_cycles += 1
+                logger.info(f"   🚫 SELL blocked by EMA filter (EMA trend={ema_trend}, need downtrend)")
+                return False, None, f"SELL blocked: EMA uptrend", 0.0, None, None
+
             # === BUY / SELL シグナル生成 ===
             if confirmed_position == 'above':
-                reason = f'MACD Position BUY (above signal, hist={confirmed_histogram:.4f})'
+                reason = f'MACD Position BUY (above signal, hist={confirmed_histogram:.4f}, EMA=up)'
                 stop_loss = current_price * (1 - self.stop_loss_pct)
                 take_profit = current_price * (1 + self.take_profit_pct)
                 logger.info(f"   🟢 BUY SIGNAL: {reason} (confidence={confidence:.2f})")
                 self.last_entry_macd_position = confirmed_position
                 return True, 'BUY', reason, confidence, stop_loss, take_profit
             else:
-                reason = f'MACD Position SELL (below signal, hist={confirmed_histogram:.4f})'
+                reason = f'MACD Position SELL (below signal, hist={confirmed_histogram:.4f}, EMA=down)'
                 stop_loss = current_price * (1 + self.stop_loss_pct)
                 take_profit = current_price * (1 - self.take_profit_pct)
                 logger.info(f"   🔴 SELL SIGNAL: {reason} (confidence={confidence:.2f})")
