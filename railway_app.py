@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.24.0-price-tp-ema-filter"
+VERSION = "3.24.1-be07-macd-slow"
 BUILD_DATE = "2026-04-17"
-COMMIT_HASH = "price-tp-2pct-ema-filter-hist-0.003"
+COMMIT_HASH = "be07-macd-slow-15-30-9"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
