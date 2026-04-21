@@ -655,16 +655,15 @@ class OptimizedLeverageTradingBot:
         except:
             pass
 
-        # v3.23.0: 2本連続の確定足で逆方向 + 両方ともhist>=閾値 のみ決済
-        # prev_close_pos=None（履歴不足）時は従来通り1本判定にフォールバック
+        # v3.24.3: [-2]のhist>=閾値 かつ [-3]はdirection一致のみ（histは問わない）
+        # [-3]にもhist要件を課すと小さいhistのcandle1本でブロックされ続ける
         def _reversal_confirmed(reversal_pos):
             if prev_close_pos is None:
                 return (confirmed_close_pos == reversal_pos
                         and confirmed_close_hist >= CLOSE_HIST_MIN)
             return (confirmed_close_pos == reversal_pos
                     and prev_close_pos == reversal_pos
-                    and confirmed_close_hist >= CLOSE_HIST_MIN
-                    and prev_close_hist >= CLOSE_HIST_MIN)
+                    and confirmed_close_hist >= CLOSE_HIST_MIN)
 
         if side == 'BUY' and confirmed_close_pos == 'below':
             if _reversal_confirmed('below'):
