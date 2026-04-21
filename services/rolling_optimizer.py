@@ -36,7 +36,7 @@ class RollingOptimizer:
         # DOGE/JPYの15分足ではMACDヒストグラムが非常に小さい（0.001〜0.01程度）
         # v3.20.2: SL下限を0.8%に固定（0.6%はノイズで刈られるため禁止）
         self.param_grid = {
-            'stop_loss_pct': [0.008, 0.010, 0.012, 0.015, 0.020],
+            'stop_loss_pct': [0.008, 0.010, 0.012],  # 上限1.2%（2.0%は損失過大のため除外）
             'breakeven_threshold': [0.003, 0.005, 0.007],
             'entry_hist_filter': [0.001, 0.002, 0.003, 0.005],
             'close_hist_filter': [0.0005, 0.001, 0.002, 0.003],

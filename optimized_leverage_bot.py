@@ -84,9 +84,10 @@ class OptimizedLeverageTradingBot:
             return
         old_sl = self.dynamic_hard_sl
         # v3.20.2: SL下限クランプ - 最適化が0.8%未満を選んでも0.8%を維持
-        MIN_SL = 0.008  # 0.8%（15分足ノイズ対策）
+        MIN_SL = 0.008  # 0.8%（下限）
+        MAX_SL = 0.012  # 1.2%（上限: これ以上広げると損失が大きくなりすぎる）
         raw_sl = params.get('stop_loss_pct', MIN_SL)
-        self.dynamic_hard_sl = -max(raw_sl, MIN_SL)
+        self.dynamic_hard_sl = -min(max(raw_sl, MIN_SL), MAX_SL)
         if 'trailing_stops' in params:
             self.trailing_template = params['trailing_stops']
         elif 'breakeven_threshold' in params:
@@ -617,7 +618,7 @@ class OptimizedLeverageTradingBot:
         # v3.24.0変更点:
         #   - hist閾値: 0.02 → 0.003（DOGE/JPY 15分足の実際のhist値に合わせて修正）
         #   - 2本連続確認は維持（誤発火防止）
-        CLOSE_HIST_MIN = 0.003  # v3.23.0: 0.02 → v3.24.0: 0.003
+        CLOSE_HIST_MIN = 0.001  # v3.24.0: 0.003 → v3.24.2: 0.001（確定足histが小さくてもSELL方向なら閉じる）
 
         confirmed_close_pos = 'above' if macd_line > macd_signal else 'below'  # fallback
         confirmed_close_hist = abs(macd_line - macd_signal)  # fallback

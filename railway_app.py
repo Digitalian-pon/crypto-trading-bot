@@ -39,7 +39,7 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.24.1-be07-macd-slow"
+VERSION = "3.24.2-close-hist-fix-sl-cap"
 BUILD_DATE = "2026-04-17"
 COMMIT_HASH = "be07-macd-slow-15-30-9"
 
