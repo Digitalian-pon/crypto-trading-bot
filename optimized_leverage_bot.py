@@ -866,6 +866,17 @@ class OptimizedLeverageTradingBot:
         except:
             pass
 
+        # v3.27.0: サーキットブレーカーチェック（反転注文もブロック）
+        cb_ok, cb_reason = self.trading_logic._check_circuit_breaker()
+        if not cb_ok:
+            logger.warning(f"🚨 [REVERSAL] {cb_reason} - skipping reversal order")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"REVERSAL_CIRCUIT_BREAKER_BLOCK: {cb_reason}\n")
+            except:
+                pass
+            return
+
         # v3.20.0: 反転注文前の既存ポジション確認（MAX_POSITIONS上限）
         existing_positions = self.api.get_positions(symbol=self.symbol)
         if existing_positions and len(existing_positions) >= self.MAX_POSITIONS:

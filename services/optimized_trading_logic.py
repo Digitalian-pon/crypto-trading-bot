@@ -74,6 +74,14 @@ class OptimizedTradingLogic:
         self.sl_price_range_pct = 0.005          # SL価格から±0.5%以内は禁止
         self.sl_price_cooldown_seconds = 1800    # 30分間は価格帯ブロック
 
+        # v3.27.0: サーキットブレーカー（連敗で自動停止）
+        self.consecutive_losses = 0                   # 連敗カウンター
+        self.circuit_breaker_threshold = 3            # 3連敗でトリップ
+        self.circuit_breaker_tripped_at = None        # トリップ時刻
+        self.circuit_breaker_cooldown_seconds = 21600 # 6時間停止
+        self.circuit_breaker_state_file = 'circuit_breaker_state.txt'
+        self._load_circuit_breaker_state()
+
         # v3.19.0: ローリング最適化による動的パラメータ
         self.optimized_params = None  # RollingOptimizerからのパラメータ
         self.entry_hist_filter = 0.01  # デフォルト（最適化で上書き可能）
@@ -162,6 +170,18 @@ class OptimizedTradingLogic:
             ema_diff_pct = abs(ema_20 - ema_50) / ema_50 * 100 if ema_50 > 0 else 0
             logger.info(f"   MACD Position: {confirmed_position}, Hist: {confirmed_histogram:.6f}")
             logger.info(f"   Last Entry Direction: {self.last_entry_macd_position}, EMA: {ema_trend} ({ema_diff_pct:.2f}%)")
+
+            # === v3.27.0: サーキットブレーカーチェック（最優先）===
+            cb_ok, cb_reason = self._check_circuit_breaker()
+            if not cb_ok:
+                self.no_position_cycles += 1
+                logger.warning(f"   🚨 {cb_reason}")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"CIRCUIT_BREAKER_BLOCK: {cb_reason}\n")
+                except:
+                    pass
+                return False, None, cb_reason, 0.0, None, None
 
             # === タイミングチェック（SLクールダウンのみ）===
             if not skip_price_filter:
@@ -259,6 +279,79 @@ class OptimizedTradingLogic:
         except:
             pass
 
+    def _load_circuit_breaker_state(self):
+        """v3.27.0: サーキットブレーカー状態をディスクから復元（再起動耐性）"""
+        try:
+            import os
+            if not os.path.exists(self.circuit_breaker_state_file):
+                return
+            with open(self.circuit_breaker_state_file, 'r') as f:
+                content = f.read().strip()
+            if not content:
+                return
+            parts = dict(line.split('=', 1) for line in content.split('\n') if '=' in line)
+            self.consecutive_losses = int(parts.get('consecutive_losses', 0))
+            tripped = parts.get('tripped_at', '')
+            if tripped and tripped != 'None':
+                self.circuit_breaker_tripped_at = datetime.fromisoformat(tripped)
+            logger.info(f"🔌 [Circuit Breaker] State loaded: losses={self.consecutive_losses}, tripped_at={self.circuit_breaker_tripped_at}")
+        except Exception as e:
+            logger.warning(f"Could not load circuit breaker state: {e}")
+
+    def _save_circuit_breaker_state(self):
+        """v3.27.0: サーキットブレーカー状態をディスクに保存"""
+        try:
+            tripped_str = self.circuit_breaker_tripped_at.isoformat() if self.circuit_breaker_tripped_at else 'None'
+            with open(self.circuit_breaker_state_file, 'w') as f:
+                f.write(f"consecutive_losses={self.consecutive_losses}\n")
+                f.write(f"tripped_at={tripped_str}\n")
+        except Exception as e:
+            logger.warning(f"Could not save circuit breaker state: {e}")
+
+    def _check_circuit_breaker(self):
+        """v3.27.0: サーキットブレーカーチェック
+        Returns: (allowed: bool, reason: str or None)
+        """
+        if self.circuit_breaker_tripped_at is None:
+            return True, None
+        elapsed = (datetime.now(timezone.utc) - self.circuit_breaker_tripped_at).total_seconds()
+        if elapsed >= self.circuit_breaker_cooldown_seconds:
+            logger.info(f"🔌 [Circuit Breaker] Cooldown expired ({elapsed:.0f}s) - resetting")
+            self.circuit_breaker_tripped_at = None
+            self.consecutive_losses = 0
+            self._save_circuit_breaker_state()
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CIRCUIT_BREAKER_RESET: cooldown expired, resuming trading\n")
+            except:
+                pass
+            return True, None
+        remaining = self.circuit_breaker_cooldown_seconds - elapsed
+        reason = f"Circuit breaker tripped ({self.consecutive_losses} consecutive losses) - {remaining/3600:.1f}h remaining"
+        return False, reason
+
+    def _record_loss(self):
+        """v3.27.0: 連敗カウント増加・閾値到達でトリップ"""
+        self.consecutive_losses += 1
+        logger.info(f"🔴 [Circuit Breaker] Consecutive losses: {self.consecutive_losses}/{self.circuit_breaker_threshold}")
+        if self.consecutive_losses >= self.circuit_breaker_threshold and self.circuit_breaker_tripped_at is None:
+            self.circuit_breaker_tripped_at = datetime.now(timezone.utc)
+            logger.warning(f"🚨 [Circuit Breaker] TRIPPED at {self.consecutive_losses} losses - pausing {self.circuit_breaker_cooldown_seconds/3600:.1f}h")
+            try:
+                with open('bot_execution_log.txt', 'a') as f:
+                    f.write(f"CIRCUIT_BREAKER_TRIPPED: {self.consecutive_losses} consecutive losses, pausing {self.circuit_breaker_cooldown_seconds}s\n")
+            except:
+                pass
+        self._save_circuit_breaker_state()
+
+    def _record_win(self):
+        """v3.27.0: 勝ちトレードで連敗カウンターをリセット"""
+        if self.consecutive_losses > 0:
+            logger.info(f"🟢 [Circuit Breaker] Win recorded - reset losses ({self.consecutive_losses} → 0)")
+        self.consecutive_losses = 0
+        self.circuit_breaker_tripped_at = None
+        self._save_circuit_breaker_state()
+
     def _check_anti_chase(self, current_price):
         """v3.26.0: アンチチェイスフィルター - SL価格帯での再エントリー禁止"""
         if self.last_sl_price is None or self.last_sl_time is None:
@@ -283,6 +376,13 @@ class OptimizedTradingLogic:
             # → 次サイクルで現在のMACD位置に基づき即再エントリー可能
             self.last_entry_macd_position = None
             logger.info(f"💰 Exit recorded: ¥{price:.2f} - MACD entry direction reset (ready for re-entry)")
+
+            # v3.27.0: サーキットブレーカー用の勝敗カウント
+            if result is not None:
+                if result < 0:
+                    self._record_loss()
+                elif result > 0:
+                    self._record_win()
         else:
             self.last_trade_price = price
             self.no_position_cycles = 0
