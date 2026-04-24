@@ -499,8 +499,9 @@ class OptimizedLeverageTradingBot:
                     # Hard SL: 同サイクルブロック + 5分クールダウン開始
                     loss_close = True
                     # v3.20.4: Hard SL後もSLクールダウンを開始（次サイクル以降も5分間ブロック）
-                    self.trading_logic.record_stop_loss(side)
-                    logger.info(f"⛔ LOSS CLOSE - Skipping this cycle + 5min SL cooldown started")
+                    # v3.26.0: SL価格を記録してアンチチェイスで±0.5%以内の再エントリーを30分ブロック
+                    self.trading_logic.record_stop_loss(side, current_price)
+                    logger.info(f"⛔ LOSS CLOSE @ ¥{current_price:.3f} - Skipping cycle + 5min cooldown + 30min price-zone block")
                     try:
                         with open('bot_execution_log.txt', 'a') as f:
                             f.write(f"LOSS_CLOSE_DETECTED: Suppressing new trade + SL cooldown 5min\n")
@@ -511,8 +512,8 @@ class OptimizedLeverageTradingBot:
                     if pl_ratio <= 0.002:
                         # 利益0.2%以下（実質手数料負け水準）→ 5分クールダウン開始
                         tp_sl_closed = True
-                        self.trading_logic.record_stop_loss(side)
-                        logger.info(f"⏳ Low-profit trailing stop ({pl_ratio*100:.2f}%) - 5min SL cooldown started")
+                        self.trading_logic.record_stop_loss(side, current_price)
+                        logger.info(f"⏳ Low-profit trailing stop ({pl_ratio*100:.2f}%) @ ¥{current_price:.3f} - 5min cooldown + 30min price-zone block")
                         try:
                             with open('bot_execution_log.txt', 'a') as f:
                                 f.write(f"TRAILING_STOP_COOLDOWN: pl={pl_ratio*100:.2f}%, SL cooldown 5min\n")
@@ -532,8 +533,8 @@ class OptimizedLeverageTradingBot:
                     # v3.25.0: 価格TP = トレンド転換 → 逆方向強制エントリー
                     if "Stop Loss" in reason or "Loss Limit" in reason:
                         tp_sl_closed = True
-                        self.trading_logic.record_stop_loss(side)
-                        logger.info(f"⏳ Stop loss cooldown started: {side} blocked for 5 minutes")
+                        self.trading_logic.record_stop_loss(side, current_price)
+                        logger.info(f"⏳ Stop loss @ ¥{current_price:.3f}: {side} blocked for 5min + 30min price-zone")
                     else:
                         # 価格TP = トレンド転換 → 逆方向強制エントリー
                         reversal_signal = True

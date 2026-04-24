@@ -69,6 +69,11 @@ class OptimizedTradingLogic:
         self.last_sl_time = None          # 最後のSL発動時刻
         self.sl_cooldown_seconds = 300    # SL後5分間は新規エントリー禁止
 
+        # v3.26.0: アンチチェイスフィルター（SL発動価格帯での再エントリー禁止）
+        self.last_sl_price = None                # 最後のSL発動価格
+        self.sl_price_range_pct = 0.005          # SL価格から±0.5%以内は禁止
+        self.sl_price_cooldown_seconds = 1800    # 30分間は価格帯ブロック
+
         # v3.19.0: ローリング最適化による動的パラメータ
         self.optimized_params = None  # RollingOptimizerからのパラメータ
         self.entry_hist_filter = 0.01  # デフォルト（最適化で上書き可能）
@@ -164,6 +169,18 @@ class OptimizedTradingLogic:
                     logger.info(f"   ⏳ Trade timing blocked (SL cooldown or min interval)")
                     return False, None, "Trade timing blocked", 0.0, None, None
 
+            # === v3.26.0: アンチチェイスフィルター（SL価格帯での再エントリー禁止）===
+            anti_chase_ok, anti_chase_reason = self._check_anti_chase(current_price)
+            if not anti_chase_ok:
+                self.no_position_cycles += 1
+                logger.info(f"   🚫 {anti_chase_reason}")
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"ANTI_CHASE_BLOCK: {anti_chase_reason}\n")
+                except:
+                    pass
+                return False, None, anti_chase_reason, 0.0, None, None
+
             # === ヒストグラム強度フィルター（弱すぎるシグナルを除外）===
             if confirmed_histogram < self.entry_hist_filter:
                 self.no_position_cycles += 1
@@ -225,15 +242,36 @@ class OptimizedTradingLogic:
 
         return True
 
-    def record_stop_loss(self, side):
-        """損切り記録（v3.20.0: 5分クールダウン開始）"""
+    def record_stop_loss(self, side, price=None):
+        """損切り記録（v3.20.0: 5分クールダウン / v3.26.0: 価格帯ブロック）"""
         self.last_sl_time = datetime.now(timezone.utc)
-        logger.info(f"📝 Stop loss recorded: {side} - 5min cooldown started")
+        if price is not None:
+            self.last_sl_price = price
+            logger.info(f"📝 Stop loss recorded: {side} @ ¥{price:.3f} - 5min cooldown + 30min price-zone block")
+        else:
+            logger.info(f"📝 Stop loss recorded: {side} - 5min cooldown started")
         try:
             with open('bot_execution_log.txt', 'a') as f:
-                f.write(f"SL_COOLDOWN_START: {side}, blocking new entry for {self.sl_cooldown_seconds}s\n")
+                if price is not None:
+                    f.write(f"SL_COOLDOWN_START: {side} @ ¥{price:.3f}, time={self.sl_cooldown_seconds}s, price_zone=±{self.sl_price_range_pct*100:.1f}% for {self.sl_price_cooldown_seconds}s\n")
+                else:
+                    f.write(f"SL_COOLDOWN_START: {side}, blocking new entry for {self.sl_cooldown_seconds}s\n")
         except:
             pass
+
+    def _check_anti_chase(self, current_price):
+        """v3.26.0: アンチチェイスフィルター - SL価格帯での再エントリー禁止"""
+        if self.last_sl_price is None or self.last_sl_time is None:
+            return True, None
+        elapsed = (datetime.now(timezone.utc) - self.last_sl_time).total_seconds()
+        if elapsed >= self.sl_price_cooldown_seconds:
+            return True, None
+        price_diff_pct = abs(current_price - self.last_sl_price) / self.last_sl_price
+        if price_diff_pct <= self.sl_price_range_pct:
+            remaining = self.sl_price_cooldown_seconds - elapsed
+            reason = f"Anti-chase: ¥{current_price:.3f} within ±{self.sl_price_range_pct*100:.1f}% of last SL ¥{self.last_sl_price:.3f} ({remaining:.0f}s left)"
+            return False, reason
+        return True, None
 
     def record_trade(self, trade_type, price, result=None, is_exit=False):
         """取引記録"""
