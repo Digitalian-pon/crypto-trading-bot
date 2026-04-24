@@ -507,10 +507,10 @@ class OptimizedLeverageTradingBot:
                     except:
                         pass
                 elif "Trailing Stop" in reason:
-                    # v3.20.4: Trailing Stop決済の処理
-                    tp_sl_closed = True
+                    # v3.25.0: 利確トレーリングストップ = トレンド転換 → 逆方向強制エントリー
                     if pl_ratio <= 0.002:
                         # 利益0.2%以下（実質手数料負け水準）→ 5分クールダウン開始
+                        tp_sl_closed = True
                         self.trading_logic.record_stop_loss(side)
                         logger.info(f"⏳ Low-profit trailing stop ({pl_ratio*100:.2f}%) - 5min SL cooldown started")
                         try:
@@ -519,14 +519,31 @@ class OptimizedLeverageTradingBot:
                         except:
                             pass
                     else:
-                        logger.info(f"💰 Trailing stop with profit ({pl_ratio*100:.2f}%) - no cooldown")
-                elif "Take Profit" in reason or "Stop Loss" in reason or "Loss Limit" in reason:
-                    # TP/SL/絶対損失リミットで決済された場合
-                    tp_sl_closed = True
-                    logger.info(f"💰 TP/SL CLOSE - Will check for continuation with moderate threshold")
-                    if "Stop Loss" in reason:
+                        # 利確 = トレンド転換 → 逆方向強制エントリー（同方向再エントリー禁止）
+                        reversal_signal = True
+                        reversal_trade_type = "SELL" if side == "BUY" else "BUY"
+                        logger.info(f"🔄 Profitable trailing stop = trend reversal → forcing {reversal_trade_type}")
+                        try:
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"TRAILING_STOP_REVERSAL: pl={pl_ratio*100:.2f}%, forcing {reversal_trade_type}\n")
+                        except:
+                            pass
+                elif "Price TP" in reason or "Take Profit" in reason or "Stop Loss" in reason or "Loss Limit" in reason:
+                    # v3.25.0: 価格TP = トレンド転換 → 逆方向強制エントリー
+                    if "Stop Loss" in reason or "Loss Limit" in reason:
+                        tp_sl_closed = True
                         self.trading_logic.record_stop_loss(side)
                         logger.info(f"⏳ Stop loss cooldown started: {side} blocked for 5 minutes")
+                    else:
+                        # 価格TP = トレンド転換 → 逆方向強制エントリー
+                        reversal_signal = True
+                        reversal_trade_type = "SELL" if side == "BUY" else "BUY"
+                        logger.info(f"🔄 Price TP = trend reversal → forcing {reversal_trade_type}")
+                        try:
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"PRICE_TP_REVERSAL: pl={pl_ratio*100:.2f}%, forcing {reversal_trade_type}\n")
+                        except:
+                            pass
 
                 # 決済後、SL/TP記録を削除
                 if position_id in self.active_positions_stops:
