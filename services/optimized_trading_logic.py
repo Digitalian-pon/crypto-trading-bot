@@ -74,9 +74,9 @@ class OptimizedTradingLogic:
         self.sl_price_range_pct = 0.005          # SL価格から±0.5%以内は禁止
         self.sl_price_cooldown_seconds = 1800    # 30分間は価格帯ブロック
 
-        # v3.27.0: サーキットブレーカー（連敗で自動停止）
+        # v3.27.1: サーキットブレーカー（連敗で自動停止 / 閾値5に緩和）
         self.consecutive_losses = 0                   # 連敗カウンター
-        self.circuit_breaker_threshold = 3            # 3連敗でトリップ
+        self.circuit_breaker_threshold = 5            # 5連敗でトリップ（v3.27.1: 3→5に緩和）
         self.circuit_breaker_tripped_at = None        # トリップ時刻
         self.circuit_breaker_cooldown_seconds = 21600 # 6時間停止
         self.circuit_breaker_state_file = 'circuit_breaker_state.txt'
@@ -295,6 +295,18 @@ class OptimizedTradingLogic:
             if tripped and tripped != 'None':
                 self.circuit_breaker_tripped_at = datetime.fromisoformat(tripped)
             logger.info(f"🔌 [Circuit Breaker] State loaded: losses={self.consecutive_losses}, tripped_at={self.circuit_breaker_tripped_at}")
+
+            # v3.27.1: 閾値緩和時の自動リセット（losses < 新threshold ならトリップ解除）
+            if self.circuit_breaker_tripped_at is not None and self.consecutive_losses < self.circuit_breaker_threshold:
+                logger.info(f"🔌 [Circuit Breaker] Auto-reset: losses={self.consecutive_losses} < threshold={self.circuit_breaker_threshold}")
+                self.circuit_breaker_tripped_at = None
+                self.consecutive_losses = 0
+                self._save_circuit_breaker_state()
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"CIRCUIT_BREAKER_AUTO_RESET: threshold loosened, clearing trip\n")
+                except:
+                    pass
         except Exception as e:
             logger.warning(f"Could not load circuit breaker state: {e}")
 
