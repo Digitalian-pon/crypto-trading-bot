@@ -41,7 +41,7 @@ import glob
 # バージョン情報
 VERSION = "3.28.1-bb-nan-fallback"
 BUILD_DATE = "2026-04-27"
-COMMIT_HASH = "bb-nan-fallback-and-diag"
+COMMIT_HASH = "bb-nan-fallback-redeploy"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
