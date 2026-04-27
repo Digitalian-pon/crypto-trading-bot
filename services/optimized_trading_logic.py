@@ -87,6 +87,12 @@ class OptimizedTradingLogic:
         self.entry_hist_filter = 0.01  # デフォルト（最適化で上書き可能）
         self.close_hist_filter = 0.003  # デフォルト（最適化で上書き可能）
 
+        # v3.28.0: レンジ相場フィルター（BB幅で判定）
+        # BB幅(%) = (BB_upper - BB_lower) / current_price * 100
+        # SL=1.2%なのにBB幅が0.4%だと、BB端→端の到達=価格1%未満→TP到達不可・SL頻発
+        # 閾値0.8%: SL+BE+手数料の合計を上回る最低値幅を要求
+        self.range_filter_bb_width_pct = 0.8  # 0.8%未満はレンジ判定でエントリー停止
+
     def update_parameters(self, params):
         """
         ローリング最適化から最適パラメータを適用（v3.19.0）
@@ -206,6 +212,30 @@ class OptimizedTradingLogic:
                 self.no_position_cycles += 1
                 logger.info(f"   ⚠️ Weak signal (hist={confirmed_histogram:.6f} < {self.entry_hist_filter:.3f}) - waiting")
                 return False, None, f"Weak signal (hist={confirmed_histogram:.6f})", 0.0, None, None
+
+            # === v3.28.0: レンジ相場フィルター（BB幅で判定）===
+            # 値幅が狭すぎる時はSL頻発・TP不能でエントリーしない
+            if historical_df is not None and 'bb_upper' in historical_df.columns and 'bb_lower' in historical_df.columns:
+                try:
+                    last_bb = historical_df.iloc[-2]
+                    bb_upper = float(last_bb.get('bb_upper', 0))
+                    bb_lower = float(last_bb.get('bb_lower', 0))
+                    if bb_upper > 0 and bb_lower > 0 and current_price > 0:
+                        bb_width_pct = (bb_upper - bb_lower) / current_price * 100
+                        if bb_width_pct < self.range_filter_bb_width_pct:
+                            self.no_position_cycles += 1
+                            block_msg = f"Range market (BB width={bb_width_pct:.2f}% < {self.range_filter_bb_width_pct}%)"
+                            logger.info(f"   📊 {block_msg} - blocking entry")
+                            try:
+                                with open('bot_execution_log.txt', 'a') as f:
+                                    f.write(f"RANGE_FILTER_BLOCK: BB width {bb_width_pct:.2f}% < {self.range_filter_bb_width_pct}%, price=¥{current_price:.3f}\n")
+                            except:
+                                pass
+                            return False, None, block_msg, 0.0, None, None
+                        else:
+                            logger.info(f"   📊 BB width OK: {bb_width_pct:.2f}% >= {self.range_filter_bb_width_pct}%")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ BB width check failed: {e}")
 
             # === 同方向への再エントリー防止 ===
             if self.last_entry_macd_position == confirmed_position:
