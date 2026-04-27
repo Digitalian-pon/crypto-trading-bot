@@ -213,14 +213,41 @@ class OptimizedTradingLogic:
                 logger.info(f"   ⚠️ Weak signal (hist={confirmed_histogram:.6f} < {self.entry_hist_filter:.3f}) - waiting")
                 return False, None, f"Weak signal (hist={confirmed_histogram:.6f})", 0.0, None, None
 
-            # === v3.28.0: レンジ相場フィルター（BB幅で判定）===
+            # === v3.28.1: レンジ相場フィルター（BB幅で判定・NaN対応）===
             # 値幅が狭すぎる時はSL頻発・TP不能でエントリーしない
+            bb_check_done = False
             if historical_df is not None and 'bb_upper' in historical_df.columns and 'bb_lower' in historical_df.columns:
                 try:
+                    # market_data (last_row) から取得を試みる（iloc[-2] が NaN の場合に備えて last_row も確認）
+                    bb_upper_md = market_data.get('bb_upper') if isinstance(market_data, dict) else None
+                    bb_lower_md = market_data.get('bb_lower') if isinstance(market_data, dict) else None
+
                     last_bb = historical_df.iloc[-2]
-                    bb_upper = float(last_bb.get('bb_upper', 0))
-                    bb_lower = float(last_bb.get('bb_lower', 0))
+                    bb_upper_raw = last_bb.get('bb_upper')
+                    bb_lower_raw = last_bb.get('bb_lower')
+
+                    # NaN/None チェック → market_data からフォールバック
+                    import math
+                    def _valid(v):
+                        try:
+                            return v is not None and not math.isnan(float(v)) and float(v) > 0
+                        except (TypeError, ValueError):
+                            return False
+
+                    if _valid(bb_upper_raw) and _valid(bb_lower_raw):
+                        bb_upper = float(bb_upper_raw)
+                        bb_lower = float(bb_lower_raw)
+                    elif _valid(bb_upper_md) and _valid(bb_lower_md):
+                        bb_upper = float(bb_upper_md)
+                        bb_lower = float(bb_lower_md)
+                        logger.info(f"   📊 BB fallback to market_data (iloc[-2] was NaN)")
+                    else:
+                        logger.warning(f"   ⚠️ BB values invalid: iloc[-2] upper={bb_upper_raw} lower={bb_lower_raw}, market_data upper={bb_upper_md} lower={bb_lower_md}")
+                        bb_upper = 0
+                        bb_lower = 0
+
                     if bb_upper > 0 and bb_lower > 0 and current_price > 0:
+                        bb_check_done = True
                         bb_width_pct = (bb_upper - bb_lower) / current_price * 100
                         if bb_width_pct < self.range_filter_bb_width_pct:
                             self.no_position_cycles += 1
@@ -235,7 +262,17 @@ class OptimizedTradingLogic:
                         else:
                             logger.info(f"   📊 BB width OK: {bb_width_pct:.2f}% >= {self.range_filter_bb_width_pct}%")
                 except Exception as e:
-                    logger.warning(f"   ⚠️ BB width check failed: {e}")
+                    logger.warning(f"   ⚠️ BB width check failed: {e}", exc_info=True)
+            else:
+                cols_info = list(historical_df.columns) if historical_df is not None else 'None'
+                logger.warning(f"   ⚠️ BB columns missing — historical_df cols: {cols_info}")
+
+            if not bb_check_done:
+                try:
+                    with open('bot_execution_log.txt', 'a') as f:
+                        f.write(f"RANGE_FILTER_SKIPPED: bb columns invalid or missing\n")
+                except:
+                    pass
 
             # === 同方向への再エントリー防止 ===
             if self.last_entry_macd_position == confirmed_position:
