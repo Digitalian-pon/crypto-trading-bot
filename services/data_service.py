@@ -188,8 +188,8 @@ class DataService:
         # GMO Coin APIは過去の日付パラメータが必須
         logger.info(f"Attempting to get historical data with date parameter")
         
-        # 最低限必要なデータポイント数
-        min_required_datapoints = min(limit, 24)  # 少なくとも1日分のデータ
+        # 最低限必要なデータポイント数（v4.0.0: limitに合わせて多日取得を許可）
+        min_required_datapoints = max(limit, 24)
         # 過去に遡れる最大日数（1ヶ月）
         max_days_to_try = 30
         success = False

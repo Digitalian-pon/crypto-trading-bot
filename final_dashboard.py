@@ -135,8 +135,8 @@ class FinalDashboard:
                 _cfg = load_config()
                 _tf = _cfg.get('trading', 'default_timeframe', fallback='15min')
 
-                # v3.19.0: ボットのオプティマイザー結果をダッシュボード側にも反映
-                self._sync_optimizer_params()
+                # v4.0.0: rolling optimizer removed
+                pass
 
                 market_data_response = self.data_service.get_data_with_indicators('DOGE_JPY', interval=_tf)
                 if market_data_response is not None and not market_data_response.empty:

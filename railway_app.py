@@ -1,33 +1,11 @@
 """
-Railway用統合アプリケーション - 最適化版
-- 最適化されたDOGE_JPYレバレッジ取引ボットとダッシュボードを同時起動
-- 24時間稼働対応
-- MACD Cross + EMAトレンドフォロー専用モード
-- 空売り（SELL）とロング（BUY）の両方に対応
-
-VERSION: 3.12.0-cross-only (2026-03-09)
-Changes:
-🎯 **v3.6.1** - トレンド転換時の即座反対注文 + EMA非ブロック化
-
-【v3.6.1の修正内容】
-1. ヒストグラムフィルター削除:
-   - クロス直後はhistogramが小さいため、フィルターは逆効果
-   - 全てのMACDクロスでエントリー（トレンド転換の初動を逃さない）
-2. EMAフィルター: ブロック → confidence調整のみに変更
-   - 順方向: confidence +30%
-   - 逆方向: confidence -50%（慎重だがブロックしない）
-   - トレンド転換時にEMAが遅れても取引可能
-3. MACDクロス決済 → 常に反対注文:
-   - BUY保持中にDeath Cross → 決済 + 即SELL注文
-   - SELL保持中にGolden Cross → 決済 + 即BUY注文
-   - EMA条件なし（常に反対注文を出す）
-4. トレーリングストップ細分化（v3.6.0維持）:
-   - +0.5%→SL=0% / +1%→SL=+0.5% / +1.5%→SL=+1% / +2%→SL=+1.5%
-
-【v3.6.1の主要ルール】
-- エントリー: MACDクロスの瞬間（EMAはconfidence調整のみ）
-- 決済: トレーリングストップ / MACDクロス(確認付き)→反対注文 / SL -1.5%
-- トレンド転換: 決済と同時に反対方向の新規注文を即座に実行
+Railway entry point - v4.0.0 simple trend-following bot
+- Symbol: DOGE_JPY (leverage)
+- Timeframe: 4 hour
+- Entry: ADX(14) > 25 + EMA20/EMA50 trend + MACD histogram aligned
+- Exit: TP +2%, SL -1% (fixed) — no trailing, no forced reversal
+- Sizing: 90% balance × leverage, 1 position max
+- 24h same-direction reentry block
 """
 
 import os
@@ -39,9 +17,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.28.2-bb-simplified"
+VERSION = "4.0.0-trend-follow-clean"
 BUILD_DATE = "2026-04-28"
-COMMIT_HASH = "bb-filter-simplified"
+COMMIT_HASH = "v4-adx-ema-macd-rewrite"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
@@ -122,14 +100,9 @@ def run_trading_bot():
             logger.info("🤖 TRADING BOT STARTING...")
             logger.info(f"📌 VERSION: {VERSION} ({BUILD_DATE}) - COMMIT: {COMMIT_HASH}")
             logger.info("="*70)
-            logger.info("Features: CROSS + POSITION ENTRY + FINE TRAILING (v3.8.0)")
-            logger.info("🎯 v3.8.0 CROSS + POSITION ENTRY MODE:")
-            logger.info("   - 🟢 BUY: MACD Cross (high conf) OR Line > Signal (mid conf)")
-            logger.info("   - 🔴 SELL: MACD Cross (high conf) OR Line < Signal (mid conf)")
-            logger.info("   - 📊 EMA: confidence only (+30% / -50%, NO block)")
-            logger.info("   - 🔄 REVERSAL: MACD Cross close → ALWAYS open opposite")
-            logger.info("   - 📈 TRAILING: +0.5%→0% / +1%→+0.5% / +1.5%→+1% / +2%→+1.5%")
-            logger.info("   - 🛡️ SL: -1.5% (initial)")
+            logger.info("Strategy: v4.0.0 ADX(14)>25 + EMA20/50 trend + MACD aligned")
+            logger.info("Timeframe: 4hour | TP +2% | SL -1% | sizing 90% × 2x")
+            logger.info("No trailing stop, no forced reversal, 1 position max, 24h reentry block")
             logger.info("="*70)
             from optimized_leverage_bot import OptimizedLeverageTradingBot
 
@@ -178,17 +151,12 @@ def run_dashboard():
 
 if __name__ == "__main__":
     logger.info("="*60)
-    logger.info("🚀 Railway Deployment - DOGE_JPY Trading System v3.3.0-no-filter")
+    logger.info(f"🚀 Railway Deployment - DOGE_JPY Trading System {VERSION}")
     logger.info(f"Started at: {datetime.now()}")
-    logger.info("Trading Pair: DOGE_JPY")
-    logger.info("Trading Type: Leverage (Long & Short)")
-    logger.info("Timeframe: 15min")
-    logger.info("Check Interval: 300s (5min check, 15min candles)")
-    logger.info("Primary Indicator: MACD Cross + EMA Trend Filter")
-    logger.info("Strategy: CROSS + POSITION ENTRY + FINE TRAILING (v3.8.0)")
-    logger.info("BUY = Cross(high) OR Line>Signal(mid) | SELL = Cross(high) OR Line<Signal(mid)")
-    logger.info("REVERSAL = MACD Cross close → ALWAYS open opposite order")
-    logger.info("TRAILING = +0.5%→0% | +1%→+0.5% | +1.5%→+1% | +2%→+1.5% | SL -1.5%")
+    logger.info("Trading Pair: DOGE_JPY (Leverage)")
+    logger.info("Timeframe: 4hour | Check Interval: 300s")
+    logger.info("Strategy: ADX(14)>25 + EMA20/50 trend + MACD histogram")
+    logger.info("Exit: TP +2% / SL -1% (fixed) | 24h same-side reentry block")
     logger.info("="*60)
 
     # 取引ボットをバックグラウンドスレッドで起動
