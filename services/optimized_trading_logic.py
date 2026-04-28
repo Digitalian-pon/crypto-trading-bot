@@ -213,66 +213,49 @@ class OptimizedTradingLogic:
                 logger.info(f"   ⚠️ Weak signal (hist={confirmed_histogram:.6f} < {self.entry_hist_filter:.3f}) - waiting")
                 return False, None, f"Weak signal (hist={confirmed_histogram:.6f})", 0.0, None, None
 
-            # === v3.28.1: レンジ相場フィルター（BB幅で判定・NaN対応）===
-            # 値幅が狭すぎる時はSL頻発・TP不能でエントリーしない
-            bb_check_done = False
-            if historical_df is not None and 'bb_upper' in historical_df.columns and 'bb_lower' in historical_df.columns:
-                try:
-                    # market_data (last_row) から取得を試みる（iloc[-2] が NaN の場合に備えて last_row も確認）
-                    bb_upper_md = market_data.get('bb_upper') if isinstance(market_data, dict) else None
-                    bb_lower_md = market_data.get('bb_lower') if isinstance(market_data, dict) else None
+            # === v3.28.2: レンジ相場フィルター（BB幅で判定・簡略版）===
+            try:
+                bb_upper = 0.0
+                bb_lower = 0.0
+                # まず historical_df.iloc[-2] を試す
+                if historical_df is not None and 'bb_upper' in historical_df.columns:
+                    raw_u = historical_df['bb_upper'].iloc[-2]
+                    raw_l = historical_df['bb_lower'].iloc[-2]
+                    if pd.notna(raw_u) and pd.notna(raw_l):
+                        bb_upper = float(raw_u)
+                        bb_lower = float(raw_l)
+                # NaN なら market_data (last_row) からフォールバック
+                if bb_upper <= 0 and isinstance(market_data, dict):
+                    md_u = market_data.get('bb_upper')
+                    md_l = market_data.get('bb_lower')
+                    if md_u is not None and md_l is not None and pd.notna(md_u) and pd.notna(md_l):
+                        bb_upper = float(md_u)
+                        bb_lower = float(md_l)
+                        logger.info(f"   📊 BB fallback to market_data")
 
-                    last_bb = historical_df.iloc[-2]
-                    bb_upper_raw = last_bb.get('bb_upper')
-                    bb_lower_raw = last_bb.get('bb_lower')
-
-                    # NaN/None チェック → market_data からフォールバック
-                    import math
-                    def _valid(v):
+                if bb_upper > 0 and bb_lower > 0 and current_price > 0:
+                    bb_width_pct = (bb_upper - bb_lower) / current_price * 100
+                    if bb_width_pct < self.range_filter_bb_width_pct:
+                        self.no_position_cycles += 1
+                        block_msg = f"Range market (BB width={bb_width_pct:.2f}% < {self.range_filter_bb_width_pct}%)"
+                        logger.info(f"   📊 {block_msg} - blocking entry")
                         try:
-                            return v is not None and not math.isnan(float(v)) and float(v) > 0
-                        except (TypeError, ValueError):
-                            return False
-
-                    if _valid(bb_upper_raw) and _valid(bb_lower_raw):
-                        bb_upper = float(bb_upper_raw)
-                        bb_lower = float(bb_lower_raw)
-                    elif _valid(bb_upper_md) and _valid(bb_lower_md):
-                        bb_upper = float(bb_upper_md)
-                        bb_lower = float(bb_lower_md)
-                        logger.info(f"   📊 BB fallback to market_data (iloc[-2] was NaN)")
+                            with open('bot_execution_log.txt', 'a') as f:
+                                f.write(f"RANGE_FILTER_BLOCK: BB width {bb_width_pct:.2f}% < {self.range_filter_bb_width_pct}%\n")
+                        except Exception:
+                            pass
+                        return False, None, block_msg, 0.0, None, None
                     else:
-                        logger.warning(f"   ⚠️ BB values invalid: iloc[-2] upper={bb_upper_raw} lower={bb_lower_raw}, market_data upper={bb_upper_md} lower={bb_lower_md}")
-                        bb_upper = 0
-                        bb_lower = 0
-
-                    if bb_upper > 0 and bb_lower > 0 and current_price > 0:
-                        bb_check_done = True
-                        bb_width_pct = (bb_upper - bb_lower) / current_price * 100
-                        if bb_width_pct < self.range_filter_bb_width_pct:
-                            self.no_position_cycles += 1
-                            block_msg = f"Range market (BB width={bb_width_pct:.2f}% < {self.range_filter_bb_width_pct}%)"
-                            logger.info(f"   📊 {block_msg} - blocking entry")
-                            try:
-                                with open('bot_execution_log.txt', 'a') as f:
-                                    f.write(f"RANGE_FILTER_BLOCK: BB width {bb_width_pct:.2f}% < {self.range_filter_bb_width_pct}%, price=¥{current_price:.3f}\n")
-                            except:
-                                pass
-                            return False, None, block_msg, 0.0, None, None
-                        else:
-                            logger.info(f"   📊 BB width OK: {bb_width_pct:.2f}% >= {self.range_filter_bb_width_pct}%")
-                except Exception as e:
-                    logger.warning(f"   ⚠️ BB width check failed: {e}", exc_info=True)
-            else:
-                cols_info = list(historical_df.columns) if historical_df is not None else 'None'
-                logger.warning(f"   ⚠️ BB columns missing — historical_df cols: {cols_info}")
-
-            if not bb_check_done:
-                try:
-                    with open('bot_execution_log.txt', 'a') as f:
-                        f.write(f"RANGE_FILTER_SKIPPED: bb columns invalid or missing\n")
-                except:
-                    pass
+                        logger.info(f"   📊 BB width OK: {bb_width_pct:.2f}% >= {self.range_filter_bb_width_pct}%")
+                else:
+                    logger.warning(f"   ⚠️ BB values unavailable (upper={bb_upper}, lower={bb_lower}) - skipping range filter")
+                    try:
+                        with open('bot_execution_log.txt', 'a') as f:
+                            f.write(f"RANGE_FILTER_SKIPPED: bb unavailable\n")
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"   ⚠️ BB range filter error: {e}")
 
             # === 同方向への再エントリー防止 ===
             if self.last_entry_macd_position == confirmed_position:

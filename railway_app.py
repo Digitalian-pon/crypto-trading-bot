@@ -39,9 +39,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "3.28.1-bb-nan-fallback"
-BUILD_DATE = "2026-04-27"
-COMMIT_HASH = "bb-nan-fallback-redeploy"
+VERSION = "3.28.2-bb-simplified"
+BUILD_DATE = "2026-04-28"
+COMMIT_HASH = "bb-filter-simplified"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():
