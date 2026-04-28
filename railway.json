@@ -10,5 +10,5 @@
     "healthcheckPath": "/",
     "healthcheckTimeout": 300
   },
-  "_comment": "Deployment trigger: 2026-04-25 - v3.27.1 circuit breaker threshold 3->5 + auto-reset"
+  "_comment": "Deployment trigger: 2026-04-28 - v3.28.1 BB NaN fallback + diagnostic logging"
 }
