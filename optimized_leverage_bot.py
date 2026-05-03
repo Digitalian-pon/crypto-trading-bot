@@ -43,6 +43,8 @@ class OptimizedLeverageTradingBot:
     STOP_LOSS_RATIO = 0.01     # -1%
     REENTRY_BLOCK_SECONDS = 24 * 3600
     HISTORY_FILE = 'position_history.json'
+    LOG_FILE = 'bot_execution_log.txt'
+    LOG_MAX_BYTES = 500_000  # ~500KB; truncate to last half when exceeded
 
     def __init__(self):
         config = load_config()
@@ -77,6 +79,19 @@ class OptimizedLeverageTradingBot:
     def _record_close(self, side):
         self.history['last_close'][side] = datetime.now(timezone.utc).isoformat()
         self._save_history()
+
+    def _log_event(self, text):
+        """Append a line to bot_execution_log.txt (read by /logs endpoint)."""
+        try:
+            if os.path.exists(self.LOG_FILE) and os.path.getsize(self.LOG_FILE) > self.LOG_MAX_BYTES:
+                with open(self.LOG_FILE, 'r') as f:
+                    data = f.read()
+                with open(self.LOG_FILE, 'w') as f:
+                    f.write(data[-self.LOG_MAX_BYTES // 2:])
+            with open(self.LOG_FILE, 'a') as f:
+                f.write(text + '\n')
+        except IOError:
+            pass
 
     def _is_blocked(self, side):
         last_iso = self.history['last_close'].get(side)
@@ -180,38 +195,62 @@ class OptimizedLeverageTradingBot:
         return isinstance(result, dict) and result.get('status') == 0
 
     def _trading_cycle(self):
+        cycle_ts = datetime.now(timezone.utc).isoformat()
+        self._log_event("=" * 70)
+        self._log_event(f"CYCLE_START: {cycle_ts}")
+        self._log_event(f"INTERVAL: {self.CHECK_INTERVAL_SEC}s | TIMEFRAME: {self.TIMEFRAME}")
+
         df = self.data_service.get_data_with_indicators(
             symbol=self.SYMBOL, interval=self.TIMEFRAME, limit=200
         )
         if df is None or df.empty:
             logger.warning("No market data")
+            self._log_event("ERROR: No market data")
             return
 
         current_price = self._get_current_price()
         if current_price is None or current_price <= 0:
             logger.warning("No current price")
+            self._log_event("ERROR: No current price")
             return
+        self._log_event(f"CURRENT_PRICE: ¥{current_price}")
 
         position = self._get_open_position()
+        self._log_event(f"POSITION_FETCH: symbol={self.SYMBOL}, count={1 if position else 0}")
 
         if position:
             entry = float(position.get('price', 0))
             side = position.get('side')
             size = position.get('size')
+            pid = position.get('positionId')
             pnl_ratio = ((current_price - entry) / entry) if side == 'BUY' else ((entry - current_price) / entry)
             logger.info(f"📊 Position: {side} {size} @ ¥{entry} | now ¥{current_price} | P/L {pnl_ratio*100:+.2f}%")
+            self._log_event(f"  - Position: {pid} {side} {size} @ {entry}")
+            self._log_event(f"PNL_RATIO: {pnl_ratio*100:+.2f}% | TP={self.TAKE_PROFIT_RATIO*100:.0f}% SL=-{self.STOP_LOSS_RATIO*100:.0f}%")
 
             exit_reason = self._check_exit(position, current_price)
             if exit_reason:
-                self._close_position(position, current_price, exit_reason)
+                self._log_event(f"DECISION: CLOSE ({exit_reason})")
+                closed = self._close_position(position, current_price, exit_reason)
+                self._log_event(f"TRADE_EXIT: {side} {size} @ ¥{current_price} | success={closed}")
+            else:
+                self._log_event(f"DECISION: HOLD (P/L {pnl_ratio*100:+.2f}% within bounds)")
             return
 
         signal = self.logic.should_trade(df.iloc[-1].to_dict(), df)
         should_trade, trade_type, reason, confidence, _, _ = signal
         logger.info(f"📈 Signal: should={should_trade} type={trade_type} conf={confidence:.2f} reason={reason}")
+        self._log_event(f"SIGNAL: should_trade={should_trade} type={trade_type} conf={confidence:.2f} reason={reason}")
 
         if should_trade and trade_type in ('BUY', 'SELL'):
-            self._open_position(trade_type, current_price)
+            opened = self._open_position(trade_type, current_price)
+            if opened:
+                self._log_event(f"ENTRY_SUCCESS: {trade_type} @ ~¥{current_price}")
+                self._log_event(f"TRADE_ENTRY: {trade_type} @ ¥{current_price}")
+            else:
+                self._log_event(f"ENTRY_FAILED: {trade_type} @ ~¥{current_price}")
+        else:
+            self._log_event("DECISION: HOLD (no entry signal)")
 
     def run(self):
         logger.info("=" * 70)
