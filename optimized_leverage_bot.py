@@ -39,6 +39,8 @@ class OptimizedLeverageTradingBot:
     CHECK_INTERVAL_SEC = 300  # 5 min
     LEVERAGE = 2.0
     BALANCE_USAGE_RATIO = 0.70  # 0.90 → 0.70 (margin buffer for GMO acceptance)
+    SIZE_STEP = 10  # GMO DOGE_JPY leverage: orders must be multiples of 10 DOGE
+    MIN_SIZE = 10
     TAKE_PROFIT_RATIO = 0.02   # +2%
     STOP_LOSS_RATIO = 0.01     # -1%
     REENTRY_BLOCK_SECONDS = 24 * 3600
@@ -129,8 +131,11 @@ class OptimizedLeverageTradingBot:
             return 0
         usable_jpy = jpy_available * self.BALANCE_USAGE_RATIO
         notional = usable_jpy * self.LEVERAGE
-        size = int(notional / price)
-        return max(size, 0)
+        raw = int(notional / price)
+        size = (raw // self.SIZE_STEP) * self.SIZE_STEP
+        if size < self.MIN_SIZE:
+            return 0
+        return size
 
     def _get_open_position(self):
         positions = self.api.get_positions(symbol=self.SYMBOL)
