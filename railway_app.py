@@ -17,9 +17,9 @@ import shutil
 import glob
 
 # バージョン情報
-VERSION = "4.0.1-logfile-restored"
-BUILD_DATE = "2026-05-03"
-COMMIT_HASH = "v4-restore-bot-execution-log"
+VERSION = "4.0.2-margin-buffer"
+BUILD_DATE = "2026-05-04"
+COMMIT_HASH = "v4-order-result-log-and-70pct-balance"
 
 # 強力なキャッシュクリア: Railway環境で古いバイトコードを完全削除
 def clear_python_cache():

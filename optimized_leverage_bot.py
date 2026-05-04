@@ -38,7 +38,7 @@ class OptimizedLeverageTradingBot:
     TIMEFRAME = '4hour'
     CHECK_INTERVAL_SEC = 300  # 5 min
     LEVERAGE = 2.0
-    BALANCE_USAGE_RATIO = 0.90
+    BALANCE_USAGE_RATIO = 0.70  # 0.90 → 0.70 (margin buffer for GMO acceptance)
     TAKE_PROFIT_RATIO = 0.02   # +2%
     STOP_LOSS_RATIO = 0.01     # -1%
     REENTRY_BLOCK_SECONDS = 24 * 3600
@@ -168,20 +168,28 @@ class OptimizedLeverageTradingBot:
             size=size,
         )
         logger.info(f"   close result: {result}")
-        if isinstance(result, dict) and result.get('status') == 0:
+        ok = isinstance(result, dict) and result.get('status') == 0
+        if ok:
+            self._log_event(f"CLOSE_RESULT: ok status=0 [id={pid}]")
             self._record_close(side)
             return True
+        status = result.get('status') if isinstance(result, dict) else 'non-dict'
+        messages = result.get('messages') if isinstance(result, dict) else None
+        self._log_event(f"CLOSE_RESULT: FAIL status={status} messages={messages} [id={pid}]")
         return False
 
     def _open_position(self, side, current_price):
         if self._is_blocked(side):
             logger.info(f"⏸️ {side} blocked: 24h same-direction reentry block active")
+            self._log_event(f"ENTRY_BLOCKED: {side} | 24h same-direction reentry block active")
             return False
 
         jpy = self._get_jpy_balance()
         size = self._calculate_size(jpy, current_price)
+        self._log_event(f"ORDER_PREP: side={side} jpy={jpy} price={current_price} size={size} usage={self.BALANCE_USAGE_RATIO} lev={self.LEVERAGE}")
         if size <= 0:
             logger.warning(f"❌ Size 0 — JPY={jpy} price={current_price}")
+            self._log_event(f"ENTRY_BLOCKED: {side} | size=0 (JPY={jpy})")
             return False
 
         logger.info(f"🟢 Opening {side} {size} {self.SYMBOL} @ ~¥{current_price} (JPY={jpy})")
@@ -192,7 +200,14 @@ class OptimizedLeverageTradingBot:
             size=size,
         )
         logger.info(f"   order result: {result}")
-        return isinstance(result, dict) and result.get('status') == 0
+        ok = isinstance(result, dict) and result.get('status') == 0
+        if ok:
+            self._log_event(f"ORDER_RESULT: ok status=0")
+        else:
+            status = result.get('status') if isinstance(result, dict) else 'non-dict'
+            messages = result.get('messages') if isinstance(result, dict) else None
+            self._log_event(f"ORDER_RESULT: FAIL status={status} messages={messages}")
+        return ok
 
     def _trading_cycle(self):
         cycle_ts = datetime.now(timezone.utc).isoformat()
