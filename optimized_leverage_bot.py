@@ -176,7 +176,11 @@ class OptimizedLeverageTradingBot:
         ok = isinstance(result, dict) and result.get('status') == 0
         if ok:
             self._log_event(f"CLOSE_RESULT: ok status=0 [id={pid}]")
-            self._record_close(side)
+            if reason.startswith('SL'):
+                self._record_close(side)
+                self._log_event(f"REENTRY_BLOCK: armed for {side} (24h, reason=SL)")
+            else:
+                self._log_event(f"REENTRY_BLOCK: skipped for {side} (reason={reason.split()[0]})")
             return True
         status = result.get('status') if isinstance(result, dict) else 'non-dict'
         messages = result.get('messages') if isinstance(result, dict) else None
