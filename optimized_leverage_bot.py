@@ -235,6 +235,16 @@ class OptimizedLeverageTradingBot:
             return
         self._log_event(f"CURRENT_PRICE: ¥{current_price}")
 
+        snap = self.logic.get_indicator_snapshot(df)
+        def _fmt(v, w):
+            return f"{v:.{w}f}" if isinstance(v, (int, float)) else "N/A"
+        self._log_event(
+            f"INDICATORS: ADX={_fmt(snap['adx'], 2)} "
+            f"EMA20={_fmt(snap['ema20'], 4)} EMA50={_fmt(snap['ema50'], 4)} "
+            f"MACD_hist={_fmt(snap['macd_hist'], 5)} "
+            f"(threshold ADX>{self.logic.ADX_THRESHOLD:.0f})"
+        )
+
         position = self._get_open_position()
         self._log_event(f"POSITION_FETCH: symbol={self.SYMBOL}, count={1 if position else 0}")
 

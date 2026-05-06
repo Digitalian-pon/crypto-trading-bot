@@ -60,6 +60,28 @@ class OptimizedTradingLogic:
 
         return pd.DataFrame({'adx': adx, 'plus_di': plus_di, 'minus_di': minus_di}, index=df.index)
 
+    def get_indicator_snapshot(self, historical_df):
+        """Return ADX/EMA20/EMA50/MACD_hist at confirmed bar (iloc[-2]) for logging.
+        Returns dict with float values, or None for any indicator that can't be read."""
+        snap = {'adx': None, 'ema20': None, 'ema50': None, 'macd_hist': None}
+        if historical_df is None or len(historical_df) < 60:
+            return snap
+        try:
+            adx_df = self.calculate_adx(historical_df, period=self.ADX_PERIOD)
+            adx = float(adx_df['adx'].iloc[-2])
+            snap['adx'] = None if pd.isna(adx) else adx
+        except (IndexError, ValueError, TypeError, KeyError):
+            pass
+        for key, col in (('ema20', 'ema_20'), ('ema50', 'ema_50'), ('macd_hist', 'macd_histogram')):
+            if col not in historical_df.columns:
+                continue
+            try:
+                v = float(historical_df[col].iloc[-2])
+                snap[key] = None if pd.isna(v) else v
+            except (IndexError, ValueError, TypeError):
+                pass
+        return snap
+
     def should_trade(self, market_data, historical_df=None, **_kwargs):
         """
         Returns: (should_trade, trade_type, reason, confidence, stop_loss, take_profit)
