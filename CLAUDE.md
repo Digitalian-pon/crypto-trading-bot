@@ -3035,3 +3035,38 @@ if confirmed_position != last_entry_macd_position:
 **GitHubコミット**: bea196f - 🎯 v3.21.0
 
 **解決**: シグナルが出なかった問題を根本解決、クローズ1分後に即再エントリー確認 ✅
+
+---
+
+#### 37. **⏹️ BOT停止 - STOP_TRADING.flag 設置** (2026年5月18日)
+
+**状態**: ⏹️ **停止中** — ユーザー要求により取引を停止
+
+**実装内容**:
+リポジトリ直下に `STOP_TRADING.flag` ファイルを置くと、`_trading_cycle()` の冒頭で早期returnする仕組みを追加。
+
+**コード** (`optimized_leverage_bot.py`):
+```python
+STOP_FLAG_FILE = 'STOP_TRADING.flag'  # presence halts trading cycles
+
+def _trading_cycle(self):
+    ...
+    if os.path.exists(self.STOP_FLAG_FILE):
+        logger.info("⏹️ STOP_TRADING.flag detected — trading halted")
+        self._log_event("STOPPED: STOP_TRADING.flag present — no new entries, no auto-close")
+        return
+```
+
+**動作**:
+- 各サイクル冒頭で flag を検出 → 即 return
+- 新規エントリーなし、SL/TP 自動クローズもなし
+- 既存ポジションは**手動でクローズ**が必要
+
+**再開方法**:
+1. `STOP_TRADING.flag` を削除
+2. commit & push
+3. Railway 自動デプロイで再稼働
+
+**GitHubコミット**: eefce3f - ⏹️ Halt trading via STOP_TRADING.flag
+
+**注意**: CLAUDE.md 上部の履歴（v3.21.0 まで記載）は古く、実際の稼働コードは v4.0.5 (`f85b6f8`) のシンプルなトレンドフォロー戦略（4時間足・ADX/EMA/MACD）。git log を確認すること。
