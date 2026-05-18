@@ -1,0 +1,7 @@
+Bot stopped manually on 2026-05-18 by user request.
+Remove this file (and push) to resume trading.
+
+Behavior while this file exists:
+- Bot's main loop runs but each cycle exits early before any market/position calls.
+- Existing open positions are NOT closed automatically.
+- Logs will show "STOPPED: STOP_TRADING.flag present".

@@ -47,6 +47,7 @@ class OptimizedLeverageTradingBot:
     HISTORY_FILE = 'position_history.json'
     LOG_FILE = 'bot_execution_log.txt'
     LOG_MAX_BYTES = 500_000  # ~500KB; truncate to last half when exceeded
+    STOP_FLAG_FILE = 'STOP_TRADING.flag'  # presence halts trading cycles
 
     def __init__(self):
         config = load_config()
@@ -223,6 +224,11 @@ class OptimizedLeverageTradingBot:
         self._log_event("=" * 70)
         self._log_event(f"CYCLE_START: {cycle_ts}")
         self._log_event(f"INTERVAL: {self.CHECK_INTERVAL_SEC}s | TIMEFRAME: {self.TIMEFRAME}")
+
+        if os.path.exists(self.STOP_FLAG_FILE):
+            logger.info(f"⏹️  STOP_TRADING.flag detected — trading halted (existing positions untouched)")
+            self._log_event("STOPPED: STOP_TRADING.flag present — no new entries, no auto-close")
+            return
 
         df = self.data_service.get_data_with_indicators(
             symbol=self.SYMBOL, interval=self.TIMEFRAME, limit=200
